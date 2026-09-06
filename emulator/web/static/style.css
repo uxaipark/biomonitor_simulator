@@ -406,7 +406,8 @@ ol.route li.upcoming{border-left-style:dashed}
 .troom span{padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);cursor:pointer}
 .troom span:hover{border-color:var(--acc2);color:var(--txt)}
 .troom span.sel{background:var(--sel);border-color:var(--acc2);color:var(--acc2)}
-.troom span b{color:var(--txt)}.troom span.full{border-color:var(--warn);color:var(--warn)}.troom span.full b{color:var(--warn)}
+.troom span b{color:var(--txt)}
+.troom span i{font-style:normal;margin-left:5px;color:var(--warn);font-size:10px}.troom span.full{border-color:var(--warn);color:var(--warn)}.troom span.full b{color:var(--warn)}
 .tnext .sub{font-size:11px}
 
 

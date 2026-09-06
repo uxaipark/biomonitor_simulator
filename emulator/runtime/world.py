@@ -1822,10 +1822,13 @@ class World:
                           "steps": steps, "next_exams": [{"type": e["type"], "room": e["room"], "time": iso(e["t"]), "in_s": e["t"] - now, "patch_policy": e["patch_policy"], "duration_min": e["duration_min"]} for e in next_exams]})
         trips.sort(key=lambda t: t["total_remaining"])
         exams_soon.sort(key=lambda e: e["in_s"])
+        in_room = collections.Counter(self.display_location(rec) for rec in self.admitted.values()
+                                      if not rec["outpatient"] and (rec["trip"] or rec["trip_step_until"] > now))   # who is physically in which room right now (= the plan)
         return {"sim_time": iso(now), "trips": trips,
                 "stats": {"moving": len(trips), "kinds": kinds, "shadow": n_shadow, "mri_patch_off": n_mri,
                           "exams_soon": len(exams_soon), "upcoming_h": upcoming_h, "admitted": len(self.admitted),
                           "rooms": [{"room": f"{h.buildings[b]['name']} {name}", "load": int(self.exam_load[f"{b}:{name}"]), "capacity": self.exam_capacity(f"{b}:{name}"),
+                                     "in_room": int(in_room.get(ri, 0)),          # inside the room now (matches the plan); load = booked incl. patients still on the way
                                      "room_idx": ri, "room_id": h.rooms[ri]["id"], "building_idx": b, "floor": h.rooms[ri]["floor"]}
                                     for b in range(len(h.buildings)) for name in list(h.exam_rooms) + [v[0] for v in self.VISITS] if (ri := self._room_named(name, b)) >= 0]},
                 "exams_soon": exams_soon[:200]}

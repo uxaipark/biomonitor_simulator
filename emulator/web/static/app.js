@@ -1794,7 +1794,7 @@ function wardSummary(wards) {
 const TRIP_KO = { exam: '검사', visit: '방문', transfer: '병실 이동', shadowtrip: '음영 진입', toilet: '화장실', walk: '보행', shower: '샤워', rehab: '재활', other: '기타' };
 const mmssL = (s) => { s = Math.max(0, Math.round(s)); return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : mmss(s); };
 const hhmmss = (iso) => (iso || '').slice(11, 19);
-const roomLoad = (d) => { const rs = d.stats.rooms || []; return `${rs.reduce((a, r) => a + r.load, 0)}/${rs.reduce((a, r) => a + r.capacity, 0)}`; };
+const roomLoad = (d) => { const rs = d.stats.rooms || []; const inr = rs.reduce((a, r) => a + (r.in_room || 0), 0), booked = rs.reduce((a, r) => a + r.load, 0); return `${inr}/${rs.reduce((a, r) => a + r.capacity, 0)}${booked > inr ? ` (+${booked - inr} 이동 중)` : ''}`; };
 function tripSummary(d) {
   const el = $('#tripSummary'); if (!el) return;
   if (!d) { el.textContent = ''; return; }
@@ -1809,7 +1809,8 @@ async function loadTrips() {
   const body = $('#tripTable tbody'); if (!body || isFolded('tripBody')) return;
   const stepCls = (st) => (st.state === 'done' ? 'done' : st.state === 'current' ? 'cur' : '') + (st.label.includes('MRI') ? ' mri' : '') + (st.label.includes('음영') ? ' shadow' : '');
   const stepIcon = (st) => st.state === 'done' ? '✓' : st.state === 'current' ? '▶' : '○';
-  const cap = $('#tripRooms'); if (cap) cap.innerHTML = (d.stats.rooms || []).filter(r => r.capacity).map(r => `<span class="${r.load >= r.capacity ? 'full' : ''}" data-rid="${esc(r.room_id)}" data-b="${r.building_idx}" data-f="${r.floor}" title="클릭: 도면에서 ${esc(r.room)} 보기">${esc(r.room)} <b>${r.load}</b>/${r.capacity}</span>`).join('');
+  // chip = patients inside the room now (what the plan shows) / stations; "+N 이동 중" = booked and still on the way there
+  const cap = $('#tripRooms'); if (cap) cap.innerHTML = (d.stats.rooms || []).filter(r => r.capacity).map(r => { const en = Math.max(0, r.load - (r.in_room || 0)); return `<span class="${r.load >= r.capacity ? 'full' : ''}" data-rid="${esc(r.room_id)}" data-b="${r.building_idx}" data-f="${r.floor}" title="방 안 ${r.in_room || 0}명 · 정원 ${r.capacity} · 이 방으로 이동 중 ${en}명 · 클릭: 도면에서 보기">${esc(r.room)} <b>${r.in_room || 0}</b>/${r.capacity}${en ? `<i>+${en} 이동 중</i>` : ''}</span>`; }).join('');
   const selRow = body.querySelector('tr.sel')?.dataset.row;
   const ts = tripSort.get(); tripSort.mark();
   const tk = (t) => ts.key === 'location_name' ? `${t.location_name} ${t.location}` : ts.key === 'gateway' ? (t.shadow ? '~음영' : (t.gateway || '~없음')) : t[ts.key];
