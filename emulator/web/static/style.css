@@ -26,14 +26,14 @@ header .spacer{flex:1}
 .pill.on{border-color:var(--warn);color:var(--warn)}.pill.on .dot{background:var(--warn);box-shadow:0 0 6px var(--warn)}
 .pill.bad{border-color:var(--err);color:var(--err)}
 /* ---- scrollbars: thicker so the long lists (plan cards, tables, modals) are easy to grab */
-*{scrollbar-width:auto;scrollbar-color:var(--muted) var(--panel2)}
+/* no standard scrollbar-color/width here: in Chrome they would disable the ::-webkit-scrollbar sizing below */
 ::-webkit-scrollbar{width:14px;height:12px}
 ::-webkit-scrollbar-track{background:var(--panel2)}
 ::-webkit-scrollbar-thumb{background:var(--muted);border:3px solid var(--panel2);border-radius:8px;min-height:40px}
 ::-webkit-scrollbar-thumb:hover{background:var(--txt)}
 /* the page's own (right edge) scrollbar: 3x the list scrollbars, for touch use on the reTerminal */
-html::-webkit-scrollbar{width:42px}
-html::-webkit-scrollbar-thumb{border:8px solid var(--panel2);border-radius:14px;min-height:80px}
+html::-webkit-scrollbar,body::-webkit-scrollbar{width:42px}
+html::-webkit-scrollbar-thumb,body::-webkit-scrollbar-thumb{border:8px solid var(--panel2);border-radius:14px;min-height:80px}
 html{scrollbar-gutter:stable}
 nav.tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--line)}
 nav.tabs::-webkit-scrollbar{display:none}
