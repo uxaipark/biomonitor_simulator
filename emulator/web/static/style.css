@@ -31,6 +31,10 @@ header .spacer{flex:1}
 ::-webkit-scrollbar-track{background:var(--panel2)}
 ::-webkit-scrollbar-thumb{background:var(--muted);border:3px solid var(--panel2);border-radius:8px;min-height:40px}
 ::-webkit-scrollbar-thumb:hover{background:var(--txt)}
+/* the page's own (right edge) scrollbar: 3x the list scrollbars, for touch use on the reTerminal */
+html::-webkit-scrollbar{width:42px}
+html::-webkit-scrollbar-thumb{border:8px solid var(--panel2);border-radius:14px;min-height:80px}
+html{scrollbar-gutter:stable}
 nav.tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--line)}
 nav.tabs::-webkit-scrollbar{display:none}
 nav.tabs button{white-space:nowrap;border-radius:999px;min-height:40px;padding:6px 14px;background:transparent;border-color:transparent;color:var(--muted)}
