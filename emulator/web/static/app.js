@@ -824,7 +824,7 @@ async function loadFloor() {
     if (r.ensuite) return;                                   // in-room toilets are not drawn
     const fill = r.kind === 'courtyard' ? 'url(#grass)' : (KIND_FILL[r.kind] || '#eee');
     const [bx0, by0, bx1, by1] = bbox(r.poly); const occN = (r.beds || []).filter(b => patByBed[b.id]).length;
-    out += `<polygon points="${pts(r.poly)}" fill="${fill}" stroke="none"><title>${esc(r.name)} · ${KIND_KO[r.kind] || r.kind}${r.ward ? ' · ' + esc(r.ward) : ''} · ${(bx1 - bx0).toFixed(1)} × ${(by1 - by0).toFixed(1)} m (${((bx1 - bx0) * (by1 - by0)).toFixed(0)} m²)${r.beds && r.beds.length ? ` · ${r.beds.length}병상 · 재원 ${occN}` : ''}${r.gateway_idx >= 0 ? ' · 게이트웨이 있음' : ''}</title></polygon>`;
+    out += `<polygon points="${pts(r.poly)}" fill="${fill}" stroke="none" data-rid="${esc(r.id)}"><title>${esc(r.name)} · ${KIND_KO[r.kind] || r.kind}${r.ward ? ' · ' + esc(r.ward) : ''} · ${(bx1 - bx0).toFixed(1)} × ${(by1 - by0).toFixed(1)} m (${((bx1 - bx0) * (by1 - by0)).toFixed(0)} m²)${r.beds && r.beds.length ? ` · ${r.beds.length}병상 · 재원 ${occN}` : ''}${r.gateway_idx >= 0 ? ' · 게이트웨이 있음' : ''}</title></polygon>`;
     if (r.kind === 'stairs') out += `<polygon points="${pts(r.poly)}" fill="url(#hatch)" stroke="none"/>`;
     out += `<polygon class="wall" points="${pts(r.poly)}"/>`;
     const [x0, y0, x1, y1] = bbox(r.poly); const w = x1 - x0, h = y1 - y0;
@@ -1288,13 +1288,18 @@ async function gotoPlanFloor(fi) {                                  // show a fl
 function applyHighlight() {
   if (!mapHighlight) return;
   const svg = $('#floorMap');
-  const el = mapHighlight.type === 'patient' ? svg.querySelector(`g.pat[data-row="${mapHighlight.row}"] circle, .bed[data-row="${mapHighlight.row}"]`) : svg.querySelector(`g.gw[data-gwidx="${mapHighlight.idx}"] circle`);
+  const el = mapHighlight.type === 'patient' ? svg.querySelector(`g.pat[data-row="${mapHighlight.row}"] circle, .bed[data-row="${mapHighlight.row}"]`)
+    : mapHighlight.type === 'room' ? svg.querySelector(`polygon[data-rid="${mapHighlight.id}"]`) : svg.querySelector(`g.gw[data-gwidx="${mapHighlight.idx}"] circle`);
   if (!el) return;
-  let cx, cy;
-  if (el.tagName === 'circle') { cx = Number(el.getAttribute('cx')); cy = Number(el.getAttribute('cy')); }
+  let cx, cy, rr = 1.6;
+  if (el.tagName === 'polygon') {                                          // room: pulse a ring sized to the room, centred on it
+    const p = el.getAttribute('points').split(' ').map(t => t.split(',').map(Number)); const b = bbox(p);
+    cx = (b[0] + b[2]) / 2; cy = (b[1] + b[3]) / 2; rr = Math.max(1.6, Math.min(b[2] - b[0], b[3] - b[1]) / 2 + 0.4);
+  }
+  else if (el.tagName === 'circle') { cx = Number(el.getAttribute('cx')); cy = Number(el.getAttribute('cy')); }
   else { const tr = el.getAttribute('transform') || ''; const m = tr.match(/translate\(([-\d.]+),([-\d.]+)\)/); if (!m) return; cx = Number(m[1]); cy = Number(m[2]); }
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.setAttribute('class', 'hl');
-  g.innerHTML = `<circle cx="${cx}" cy="${cy}" r="1.6" fill="none" stroke="#ff3b3b" stroke-width="0.22"><animate attributeName="r" values="1.2;2.2;1.2" dur="1.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0.35;1" dur="1.4s" repeatCount="indefinite"/></circle><circle cx="${cx}" cy="${cy}" r="0.9" fill="none" stroke="#ff3b3b" stroke-width="0.14"/>`;
+  g.innerHTML = `<circle cx="${cx}" cy="${cy}" r="${rr}" fill="none" stroke="#ff3b3b" stroke-width="0.22"><animate attributeName="r" values="${(rr * 0.75).toFixed(2)};${(rr * 1.35).toFixed(2)};${(rr * 0.75).toFixed(2)}" dur="1.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0.35;1" dur="1.4s" repeatCount="indefinite"/></circle><circle cx="${cx}" cy="${cy}" r="0.9" fill="none" stroke="#ff3b3b" stroke-width="0.14"/>`;
   svg.appendChild(g);
   // zoom in on the highlighted item
   const b = planZoom.base; if (b) { const w = b[2] / 2.5, h = b[3] / 2.5; planSetVB([Math.max(b[0], Math.min(b[0] + b[2] - w, cx - w / 2)), Math.max(b[1], Math.min(b[1] + b[3] - h, cy - h / 2)), w, h]); planZoom.on = true; svg.style.cursor = 'grab'; }
@@ -1804,7 +1809,7 @@ async function loadTrips() {
   const body = $('#tripTable tbody'); if (!body || isFolded('tripBody')) return;
   const stepCls = (st) => (st.state === 'done' ? 'done' : st.state === 'current' ? 'cur' : '') + (st.label.includes('MRI') ? ' mri' : '') + (st.label.includes('음영') ? ' shadow' : '');
   const stepIcon = (st) => st.state === 'done' ? '✓' : st.state === 'current' ? '▶' : '○';
-  const cap = $('#tripRooms'); if (cap) cap.innerHTML = (d.stats.rooms || []).filter(r => r.capacity).map(r => `<span class="${r.load >= r.capacity ? 'full' : ''}">${esc(r.room)} <b>${r.load}</b>/${r.capacity}</span>`).join('');
+  const cap = $('#tripRooms'); if (cap) cap.innerHTML = (d.stats.rooms || []).filter(r => r.capacity).map(r => `<span class="${r.load >= r.capacity ? 'full' : ''}" data-rid="${esc(r.room_id)}" data-b="${r.building_idx}" data-f="${r.floor}" title="클릭: 도면에서 ${esc(r.room)} 보기">${esc(r.room)} <b>${r.load}</b>/${r.capacity}</span>`).join('');
   const selRow = body.querySelector('tr.sel')?.dataset.row;
   const ts = tripSort.get(); tripSort.mark();
   const tk = (t) => ts.key === 'location_name' ? `${t.location_name} ${t.location}` : ts.key === 'gateway' ? (t.shadow ? '~음영' : (t.gateway || '~없음')) : t[ts.key];
@@ -1820,6 +1825,14 @@ async function loadTrips() {
     <td data-l="다음 예정 검사"><div class="tnext">${t.next_exams.length ? t.next_exams.map(e => `<span><b>${esc(e.type)}</b> ${hhmmss(e.time).slice(0, 5)} <span class="sub">(${mmssL(e.in_s)} 후 · ${esc(e.room)} · ${e.duration_min}분${e.patch_policy === 'remove' ? ' · 패치 분리' : ''})</span></span>`).join('') : '<span class="sub">예정 없음</span>'}</div></td>
   </tr>`).join('') || '<tr><td colspan="8" class="sub">현재 이동 중인 환자가 없습니다.</td></tr>';
 }
+$('#tripRooms').addEventListener('click', e => {                     // room-load chip: open that floor and pulse the room on the plan
+  const ch = e.target.closest('span[data-rid]'); if (!ch) return;
+  $$('#tripRooms span.sel').forEach(x => x.classList.remove('sel')); ch.classList.add('sel');
+  mapHighlight = { type: 'room', id: ch.dataset.rid };
+  gotoPlanFloor(floors.findIndex(x => String(x.building_idx) === ch.dataset.b && String(x.floor) === ch.dataset.f));
+  clearTimeout(tripHlTimer);
+  tripHlTimer = setTimeout(() => { ch.classList.remove('sel'); if (mapHighlight && mapHighlight.type === 'room' && mapHighlight.id === ch.dataset.rid) { mapHighlight = null; const hl = $('#floorMap .hl'); if (hl) hl.remove(); } }, 8000);
+});
 const tripSort = makeSortable('tripTable', 'tripSort', { key: 'name', dir: 1 }, () => { if (lastTrips) loadTrips(); });
 $('#tripTable').addEventListener('click', e => {
   const o = e.target.closest('[data-gwopen]'); if (o) { openGatewayMonitor(Number(o.dataset.gwopen)); return; }

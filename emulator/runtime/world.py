@@ -1825,8 +1825,9 @@ class World:
         return {"sim_time": iso(now), "trips": trips,
                 "stats": {"moving": len(trips), "kinds": kinds, "shadow": n_shadow, "mri_patch_off": n_mri,
                           "exams_soon": len(exams_soon), "upcoming_h": upcoming_h, "admitted": len(self.admitted),
-                          "rooms": [{"room": f"{h.buildings[b]['name']} {name}", "load": int(self.exam_load[f"{b}:{name}"]), "capacity": self.exam_capacity(f"{b}:{name}")}
-                                    for b in range(len(h.buildings)) for name in list(h.exam_rooms) + [v[0] for v in self.VISITS] if self._room_named(name, b) >= 0]},
+                          "rooms": [{"room": f"{h.buildings[b]['name']} {name}", "load": int(self.exam_load[f"{b}:{name}"]), "capacity": self.exam_capacity(f"{b}:{name}"),
+                                     "room_idx": ri, "room_id": h.rooms[ri]["id"], "building_idx": b, "floor": h.rooms[ri]["floor"]}
+                                    for b in range(len(h.buildings)) for name in list(h.exam_rooms) + [v[0] for v in self.VISITS] if (ri := self._room_named(name, b)) >= 0]},
                 "exams_soon": exams_soon[:200]}
 
     def gateway_view(self) -> list[dict]:

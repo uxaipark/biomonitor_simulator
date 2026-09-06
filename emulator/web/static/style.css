@@ -403,7 +403,9 @@ ol.route li.upcoming{border-left-style:dashed}
 .tprog.shadow i{background:var(--warn)}
 .tnext{display:flex;flex-direction:column;gap:2px;font-size:11px;white-space:nowrap}
 .troom{display:flex;flex-wrap:wrap;gap:4px 6px;padding:0 0 8px;font-size:11px;color:var(--muted)}
-.troom span{padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel2)}
+.troom span{padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);cursor:pointer}
+.troom span:hover{border-color:var(--acc2);color:var(--txt)}
+.troom span.sel{background:var(--sel);border-color:var(--acc2);color:var(--acc2)}
 .troom span b{color:var(--txt)}.troom span.full{border-color:var(--warn);color:var(--warn)}.troom span.full b{color:var(--warn)}
 .tnext .sub{font-size:11px}
 
