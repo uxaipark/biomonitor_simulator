@@ -293,6 +293,14 @@
     <div class="sub" id="dbMsg"></div>
     <div class="tbl" style="max-height:40vh"><table id="dbTable"><thead></thead><tbody></tbody></table></div></div>
   </div>
+  <div class="card" style="margin-bottom:10px"><h3><button class="fold" data-fold="cfgHistBody" aria-expanded="true">▾</button>설정 이력 <span class="sub" id="cfgHistSummary"></span></h3><div id="cfgHistBody">
+    <div class="help">모든 설정 변경(GUI·API·자동 최적화·초기화·복원)이 시각·출처·경로·이전값→새값으로 남고, 전송 실행마다 시작 시점의 설정 전체가 스냅샷으로 저장됩니다. 실행 행의 [이 설정으로 복원]은 그때의 시나리오 전체를, 변경 행의 [되돌리기]는 그 항목 하나만 이전값으로 되돌립니다. 구조 설정이 바뀌면 [병원·환자 재구성]이 필요합니다.</div>
+    <div class="row" style="align-items:flex-end"><div class="field" style="flex:1"><span>경로 검색 (예: active_patients, network)</span><input type="text" id="cfgHistQ" placeholder="설정 경로 일부"></div><button class="small" id="cfgHistReload">새로고침</button></div>
+    <h4 style="margin:10px 0 4px;font-size:12px;color:var(--muted)">전송 실행 이력 (시작 시점 설정 스냅샷)</h4>
+    <div class="tbl" style="max-height:30vh"><table id="runsTable"><thead><tr><th>#</th><th>시작</th><th>종료</th><th>대상</th><th>워커</th><th>환자</th><th>GW</th><th>pkts</th><th>드롭</th><th></th></tr></thead><tbody></tbody></table></div>
+    <h4 style="margin:12px 0 4px;font-size:12px;color:var(--muted)">설정 변경 이력</h4>
+    <div class="tbl" style="max-height:40vh"><table id="cfgHistTable"><thead><tr><th>시각</th><th>출처</th><th>실행</th><th>경로</th><th>이전</th><th>새 값</th><th></th></tr></thead><tbody></tbody></table></div>
+  </div></div>
   <div class="grid">
     <div class="card"><h3><button class="fold" data-fold="bankBody" aria-expanded="true">▾</button>루프 파일 은행 (1시간 파형 데이터)</h3><div id="bankBody">
       <div id="bankInfo2" class="sub"></div>

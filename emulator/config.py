@@ -162,6 +162,7 @@ class Config:
 
     def __init__(self, path: Path = CONFIG_PATH):
         self.path = path
+        self._listeners: list = []
         self._lock = threading.RLock()
         self._data = copy.deepcopy(DEFAULT_CONFIG)
         self.load()
@@ -198,19 +199,50 @@ class Config:
         with self._lock:
             return copy.deepcopy(self._data)
 
-    def update(self, patch: dict[str, Any]) -> dict[str, Any]:
+    def add_listener(self, fn) -> None:
+        """fn(changes: list[(path, old, new)], source: str) is called after every update()/reset() that changed something."""
+        self._listeners.append(fn)
+
+    @staticmethod
+    def diff(old: dict, new: dict, prefix: str = "") -> list[tuple[str, Any, Any]]:
+        out: list[tuple[str, Any, Any]] = []
+        for k in sorted(set(old) | set(new)):
+            a, b = old.get(k), new.get(k)
+            if isinstance(a, dict) and isinstance(b, dict):
+                out += Config.diff(a, b, f"{prefix}{k}.")
+            elif a != b:
+                out.append((f"{prefix}{k}", a, b))
+        return out
+
+    def _notify(self, before: dict, after: dict, source: str) -> None:
+        changes = self.diff(before, after)
+        if not changes:
+            return
+        for fn in list(self._listeners):
+            try:
+                fn(changes, source)
+            except Exception:
+                pass
+
+    def update(self, patch: dict[str, Any], source: str = "api") -> dict[str, Any]:
         with self._lock:
+            before = copy.deepcopy(self._data)
             _deep_update(self._data, patch)
             self._validate()
             snap = copy.deepcopy(self._data)
         self.save()
+        self._notify(before, snap, source)
         return snap
 
-    def reset(self) -> dict[str, Any]:
+    def reset(self, source: str = "reset") -> dict[str, Any]:
         with self._lock:
+            before = copy.deepcopy(self._data)
             self._data = copy.deepcopy(DEFAULT_CONFIG)
+            self._validate()
+            snap = copy.deepcopy(self._data)
         self.save()
-        return self.snapshot()
+        self._notify(before, snap, source)
+        return snap
 
     def _validate(self) -> None:
         d = self._data

@@ -1585,12 +1585,12 @@ class World:
             at["step"] = max(5, at["step"] // 2)
             nxt = max(10, at["best"] if at["best"] else at["current"] - at["step"])
             if at["step"] <= 5 and at["fail_streak"] >= 2:
-                self.cfg.update({"general": {"active_patients": at["best"] or nxt}})
+                self.cfg.update({"general": {"active_patients": at["best"] or nxt}}, source="autotune")
                 self.log.add("autotune", f"자동 최적화 완료: 안정적으로 수용 가능한 최대 채널 수 = {at['best']}명 (설정 반영)")
                 self.autotune = None
                 return
         at["current"] = nxt
-        self.cfg.update({"general": {"active_patients": nxt}})
+        self.cfg.update({"general": {"active_patients": nxt}}, source="autotune")
         self.log.add("autotune", f"자동 최적화: {'안정' if ok else '불안정'} → 환자 {nxt}명 (step {at['step']})")
 
     def health(self) -> dict:

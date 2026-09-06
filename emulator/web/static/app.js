@@ -8,7 +8,7 @@ const api = async (path, opt = {}) => {
   return r.json();
 };
 const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
-const patch = (body) => api('/config', { method: 'PATCH', body: JSON.stringify(body) });
+const patch = (body) => api('/config', { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Source': 'gui' }, body: JSON.stringify(body) });   // tagged in the config history
 const fmt = (n, d = 0) => (n === undefined || n === null || isNaN(n)) ? '-' : Number(n).toLocaleString('ko-KR', { maximumFractionDigits: d, minimumFractionDigits: d });
 const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2200); };
 const mmss = (sec) => { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
@@ -104,7 +104,7 @@ function showTab(id) {
   if (id === 'proto') loadProto();
   if (id === 'pat') loadPatients();
   if (id === 'log') renderLog();
-  if (id === 'data') { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); }
+  if (id === 'data') { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); loadConfigHistory(); }
   if (id === 'scn' || id === 'tx') loadScripts();
   if (id === 'scn') loadDevices();
 }
@@ -1947,6 +1947,32 @@ $$('.trend canvas').forEach(cv => { cv.addEventListener('mousemove', trendHover)
 window.addEventListener('resize', () => { if (trendOpen && trendData) loadTrend(); });
 
 // ---------------------------------------------------------------- data tab
+// ---- config history / run snapshots (data tab)
+const tsK = (t) => t ? new Date(t * 1000).toLocaleString('ko-KR', { hour12: false }) : '-';
+const jshort = (v) => { const t = JSON.stringify(v); return t === undefined ? '-' : (t.length > 60 ? t.slice(0, 57) + '…' : t); };
+async function loadConfigHistory() {
+  const q = ($('#cfgHistQ') || {}).value || '';
+  try {
+    const [h, r] = await Promise.all([api('/config/history?limit=300&path=' + encodeURIComponent(q)), api('/runs?limit=50')]);
+    const sm = $('#cfgHistSummary'); if (sm) sm.textContent = `변경 ${h.total}건 · 실행 ${r.runs.length}회${r.current ? ' · 현재 실행 #' + r.current : ''}`;
+    $('#runsTable tbody').innerHTML = r.runs.map(x => `<tr class="${x.id === r.current ? 'sel' : ''}"><td>${x.id}</td><td>${tsK(x.started_at)}</td><td>${x.stopped_at ? tsK(x.stopped_at) : '<span class="tag ok">진행 중</span>'}</td><td class="mono">${esc(x.target || '-')}</td><td>${x.workers ?? '-'}</td><td>${x.patients ?? '-'}</td><td>${x.gateways ?? '-'}</td><td>${fmt(x.pkts)}</td><td>${fmt(x.drops)}</td><td>${x.has_config ? `<button class="small" data-restore-run="${x.id}">이 설정으로 복원</button> <button class="small" data-show-run="${x.id}">보기</button>` : '<span class="sub">스냅샷 없음</span>'}</td></tr>`).join('') || '<tr><td colspan="10" class="sub">실행 기록 없음</td></tr>';
+    $('#cfgHistTable tbody').innerHTML = h.items.map(x => `<tr><td>${tsK(x.t)}</td><td><span class="tag">${esc(x.source)}</span></td><td>${x.run_id ?? '-'}</td><td class="mono">${esc(x.path)}</td><td class="mono sub">${esc(jshort(x.old))}</td><td class="mono">${esc(jshort(x.new))}</td><td><button class="small" data-restore-h="${x.id}" title="이 항목을 이전값 ${esc(jshort(x.old))} 으로">되돌리기</button></td></tr>`).join('') || '<tr><td colspan="7" class="sub">변경 이력 없음</td></tr>';
+  } catch (e) { }
+}
+document.addEventListener('click', async e => {
+  const rr = e.target.closest('[data-restore-run]'), rh = e.target.closest('[data-restore-h]'), sr = e.target.closest('[data-show-run]');
+  if (sr) { try { const r = await api('/runs/' + sr.dataset.showRun + '/config'); const g = r.config.general, sc = r.config.scenario; toast(`실행 #${r.run_id}: 환자 ${g.active_patients}명 · 원외 ${g.outpatient_count} · 병상 ${g.bed_capacity} · ECG ${r.config.signals.ecg_fs} Hz · 네트워크 ${sc.network.enabled ? sc.network.intensity + '%' : 'OFF'} · 아티팩트 ${sc.artifacts.enabled ? sc.artifacts.intensity + '%' : 'OFF'} · 대상 ${r.config.transport.target_ip || '-'}:${r.config.transport.target_port}`); } catch (er) { toast('스냅샷을 읽지 못했습니다'); } return; }
+  if (!rr && !rh) return;
+  const what = rr ? `실행 #${rr.dataset.restoreRun}의 설정 전체로 되돌립니다` : `변경 #${rh.dataset.restoreH} 항목을 이전값으로 되돌립니다`;
+  if (!await askConfirm('설정 복원', what + '. 계속할까요?', '복원')) return;
+  try {
+    const r = await post('/config/restore', rr ? { run_id: Number(rr.dataset.restoreRun) } : { history_id: Number(rh.dataset.restoreH) });
+    toast('복원 완료' + (r.needs_rebuild ? ' · 구조 설정 변경: [병원·환자 재구성] 필요' : '') + (r.needs_generate ? ' · 루프 은행 재생성 필요' : ''));
+    await loadConfig(); loadConfigHistory();
+  } catch (er) { toast('복원 실패: ' + er.message); }
+});
+$('#cfgHistReload').onclick = loadConfigHistory; $('#cfgHistQ').addEventListener('input', () => { clearTimeout(window.__cfgHistT); window.__cfgHistT = setTimeout(loadConfigHistory, 300); });
+setInterval(() => { if ($('[data-tab="data"]').classList.contains('on') && !isFolded('cfgHistBody')) loadConfigHistory(); }, 15000);
 async function loadBankFiles() {
   try {
     const c = await api('/signals/catalog'); const b = c.bank;

@@ -42,7 +42,9 @@ CREATE TABLE IF NOT EXISTS gateways (
   gw_no INTEGER PRIMARY KEY, row INTEGER, gw_id TEXT, mac TEXT, type TEXT, building TEXT, floor INTEGER, room TEXT,
   status TEXT, installed_at REAL, installed_reason TEXT, retired_at REAL, retired_reason TEXT);
 CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at REAL, stopped_at REAL, target TEXT, workers INTEGER,
-  patients INTEGER, gateways INTEGER, pkts INTEGER, bytes INTEGER, drops INTEGER);
+  patients INTEGER, gateways INTEGER, pkts INTEGER, bytes INTEGER, drops INTEGER, config_json TEXT);
+CREATE TABLE IF NOT EXISTS config_history (id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, source TEXT, run_id INTEGER, path TEXT, old_json TEXT, new_json TEXT);
+CREATE INDEX IF NOT EXISTS ix_cfghist_t ON config_history(t);
 """
 
 
@@ -56,6 +58,9 @@ class DB:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
+        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(runs)").fetchall()]
+        if "config_json" not in cols:                                  # migration: older DBs
+            self.conn.execute("ALTER TABLE runs ADD COLUMN config_json TEXT")
         self._pending: list[tuple] = []
         self._pending_pe: list[tuple] = []
 
@@ -196,15 +201,47 @@ class DB:
             n["admissions"] = c.execute("DELETE FROM admissions WHERE discharge_time IS NOT NULL AND discharge_time < ?", (before,)).rowcount
             n["events"] = c.execute("DELETE FROM events WHERE t < ?", (before,)).rowcount
             n["runs"] = c.execute("DELETE FROM runs WHERE stopped_at IS NOT NULL AND stopped_at < ?", (before,)).rowcount
+            n["config_history"] = c.execute("DELETE FROM config_history WHERE t < ?", (before,)).rowcount
             if sum(n.values()):
                 c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return n
 
     # ------------------------------------------------------------- runs
-    def start_run(self, target: str, workers: int, patients: int, gateways: int) -> int:
+    def start_run(self, target: str, workers: int, patients: int, gateways: int, config_json: str | None = None) -> int:
         with self.lock:
-            cur = self.conn.execute("INSERT INTO runs(started_at, target, workers, patients, gateways) VALUES (?,?,?,?,?)", (time.time(), target, workers, patients, gateways))
+            cur = self.conn.execute("INSERT INTO runs(started_at, target, workers, patients, gateways, config_json) VALUES (?,?,?,?,?,?)",
+                                    (time.time(), target, workers, patients, gateways, config_json))
         return int(cur.lastrowid)
+
+    def runs(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        with self.lock:
+            rows = self.conn.execute("SELECT id, started_at, stopped_at, target, workers, patients, gateways, pkts, bytes, drops, config_json IS NOT NULL FROM runs ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+        keys = ["id", "started_at", "stopped_at", "target", "workers", "patients", "gateways", "pkts", "bytes", "drops", "has_config"]
+        return [dict(zip(keys, r)) for r in rows]
+
+    def run_config(self, rid: int) -> dict | None:
+        with self.lock:
+            r = self.conn.execute("SELECT config_json FROM runs WHERE id=?", (rid,)).fetchone()
+        return json.loads(r[0]) if r and r[0] else None
+
+    # ------------------------------------------------------------- config history (every change, any source)
+    def add_config_changes(self, t: float, source: str, run_id: int | None, changes: list) -> None:
+        rows = [(t, source, run_id, path, json.dumps(old, ensure_ascii=False), json.dumps(new, ensure_ascii=False)) for path, old, new in changes]
+        with self.lock:
+            self.conn.executemany("INSERT INTO config_history(t, source, run_id, path, old_json, new_json) VALUES (?,?,?,?,?,?)", rows)
+
+    def config_history(self, limit: int = 200, offset: int = 0, path: str = "") -> dict:
+        with self.lock:
+            where = "WHERE path LIKE ?" if path else ""
+            args = (f"%{path}%",) if path else ()
+            total = self.conn.execute(f"SELECT COUNT(*) FROM config_history {where}", args).fetchone()[0]
+            rows = self.conn.execute(f"SELECT id, t, source, run_id, path, old_json, new_json FROM config_history {where} ORDER BY id DESC LIMIT ? OFFSET ?", args + (limit, offset)).fetchall()
+        return {"total": total, "items": [{"id": r[0], "t": r[1], "source": r[2], "run_id": r[3], "path": r[4], "old": json.loads(r[5]), "new": json.loads(r[6])} for r in rows]}
+
+    def config_change(self, hid: int) -> dict | None:
+        with self.lock:
+            r = self.conn.execute("SELECT id, t, source, run_id, path, old_json, new_json FROM config_history WHERE id=?", (hid,)).fetchone()
+        return {"id": r[0], "t": r[1], "source": r[2], "run_id": r[3], "path": r[4], "old": json.loads(r[5]), "new": json.loads(r[6])} if r else None
 
     def stop_run(self, rid: int | None, pkts: int, nbytes: int, drops: int) -> None:
         if rid:

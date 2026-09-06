@@ -4,6 +4,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import os
 import contextlib
+import json
 import threading
 import time
 from pathlib import Path
@@ -62,6 +63,7 @@ class Engine:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.rw = RWLock()                                   # see RWLock: request threads read(), rebuild() write()s
+        self.cfg.add_listener(self._on_config_change)         # every setting change (GUI, API, autotune, restore) -> config_history
         self.log = EventLog()
         self.bank = self._make_bank()
         self.world: World | None = None
@@ -136,6 +138,12 @@ class Engine:
             self.log.add("system", "월드 재구성 완료")
 
     # ---------------------------------------------------------------- run control
+    def _on_config_change(self, changes, source: str) -> None:
+        try:
+            self.world.db.add_config_changes(time.time(), source, getattr(self, "run_id", None) if self.running else None, changes)
+        except Exception:
+            pass
+
     def start(self) -> str:
         if self.running:
             return "already running"
@@ -173,7 +181,8 @@ class Engine:
         self.started_at = time.time()
         self._last_totals = {}
         self.log.add("system", f"전송 시작: 워커 {n_workers}, 대상 {t['target_ip'] or '(생성만)'}:{t['target_port']}, 채널 마스크 {int(st.ctl[CTL['chan_mask']])}")
-        self.run_id = w.db.start_run(f"{t['target_ip'] or '-'}:{t['target_port']}", n_workers, len(w.admitted), len(w.hospital.gateways))
+        self.run_id = w.db.start_run(f"{t['target_ip'] or '-'}:{t['target_port']}", n_workers, len(w.admitted), len(w.hospital.gateways),
+                                     json.dumps(self.cfg.snapshot(), ensure_ascii=False))          # full scenario snapshot: every run is reproducible
         return "started"
 
     def stop(self) -> str:

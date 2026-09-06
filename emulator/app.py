@@ -7,7 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -134,11 +134,10 @@ def _changed_paths(old: dict, new: dict, prefix=()):
             yield prefix + (k,)
 
 
-@app.patch("/api/v1/config")
-async def patch_config(patch: dict):
+def _apply_config(patch: dict, source: str) -> dict:
     e = E()
     old = cfg.snapshot()
-    new = cfg.update(patch)
+    new = cfg.update(patch, source=source)
     changed = set(_changed_paths(old, new))
     needs_rebuild = bool(changed & STRUCTURAL) or (("general", "outpatient_count") in changed and new["general"]["outpatient_count"] > e.world.mobile_pool)
     if ("general", "active_patients") in changed and (new.get("hospital") or {}).get("size_by_patients", True) and not (new.get("hospital") or {}).get("layout_file"):
@@ -153,6 +152,59 @@ async def patch_config(patch: dict):
             "note": "구조 설정(병상수/시드/게이트웨이 용량)은 POST /control/rebuild, 샘플링/변형 수는 /control/generate 로 반영"}
 
 
+@app.patch("/api/v1/config")
+async def patch_config(patch: dict, request: Request):
+    return _apply_config(patch, request.headers.get("x-source", "api"))
+
+
+@app.get("/api/v1/config/history")
+def config_history(limit: int = Query(200, le=2000), offset: int = 0, path: str = ""):
+    """Every setting change with time, source (gui/api/autotune/reset/restore), run id, path and old -> new value."""
+    return E().world.db.config_history(limit, offset, path)
+
+
+@app.get("/api/v1/runs")
+def runs(limit: int = Query(50, le=500), offset: int = 0):
+    """Transmission runs with the full scenario snapshot taken at start (GET /runs/{id}/config)."""
+    return {"runs": E().world.db.runs(limit, offset), "current": getattr(E(), "run_id", None) if E().running else None}
+
+
+@app.get("/api/v1/runs/{rid}/config")
+def run_config(rid: int):
+    c = E().world.db.run_config(rid)
+    if c is None:
+        raise HTTPException(404, "no snapshot for this run")
+    return {"run_id": rid, "config": c}
+
+
+@app.post("/api/v1/config/restore")
+async def config_restore(body: dict):
+    """{run_id}: put the whole scenario back to that run's snapshot.  {history_id}: undo one change (path back to its old value).
+    Applied like a PATCH (needs_rebuild / needs_generate flags), recorded in the history with source 'restore'."""
+    db = E().world.db
+    if "run_id" in body:
+        snap = db.run_config(int(body["run_id"]))
+        if snap is None:
+            raise HTTPException(404, "no snapshot for this run")
+        r = _apply_config(snap, f"restore:run{int(body['run_id'])}")
+        r["restored"] = {"run_id": int(body["run_id"])}
+        return r
+    if "history_id" in body:
+        h = db.config_change(int(body["history_id"]))
+        if h is None:
+            raise HTTPException(404, "unknown history entry")
+        patch: dict = {}
+        cur = patch
+        parts = h["path"].split(".")
+        for k in parts[:-1]:
+            cur = cur.setdefault(k, {})
+        cur[parts[-1]] = h["old"]
+        r = _apply_config(patch, f"restore:h{h['id']}")
+        r["restored"] = {"history_id": h["id"], "path": h["path"], "value": h["old"]}
+        return r
+    raise HTTPException(400, "run_id or history_id required")
+
+
 @app.post("/api/v1/config/reset")
 async def reset_config(body: dict | None = None):
     """scope=all: factory defaults (structure too -> rebuild needed).  scope=runtime (default from the GUI): every parameter back
@@ -160,10 +212,10 @@ async def reset_config(body: dict | None = None):
     scope = (body or {}).get("scope", "all")
     e = E()
     if scope != "runtime":
-        return {"config": cfg.reset(), "needs_rebuild": True}
+        return {"config": cfg.reset(source="reset:all"), "needs_rebuild": True}
     old = cfg.snapshot()
     keep = STRUCTURAL | BANK_KEYS | {("hospital", "template"), ("hospital", "layout_file")}
-    cfg.reset()
+    cfg.reset(source="reset:runtime")
     patch: dict = {}
     for path in keep:
         cur = old
@@ -175,7 +227,7 @@ async def reset_config(body: dict | None = None):
         for k in path[:-1]:
             d = d.setdefault(k, {})
         d[path[-1]] = cur
-    new = cfg.update(patch)
+    new = cfg.update(patch, source="reset:runtime")
     with e.world.lock:
         e.world.apply_config()
     return {"config": new, "needs_rebuild": False, "kept": [".".join(p) for p in keep]}
