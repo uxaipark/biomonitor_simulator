@@ -1,0 +1,31 @@
+{
+ "name": "patch_lifecycle",
+ "description": "패치 수명주기: 리드오프 → 교체 → MRI(제거·신규 패치) → 퇴원 → 입원",
+ "items": [
+  {
+   "at": 0,
+   "what": "lead_off",
+   "note": "무작위 환자 리드오프 60초"
+  },
+  {
+   "at": 70,
+   "what": "replace_patch",
+   "note": "무작위 환자 패치 교체(새 시리얼)"
+  },
+  {
+   "at": 90,
+   "what": "exam",
+   "note": "MRI 이동: 패치 제거 후 새 패치로 복귀"
+  },
+  {
+   "at": 400,
+   "what": "discharge",
+   "note": "무작위 퇴원(패치 반납)"
+  },
+  {
+   "at": 420,
+   "what": "admit",
+   "note": "신규 입원(새 환자번호·패치)"
+  }
+ ]
+}

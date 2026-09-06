@@ -1,0 +1,62 @@
+{
+ "name": "storm_drill",
+ "description": "라우터 접속/복구 내구성: 정답 캡처 → 네트워크 이벤트 → 연결 폭주 → 반열림 → gw_id 중복 → 장애/교체 → 캡처 종료",
+ "items": [
+  {
+   "at": 0,
+   "what": "capture",
+   "params": {
+    "enabled": true
+   },
+   "note": "정답 캡처 시작"
+  },
+  {
+   "at": 5,
+   "what": "network_event",
+   "note": "한 층 네트워크 장애(저장 후 전송 버퍼 적재)"
+  },
+  {
+   "at": 40,
+   "what": "storm",
+   "params": {
+    "duration": 20
+   },
+   "note": "전체 게이트웨이 동시 재접속"
+  },
+  {
+   "at": 80,
+   "what": "half_open",
+   "params": {
+    "count": 5,
+    "duration": 60
+   },
+   "note": "5대 반열림"
+  },
+  {
+   "at": 100,
+   "what": "dup_id",
+   "params": {
+    "duration": 60
+   },
+   "note": "gw_id 중복"
+  },
+  {
+   "at": 150,
+   "what": "gateway_fault",
+   "note": "무작위 게이트웨이 장애 90초"
+  },
+  {
+   "at": 200,
+   "what": "gateway_replace",
+   "note": "하드웨어 고장 → 30초 후 새 번호로 교체"
+  },
+  {
+   "at": 300,
+   "what": "capture",
+   "params": {
+    "enabled": false
+   },
+   "note": "정답 캡처 종료"
+  }
+ ]
+}

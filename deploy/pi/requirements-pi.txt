@@ -1,0 +1,6 @@
+# Raspberry Pi (64-bit Raspberry Pi OS Bookworm/Bullseye, Python 3.11+).  All four have wheels on piwheels.org,
+# so `pip install -r` needs no compiler.  Same packages as ../../requirements.txt, pinned to ranges known to work.
+numpy>=1.24,<3
+fastapi>=0.100,<1
+uvicorn[standard]>=0.23,<1
+python-avatars>=1.4

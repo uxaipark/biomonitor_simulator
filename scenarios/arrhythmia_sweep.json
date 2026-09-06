@@ -1,0 +1,23 @@
+{
+ "name": "arrhythmia_sweep",
+ "description": "부정맥 에피소드 연속 주입 후 심실세동",
+ "items": [
+  {
+   "at": 0,
+   "what": "episode"
+  },
+  {
+   "at": 30,
+   "what": "episode"
+  },
+  {
+   "at": 60,
+   "what": "episode"
+  },
+  {
+   "at": 120,
+   "what": "vfib",
+   "note": "심실세동 120초"
+  }
+ ]
+}

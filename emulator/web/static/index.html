@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f141a">
+<title>Bio-Signal Emulator</title>
+<link rel="stylesheet" href="/static/style.css">
+<script>try{var t=localStorage.getItem("theme");if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t;}catch(e){}</script>
+</head>
+<body>
+<div id="top">
+<header>
+  <h1>🫀 Bio-Signal Emulator</h1>
+  <span class="spacer"></span>
+  <button id="btnTheme" title="테마 전환">🌙</button>
+  <button id="btnStart" class="primary">▶ 시작</button>
+  <button id="btnStop" class="danger">■ 정지</button>
+</header>
+<select id="tabSelect"></select>
+<div class="status" id="statusStrip">
+  <span id="runPill" class="pill"><span class="dot"></span><span id="runTxt">정지</span></span>
+  <span class="pill hide-sm" id="pillPat">환자 -</span>
+  <span class="pill hide-sm" id="pillRate">0 pkt/s</span>
+  <span class="pill" id="pillNet" title="네트워크 장애 시나리오"><span class="dot"></span>NET 장애 OFF</span>
+  <span class="pill" id="pillArt" title="아티팩트 시나리오"><span class="dot"></span>아티팩트 OFF</span>
+  <span class="pill" id="pillGwf" title="게이트웨이 장애 시나리오"><span class="dot"></span>GW 장애 OFF</span>
+  <span class="pill" id="pillErrPkt" title="오류 패킷 = 시나리오 손실 + 송신 백로그 드롭 + 전송 오류 (누적)">오류 pkt 0</span>
+  <span class="pill" id="pillNoConn" title="라우터에 TCP 연결이 없어 버려진 프레임 (누적)" hidden>라우터 미연결</span>
+  <span class="pill" id="pillErrGw" title="오류 게이트웨이 = 장애 + 성능저하">오류 GW 0</span>
+</div>
+<nav class="tabs" id="tabs"></nav>
+</div>
+<main>
+
+<!-- ================= 대시보드 -->
+<section class="tab" data-tab="dash" data-title="대시보드">
+  <div class="grid">
+    <div class="card" style="grid-column:1/-1">
+      <h3>상태 <span class="right" id="dashTime"></span></h3>
+      <div class="kpis" id="kpis"></div>
+    </div>
+    <div class="card" style="grid-column:1/-1"><h3>전송률 (pkt/s)</h3><canvas class="spark" id="sparkPkts"></canvas>
+      <h3 style="margin-top:8px">데이터량 (KB/s)</h3><canvas class="spark" id="sparkBytes"></canvas></div>
+    <div class="card" style="grid-column:1/-1"><h3>최근 이벤트</h3><div class="events" id="dashEvents"></div></div>
+  </div>
+</section>
+
+<!-- ================= 신호 -->
+<section class="tab" data-tab="sig" data-title="신호">
+  <div class="card" style="margin-bottom:10px">
+        <h3>전송 데이터 선택 <span class="right">모든 환자·패치에 공통 적용</span></h3>
+        <div class="help">여기서 체크된 채널 중 환자가 착용한 기기가 제공하는 채널만 패킷에 담겨 전송됩니다. 아래 파형 미리보기도 같은 규칙을 따릅니다.</div>
+        <div class="chips" id="chanChips"></div>
+        <div class="row" style="margin-top:8px">
+          <div class="field"><span>호흡수 소스 (ECG 패치)</span><select id="selRespSrc"></select></div>
+          <div class="field"><span>ECG 샘플링</span><select id="selEcgFs"><option value="250">250 Hz</option><option value="500">500 Hz</option></select></div>
+          <div class="field"><span>환자별 기기 세트</span><div class="sub" style="min-height:44px;display:flex;align-items:center" id="devPolicyNote">SpO2 센서·체온 패치·CGM 장착 여부는 환자마다 다릅니다. 실제 전송 채널 = 위 선택 ∩ 환자 기기 채널. 정책은 [시나리오] 탭에서.</div></div>
+        </div>
+  </div>
+  <div class="two">
+    <div>
+      <div class="card">
+        <h3>환자 실시간 신호</h3>
+        <div class="row" style="margin-bottom:8px">
+          <div class="field" style="flex:2;margin-bottom:0"><span>환자 선택 (입원/MCOT)</span><select id="selPatient"></select></div>
+          <div class="field" style="margin-bottom:0"><span>검색</span><input type="text" id="patSearch" placeholder="이름/병상/MRN"></div>
+        </div>
+        <div class="wavebox"><canvas class="wave" id="wEcg"></canvas><span class="lbl" id="ecgLbl">ECG (mV)</span><span class="lbl" style="left:auto;right:8px;top:26px;font-size:10px" id="ecgLegend"></span><span class="val" id="vHr" style="color:var(--ecg)"></span></div>
+        <div class="wavebox" id="boxPpg"><canvas class="wave" id="wPpg"></canvas><span class="lbl">PPG</span><span class="val" id="vSpo2" style="color:var(--ppg)"></span></div>
+        <div class="wavebox" id="boxResp"><canvas class="wave" id="wResp"></canvas><span class="lbl">호흡 파형</span><span class="val" id="vResp" style="color:var(--resp)"></span></div>
+        <div class="wavebox" id="boxAcc"><canvas class="wave" id="wAcc"></canvas><span class="lbl">가속도 X/Y/Z (g)</span></div>
+        <div class="nums">
+          <div class="num hr"><div class="v" id="nHr">--</div><div class="l">HR bpm</div></div>
+          <div class="num spo2"><div class="v" id="nSpo2">--</div><div class="l">SpO2 %</div></div>
+          <div class="num resp"><div class="v" id="nResp">--</div><div class="l">RR /min</div></div>
+          <div class="num temp"><div class="v" id="nTemp">--</div><div class="l">체온 °C</div></div>
+          <div class="num gl"><div class="v" id="nGl">--</div><div class="l">혈당 mg/dL</div></div>
+          <button class="num expand" id="btnTrend" title="추세 그래프 펼치기/접기"><span class="v">⌄</span><span class="l">추세</span></button>
+        </div>
+        <div id="trendPanel" hidden>
+          <div class="row tight" style="margin:10px 0 6px;align-items:center">
+            <span class="sub">추세 기간</span>
+            <div class="seg" id="trendDays"><button data-days="1" class="on">1일</button><button data-days="2">2일</button><button data-days="3">3일</button></div>
+            <span class="sub" id="trendNote" style="flex:1;text-align:right"></span>
+          </div>
+          <div class="trends">
+            <div class="trend"><div class="tl">HR <small>bpm</small><b id="tHrRange"></b></div><canvas id="tHr"></canvas></div>
+            <div class="trend"><div class="tl">SpO2 <small>%</small><b id="tSpo2Range"></b></div><canvas id="tSpo2"></canvas></div>
+            <div class="trend"><div class="tl">RR <small>/min</small><b id="tRespRange"></b></div><canvas id="tResp"></canvas></div>
+            <div class="trend"><div class="tl">체온 <small>°C</small><b id="tTempRange"></b></div><canvas id="tTemp"></canvas></div>
+            <div class="trend"><div class="tl">혈당 <small>mg/dL</small><b id="tGlRange"></b></div><canvas id="tGl"></canvas></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:10px"><h3>이 환자에게 이벤트 주입</h3>
+        <div class="switches">
+          <label class="sw" data-trig="lead_off" data-off="lead_off_off"><input type="checkbox"><span class="track"></span><span class="txt">리드 오프 <small>60초</small></span><span class="rem"></span></label>
+          <label class="sw" data-trig="episode" data-off="episode_off"><input type="checkbox"><span class="track"></span><span class="txt">부정맥 에피소드 <small>180초</small></span><span class="rem"></span></label>
+          <label class="sw" data-trig="vfib" data-off="episode_off"><input type="checkbox"><span class="track"></span><span class="txt">심실세동 (VFib) <small>120초</small></span><span class="rem"></span></label>
+          <label class="sw" data-trig="exam" data-off="exam_off"><input type="checkbox"><span class="track"></span><span class="txt">MRI 검사 이동 <small>이동 중 핸드오버·음영, 촬영 중 패치 분리, 종료 후 새 패치</small></span><span class="rem"></span></label>
+          <button class="sw act" data-trig="replace_patch"><span class="ico">⟳</span><span class="txt">패치 교체 <small>새 시리얼·배터리 100%</small></span></button>
+          <button class="sw act" data-trig="discharge"><span class="ico">⏏</span><span class="txt">퇴원 <small>패치 반납·전원 OFF</small></span></button>
+        </div>
+        <div class="help">스위치는 지속시간이 끝나면 자동으로 풀립니다. 시뮬 속도가 1이 아니면 실제 시간은 그 배율만큼 달라집니다.</div>
+      </div>
+    </div>
+    <div>
+      <div class="card" id="patCard"><h3>환자 정보</h3><div id="patInfo" class="sub">환자를 선택하세요</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 환자 -->
+<section class="tab" data-tab="pat" data-title="환자">
+  <div class="two">
+    <div class="card">
+      <h3>환자 목록 <span class="right" id="patCount"></span></h3>
+      <div class="row">
+        <div class="field"><span>상태</span><select id="patStatus"><option value="admitted">입원/MCOT (모니터링 중)</option><option value="pool">대기 프로필</option><option value="discharged">퇴원</option><option value="all">전체 (1만명)</option></select></div>
+        <div class="field" style="flex:2"><span>검색</span><input type="text" id="patQ" placeholder="이름, 환자번호, MRN, 질환, 리듬(심방세동/afib), 병동(6A), 진료과(심장내과), 패치, 병상, 게이트웨이"></div>
+      </div>
+      <div class="plist">
+        <div class="phead" id="patHead">
+          <div><button data-sort="name">이름</button> · <button data-sort="patient_no">환자번호</button> · <button data-sort="id">프로필</button></div>
+          <div><button data-sort="disease">질환</button> · <button data-sort="rhythm_label">리듬</button></div>
+          <div><button data-sort="bed">병상</button> · <button data-sort="ward">병동</button> · <button data-sort="specialty">진료과</button> · <button data-sort="gateway">GW</button></div>
+          <div><button data-sort="patch_id">패치ID</button> · <button data-sort="devn">기기</button></div>
+          <div><button data-sort="activity">활동</button> · <button data-sort="battery">배터리</button> · <button data-sort="rssi">RSSI</button></div>
+        </div>
+        <div id="patBody"></div>
+      </div>
+      <div class="pager" id="patPager"></div>
+    </div>
+    <div class="card" id="patDetail"><h3>환자 상세</h3><div class="sub">목록에서 환자를 선택하세요</div></div>
+  </div>
+</section>
+
+<!-- ================= 병원 -->
+<section class="tab" data-tab="hosp" data-title="병원">
+  <div class="card hospctl">
+    <div class="row">
+      <div class="field" style="flex:1.4"><span>검색 (환자 이름 · 게이트웨이 번호/ID)</span><input type="text" id="mapQ" placeholder="예: 김영수, #121, GW-101-0005"><div class="dd-menu mapres" id="mapRes"></div></div>
+      <div class="field"><span>건물 · 층</span><select id="selFloor"></select></div>
+      <div class="field"><span>표시</span><select id="mapMode"><option value="patients">환자 + 게이트웨이 + 설비</option><option value="gw">게이트웨이 상태</option><option value="coverage">게이트웨이 음영지역</option><option value="plan">도면만</option></select></div>
+    </div>
+  </div>
+  <div class="planrow">
+    <div class="card planmain">
+      <h3>건축 도면 <span class="right" id="hospTitle"></span></h3>
+      <div class="planwrap"><svg id="floorMap" class="plan" preserveAspectRatio="xMidYMid meet"></svg></div>
+      <div class="sub legend" id="mapLegend"></div>
+    </div>
+    <div class="card planside">
+      <h3>건물 측면도 <span class="right sub">층을 누르면 도면 표시</span></h3>
+      <div class="elevwrap"><svg id="elevation" class="elev" preserveAspectRatio="xMidYMin meet"></svg></div>
+      <div class="sub" id="elevInfo"></div>
+      <div class="row tight jsonrow"><span class="sub">도면 JSON</span><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><button class="small" id="btnLayoutReset">템플릿 재생성</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:10px">
+    <h3><button class="fold" data-fold="tripBody" aria-expanded="true">▾</button>이동 중 환자 <span class="sub" id="tripSummary"></span></h3>
+    <div class="tbl" id="tripBody" style="max-height:48vh"><div class="troom" id="tripRooms"></div><table id="tripTable"><thead><tr><th data-key="name">환자</th><th>이동</th><th data-key="stage">현재 단계</th><th data-key="location_name">위치</th><th data-key="gateway">게이트웨이</th><th>진행</th><th>타임테이블 (현재 → 예정)</th><th>다음 예정 검사</th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="card" style="margin-top:10px">
+    <h3><button class="fold" data-fold="gwBody" aria-expanded="true">▾</button>게이트웨이 <span class="sub" id="gwSummary"></span><span class="right"><select id="gwFilter" style="min-height:32px;padding:4px 8px;width:auto"><option value="all">전체</option><option value="down">장애</option><option value="degraded">성능저하</option><option value="busy">연결 있음</option><option value="mobile">모바일(MCOT)</option></select></span></h3>
+    <div class="tbl" id="gwBody"><table id="gwTable"><thead><tr><th data-key="gw_no">ID (번호)</th><th data-key="type">유형</th><th data-key="loc">위치</th><th data-key="status">상태</th><th data-key="n_conn">연결</th><th data-key="cpu">CPU</th><th data-key="mem">MEM</th><th data-key="net">NET</th><th data-key="wan_rssi">WAN</th><th data-key="loss">손실</th><th data-key="latency_ms">지연</th><th data-key="pkts">pkts</th><th data-key="connected">TCP</th><th></th></tr></thead><tbody></tbody></table></div>
+  </div>
+  <div class="card" style="margin-top:10px"><h3><button class="fold" data-fold="wardBody" aria-expanded="true">▾</button>병동 <span class="sub" id="wardCount"></span></h3><div class="tbl" id="wardBody" style="max-height:40vh"><table id="wardTable"><thead><tr><th>병동</th><th>진료과</th><th>위치</th><th>병상</th><th>재원</th></tr></thead><tbody></tbody></table></div></div>
+</section>
+
+<!-- ================= 시나리오 -->
+<section class="tab" data-tab="scn" data-title="시나리오">
+  <div class="grid">
+    <div class="card"><h3>규모 / 환자</h3>
+      <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="2000" step="1"><output id="g_active_o"></output></div></div>
+      <div class="presets" id="activePresets"></div>
+      <div class="field"><span>원외 MCOT 환자 수</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
+      <div class="presets" id="outPresets"></div>
+      <div class="field"><span>장소 시나리오</span><select id="s_site"><option value="hospital">병원 내 연속 모니터링 (BLE 패치 + 게이트웨이)</option><option value="mcot">원외 MCOT (모바일 게이트웨이)</option><option value="mixed">혼합</option></select></div>
+      <div class="row"><div class="field"><span>시간당 신규 입원 (명/h)</span><input type="number" id="g_adm" min="0" max="500"></div><div class="field"><span>시간당 퇴원 (명/h)</span><input type="number" id="g_dis" min="0" max="500"></div><div class="field"><span>시뮬 속도 ×</span><input type="number" id="g_speed" min="0.1" max="1000" step="0.1"></div></div>
+      <div class="help">입원/퇴원 회전율: 시뮬레이션 1시간당 무작위(포아송)로 발생하는 신규 입원·퇴원 건수입니다. 총 인원은 위의 목표치 ±5명 안에서 유지되며, 퇴원한 환자의 패치는 전원 OFF·반납되고 신규 입원자는 대기 프로필에서 새 패치를 받습니다. 시뮬 속도를 올리면 배터리 소모·입퇴원·검사 일정이 같은 배율로 빨라집니다.</div>
+      <label class="chk"><input type="checkbox" id="s_ep"> 자연 발생 부정맥 에피소드 (기저 리듬 위 발작성 리듬 전환)</label>
+      <label class="chk"><input type="checkbox" id="s_hop"> 루프 변형 순환 (8~25분마다 같은 리듬의 다른 변형으로 전환해 1시간 반복 방지)</label>
+      <div class="row tight"><button class="small" data-trig="episode">임의 환자 부정맥 에피소드</button></div>
+      <div class="help">병상 수·시드 등 구조 설정은 [전송] 탭의 고급 설정에서 재구성합니다.</div>
+    </div>
+    <div class="card"><h3>기기 세트 (환자별 채널)</h3>
+      <div class="field"><span>배정 정책</span><select id="s_devpol"><option value="auto">증상 맞춤 (질환·병동·재원 형태별 자동)</option><option value="all">전체 장착 (ECG+체온+SpO2+CGM)</option><option value="minimal">ECG 패치만</option></select></div>
+      <div class="help">신규 입원자는 이 정책으로 기기를 받습니다. 이미 입원한 환자에게 적용하려면 아래 버튼을 누르세요. 증상 맞춤: 호흡기·감염·심부전·심장수술·수면무호흡 환자는 SpO2 92%, 발열·수술·종양 병동은 체온 패치 95%, 당뇨는 CGM 95%, 원외 환자는 반지형/손목 SpO2.</div>
+      <div class="field"><span>SpO2 센서 종류 비율 (합계 기준 정규화, 원외 환자는 손끝 제외)</span>
+        <div class="row"><div class="field" style="margin:0"><span>손끝 %</span><input type="number" id="d_mf" min="0" max="100"></div><div class="field" style="margin:0"><span>반지형 %</span><input type="number" id="d_mr" min="0" max="100"></div><div class="field" style="margin:0"><span>손목 밴드 %</span><input type="number" id="d_mw" min="0" max="100"></div></div>
+        <div class="sub" id="d_mixNote"></div></div>
+      <div class="row tight"><button id="btnDevApply" class="small primary">입원 환자 전체에 일괄 적용</button></div>
+      <div id="devStats" class="sub" style="margin-top:8px"></div>
+    </div>
+    <div class="card"><h3>네트워크 장애</h3>
+      <label class="chk"><input type="checkbox" id="n_en"> 시나리오 사용 <small class="sub">(기본: 무장애)</small></label>
+      <div class="field"><span>강도</span><div class="rv"><input type="range" id="n_int" min="0" max="100"><output id="n_int_o"></output></div></div>
+      <label class="chk"><input type="checkbox" id="n_wl"> 무선 노이즈 → 신호 저하/손실</label>
+      <label class="chk"><input type="checkbox" id="n_wd"> 유선 네트워크 장애 (층 단위)</label>
+      <label class="chk"><input type="checkbox" id="n_lat"> 네트워크 지연</label>
+      <label class="chk"><input type="checkbox" id="n_pw"> 순간 정전 (게이트웨이 리부팅)</label>
+      <button class="small" data-trig="network_event">지금 네트워크 이벤트 주입</button>
+    </div>
+    <div class="card"><h3>아티팩트 / 환자 활동</h3>
+      <label class="chk"><input type="checkbox" id="a_en"> 시나리오 사용</label>
+      <div class="field"><span>강도</span><div class="rv"><input type="range" id="a_int" min="0" max="100"><output id="a_int_o"></output></div></div>
+      <label class="chk"><input type="checkbox" id="a_mo"> 움직임/뒤척임/보행/화장실 (motion artifact)</label>
+      <label class="chk"><input type="checkbox" id="a_sh"> 샤워 (SpO2 센서 분리, 강한 노이즈)</label>
+      <label class="chk"><input type="checkbox" id="a_ex"> 검사 이동 (복도·엘리베이터 핸드오버/음영, 패치 유지; MRI만 촬영 중 분리 후 새 패치로 교체)</label>
+      <div class="field"><span>이동 중 환자 비율 (%) · 재원 환자 중 항상 이 비율이 병실 밖 이동 중 (검사실·외래 진료실·투석실·초음파실·편의점/카페·환자휴게실·가족실·약국·원무과) · 아티팩트 OFF여도 적용 · 병원 탭 이동 중 환자 목록/도면에 표시</span><div class="rv"><input type="range" id="x_ratio" min="0" max="20" step="0.5"><output id="x_ratio_o"></output></div></div>
+      <label class="chk"><input type="checkbox" id="a_re"> 패치 분리/재부착</label>
+      <label class="chk"><input type="checkbox" id="a_tr"> 병실 이동/타병원 전원 (패치 교체)</label>
+      <label class="chk"><input type="checkbox" id="a_rp"> 배터리 소진 시 패치 교체</label>
+      <label class="chk"><input type="checkbox" id="a_hm"> 원외: 전파 간섭, 음영, 모바일 GW 방전</label>
+      <div class="row tight"><button class="small" data-trig="exam">임의 환자 MRI 이동</button></div>
+    </div>
+    <div class="card"><h3>패치 (웨어러블 BLE)</h3>
+      <div class="row"><div class="field"><span>패치 배터리 수명 (일)</span><input type="number" id="p_days" min="0.01" max="30" step="0.5"></div><div class="field"><span>교체 기준 (%)</span><input type="number" id="p_rep" min="0" max="50"></div></div>
+      <label class="chk"><input type="checkbox" id="p_dr"> 배터리 감소 시뮬레이션 (입원 시간에 따라 소모, 기준 이하 시 교체)</label>
+      <label class="chk"><input type="checkbox" id="p_lo"> 리드 오프 이벤트 (전극 분리, 자연 발생)</label>
+      <div class="row tight"><button class="small" data-trig="lead_off">임의 리드 오프 60s</button><button class="small" data-trig="replace_patch">임의 패치 교체</button></div>
+    </div>
+    <div class="card"><h3>게이트웨이 장애</h3>
+      <label class="chk"><input type="checkbox" id="gw_f"> 시나리오 사용</label>
+      <div class="field"><span>강도</span><div class="rv"><input type="range" id="gw_int" min="0" max="100"><output id="gw_int_o"></output></div></div>
+      <label class="chk"><input type="checkbox" id="gw_out"> 무응답 장애 → 연결 패치 동시 끊김, 인접 게이트웨이로 재접속 (용량 이내), 복구 시 자동 복귀</label>
+      <label class="chk"><input type="checkbox" id="gw_deg"> 성능 저하 → CPU 과부하, 패킷 손실, 지연 증가</label>
+      <label class="chk"><input type="checkbox" id="gw_rep"> 하드웨어 고장 → 교체 대기(5~25분) 후 새 게이트웨이 번호·MAC의 장비로 교체, 새 장비로 라우터 재접속(META 재전송)</label>
+      <div class="help">병실·복도·엘리베이터·계단·검사실·화장실 게이트웨이(최대 32 BLE 연결)에 무작위로 발생합니다. 장애가 켜지면 상단에 GW 장애 ON으로 표시됩니다.</div>
+      <div class="row tight"><button class="small" data-trig="gateway_fault">임의 게이트웨이 장애 90s</button><button class="small" data-trig="gateway_replace">임의 게이트웨이 고장→30초 후 교체</button></div>
+    </div>
+    <div class="card"><h3>파라미터 초기화 <span class="right sub">템플릿(도면)·루프 은행은 그대로</span></h3>
+      <div class="help">환자 수, 시나리오(네트워크·아티팩트·패치·게이트웨이), 기기 세트, 전송 설정, 드릴 설정을 모두 기본값으로 되돌립니다. 병원 도면과 루프 파일은 재생성하지 않습니다.</div>
+      <div class="row tight"><button class="small" id="btnResetRuntime">전체 파라미터 초기화…</button></div>
+    </div>
+    <div class="card"><h3>라우터 테스트 드릴 (전송 계층)</h3>
+      <div class="help">라우터 서버의 파서·접속 처리 내구성을 검증하는 이벤트입니다. 저장 후 전송, 오염 프레임, 정답 캡처는 전송 탭에서 설정합니다.</div>
+      <div class="row tight"><button class="small" data-trig="storm" data-params='{"duration":20}'>연결 폭주 (전체 동시 재접속 20s)</button><button class="small" data-trig="half_open" data-params='{"count":5,"duration":60}'>반열림 연결 5대 60s</button><button class="small" data-trig="dup_id" data-params='{"duration":60}'>gw_id 중복 60s</button><button class="small" data-trig="network_event">네트워크 이벤트 1회</button></div>
+      <h3 style="margin-top:10px">시나리오 스크립트</h3>
+      <div class="row"><div class="field" style="flex:2"><span>스크립트 파일 (scenarios/*.json)</span><select id="scriptFile"></select></div><div class="field"><span>&nbsp;</span><div class="row tight"><button class="small" id="scriptStart">시작</button><button class="small" id="scriptStop">중지</button></div></div></div>
+      <div class="sub" id="scriptStatus">스크립트 없음</div>
+      <div class="sub mono" id="scriptLog" style="font-size:11px;max-height:120px;overflow:auto"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 전송 -->
+<section class="tab" data-tab="tx" data-title="전송">
+  <div class="grid">
+    <div class="card"><h3>라우터 서버 (대상)</h3>
+      <div class="row"><div class="field" style="flex:2"><span>서버 IP (비우면 생성만 수행)</span><input type="text" id="t_ip" placeholder="예: 192.168.0.10"></div><div class="field"><span>포트</span><input type="number" id="t_port" min="1" max="65535"></div></div>
+      <div class="row"><div class="field"><span>소켓 모드</span><select id="t_mode"><option value="per_gateway">게이트웨이당 1 소켓 (현실)</option><option value="shared">워커당 1 소켓 (다중화)</option></select></div>
+        <div class="field"><span>번들 주기 (ms)</span><input type="number" id="t_bundle" min="50" max="2000" step="50"></div></div>
+      <div class="row"><div class="field"><span>META 전송 주기 (프레임)</span><input type="number" id="t_meta" min="1" max="1000"></div><div class="field"><span>GW 상태 주기 (프레임)</span><input type="number" id="t_gws" min="1" max="1000"></div></div>
+      <div class="row"><div class="field"><span>워커 프로세스 (0=자동)</span><input type="number" id="t_workers" min="0" max="16"></div><div class="field"><span>송신 백로그 한도 (bytes)</span><input type="number" id="t_backlog" min="4096" step="4096"></div></div>
+      <div class="field"><span>라우터 상태 URL (선택, 2단계)</span><input type="text" id="t_router" placeholder="http://router:9000/status"></div>
+      <div class="help">전송 설정은 즉시 반영됩니다 (워커가 소켓을 재연결).</div>
+      <h3 style="margin-top:10px">라우터 테스트 드릴</h3>
+      <label class="chk"><input type="checkbox" id="sf_en"> 저장 후 전송 (게이트웨이 장애·회선 단절 중 프레임을 로컬 버퍼에 보관, 복구 시 과거 타임스탬프 프레임을 버스트로 재전송)</label>
+      <div class="row"><div class="field"><span>게이트웨이별 버퍼 한도 (bytes)</span><input type="number" id="sf_max" min="65536" step="65536"></div><div class="field"><span>재전송 버스트 (프레임/주기)</span><input type="number" id="sf_burst" min="1" max="1000"></div></div>
+      <label class="chk"><input type="checkbox" id="fz_en"> 오염 프레임 주입 (파서 퍼징: bad_magic·bad_version·bad_len·truncated·oversize·garbage·dup·reorder·seq_gap·bad_record)</label>
+      <div class="row"><div class="field"><span>주입 비율 (프레임 1000개당)</span><input type="number" id="fz_rate" min="0" max="1000" step="0.5"></div><div class="field" style="flex:2"><span>종류 (쉼표 구분, 비우면 전체)</span><input type="text" id="fz_kinds" placeholder="bad_magic,truncated,dup"></div></div>
+      <label class="chk"><input type="checkbox" id="t_storm"> 재접속 완만화 (끄면 모든 게이트웨이가 동시에 재접속 → 상시 연결 폭주)</label>
+      <div class="row tight" style="align-items:center"><label class="chk" style="margin:0"><input type="checkbox" id="cap_en"> 정답 데이터 캡처 (소켓에 보낸 원본 바이트를 data/runtime/capture/w*.bin 에 기록, 라우터 대상 IP가 있을 때만)</label><button class="small" id="capClear">캡처 파일 삭제</button><span class="sub" id="capInfo"></span></div>
+      <div class="help">검증: <code>python tools/receiver.py --port 9100 --strict --save-frames recv/</code> 로 받고 <code>python tools/verify_capture.py --capture data/runtime/capture --received recv/</code> 로 대조합니다.</div>
+    </div>
+    <div class="card"><h3>전송 통계</h3><div class="kpis" id="txKpis"></div>
+      <h3 style="margin-top:10px">워커</h3><div class="tbl" style="max-height:30vh"><table id="wTable"><thead><tr><th>#</th><th>alive</th><th>패치</th><th>GW</th><th>ticks</th><th>overrun</th><th>build µs</th><th>send µs</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card"><h3>자동 최적화 (최대 수용 채널 탐색)</h3>
+      <div class="help">전송 중 환자 수를 단계적으로 늘리며 틱 오버런·백로그 드롭·처리시간(번들의 70%)을 감시해 안정적으로 수용 가능한 최대 채널 수를 찾습니다.</div>
+      <div class="row"><div class="field"><span>증가 폭</span><input type="number" id="at_step" value="100" min="5"></div><div class="field"><span>관찰 시간 (s)</span><input type="number" id="at_win" value="12" min="5"></div></div>
+      <div class="row tight"><button id="btnAtStart" class="small primary">최적화 시작</button><button id="btnAtStop" class="small">중지</button></div>
+      <div id="atInfo" class="sub" style="margin-top:8px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 데이터 -->
+<section class="tab" data-tab="data" data-title="데이터">
+  <div class="card" style="margin-bottom:10px"><h3><button class="fold" data-fold="regBody" aria-expanded="true">▾</button>패치 레지스트리 <span class="right" id="regCount"></span></h3><div id="regBody">
+    <div class="help">에뮬레이터가 발급한 모든 웨어러블 패치의 이력입니다. 시리얼·patch_id는 단조 증가하며 재사용되지 않고, 교체·퇴원·MRI로 떼어낸 패치는 "사용 완료"로 남습니다.</div>
+    <div class="row"><div class="field"><span>상태</span><select id="regStatus"><option value="all">전체</option><option value="active">사용 중</option><option value="retired">사용 완료</option></select></div><div class="field" style="flex:2"><span>검색 (시리얼/환자)</span><input type="text" id="regQ" placeholder="BP-000123, 이름, 환자 ID"></div></div>
+    <div class="tbl" style="max-height:45vh"><table id="regTable"><thead><tr><th data-key="serial">시리얼</th><th data-key="patch_id">patch_id</th><th data-key="status">상태</th><th data-key="patient_name">환자</th><th data-key="issued_at">발급</th><th data-key="issued_reason">발급 사유</th><th data-key="retired_at">종료</th><th data-key="retired_reason">종료 사유</th><th data-key="battery">배터리</th></tr></thead><tbody></tbody></table></div>
+    <div class="row" style="margin-top:8px"><button id="regPrev" class="small">◀ 이전</button><button id="regNext" class="small">다음 ▶</button></div></div>
+  </div>
+  <div class="card" style="margin-bottom:10px"><h3><button class="fold" data-fold="dbBody" aria-expanded="true">▾</button>SQLite DB <span class="right mono" id="dbPath"></span></h3><div id="dbBody">
+    <div class="help">환자 프로필·입퇴원·패치 레지스트리·패치 이벤트·검사 일정·이벤트 로그·전송 실행 기록을 저장합니다. 같은 구조 설정(시드·병상·프로필 수)이면 재시작 후에도 이력이 유지되고 패치 번호가 이어집니다. 구조 설정을 바꿔 재구성하면 새로 시작합니다.</div>
+    <div class="kpis" id="dbKpis"></div>
+    <div class="field" style="margin-top:8px"><span>읽기 전용 SQL (SELECT)</span><div class="row"><input type="text" id="dbSql" class="mono" value="SELECT serial, patient_name, status, issued_reason, retired_reason FROM patches ORDER BY patch_id DESC" style="flex:4"><button id="dbRun" class="small primary" style="flex:0 0 auto">실행</button></div></div>
+    <div class="sub" id="dbMsg"></div>
+    <div class="tbl" style="max-height:40vh"><table id="dbTable"><thead></thead><tbody></tbody></table></div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h3><button class="fold" data-fold="bankBody" aria-expanded="true">▾</button>루프 파일 은행 (1시간 파형 데이터)</h3><div id="bankBody">
+      <div id="bankInfo2" class="sub"></div>
+      <div class="progress" style="margin:8px 0"><div id="bankBar2"></div></div>
+      <div class="help">모든 파형은 1시간 단위로 시작·끝이 이어지는 루프 파일에서 재생됩니다. 샘플링·변형 수·시드를 바꾸면 재생성이 필요하며, 생성 중에는 전송이 정지됩니다.</div>
+      <div id="bankFiles" class="sub mono" style="font-size:11px"></div>
+    </div></div>
+    <div class="card"><h3>구조 설정 (재구성 필요)</h3>
+      <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [병원·환자 재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
+      <div class="row"><div class="field"><span>병상 수 (=최대 패치)</span><input type="number" id="g_beds" min="1" max="5000"></div><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
+      <div class="row"><div class="field"><span>시드</span><input type="number" id="g_seed"></div><div class="field"><span>GW 최대 BLE 연결</span><input type="number" id="gw_cap" min="1" max="64"></div></div>
+      <div class="row"><div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div><div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div></div>
+      <div class="row"><div class="field"><span>리듬별 루프 변형 수</span><input type="number" id="s_vpr" min="1" max="200"></div><div class="field"><span>페이스메이커 비율(심장환자)</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div></div>
+      <div class="field"><span>병원 건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
+      <label class="chk"><input type="checkbox" id="h_size"> 병원 규모를 환자 수에 맞춤 (모니터링 환자 = 병상의 80 %, 건물 1~3동, 층수는 필요한 만큼만) · 끄면 병상 상한값 그대로 대형 병원</label>
+      <div class="row"><div class="field"><span>병상 여유율 (%)</span><input type="number" id="h_head" min="0" max="60" step="5"></div><div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div></div>
+      <div class="sub" id="hSizeInfo"></div>
+      <label class="chk"><input type="checkbox" id="gw_cor"> 복도/엘리베이터/계단 게이트웨이 설치</label>
+      <div class="row tight"><button id="btnRebuild" class="small">병원·환자 재구성</button><button id="btnGen2" class="small">루프 은행 재생성</button><button id="btnReset" class="small">기본값 복원</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 프로토콜 -->
+<section class="tab" data-tab="proto" data-title="프로토콜">
+  <div class="card" style="margin-bottom:10px"><h3>진입점 API <span class="right mono">GET /api/v1</span></h3>
+    <div class="help">라우터 서버는 이 문서를 먼저 읽고 EMR API로 병원 맵·환자·게이트웨이 정보를 받은 뒤 TCP 수신을 시작합니다. 에뮬레이터가 수정되면 이 문서가 함께 갱신되므로 라우터는 여기에 맞춰 코드를 수정할 수 있습니다.</div>
+    <ol class="steps" id="protoSteps"></ol>
+  </div>
+  <div class="grid wide proto" id="protoCards"></div>
+  <div class="card" style="margin-top:10px"><h3>채널 정의</h3><div class="tbl"><table id="protoChan"><thead><tr><th>ID</th><th>key</th><th>이름</th><th>단위</th><th>dtype</th><th>scale</th><th>fs</th><th>샘플/프레임</th><th>비고</th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card" style="margin-top:10px"><h3>엔드포인트</h3><div class="tbl"><table id="protoEp"><thead><tr><th>그룹</th><th>이름</th><th>경로</th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card" style="margin-top:10px"><details><summary>원본 JSON 보기</summary><pre id="protoRaw" class="mono"></pre></details></div>
+</section>
+
+<!-- ================= 로그 -->
+<section class="tab" data-tab="log" data-title="로그">
+  <div class="card"><h3>이벤트 로그 <span class="right"><select id="logFilter" style="min-height:32px;padding:4px 8px;width:auto"><option value="">전체</option><option value="adt">입퇴원</option><option value="patch">패치</option><option value="gateway">게이트웨이</option><option value="network">네트워크</option><option value="link">연결</option><option value="rhythm">리듬</option><option value="exam">검사</option><option value="autotune">최적화</option><option value="system">시스템</option><option value="error">오류</option></select></span></h3>
+    <div class="events" id="logEvents" style="max-height:75vh"></div></div>
+</section>
+<!-- ================= 시작 매뉴얼 -->
+<section class="tab" data-tab="guide" data-title="시작 매뉴얼">
+  <div class="guide-wrap">
+    <aside class="gtoc card">
+      <input type="text" id="gSearch" placeholder="매뉴얼 검색 (예: 라우터, 알람, 퍼징)">
+      <nav id="gToc"></nav>
+    </aside>
+    <div class="gbody">
+      <div class="card gsec" data-id="g101" data-title="101 · 처음 시작">
+        <h3>101 · 처음 시작 <span class="right sub">5분이면 첫 전송까지</span></h3>
+        <div class="gitem" id="g101-1"><h4>1. 시작 버튼</h4>
+          <figure><img src="/static/guide/dash_idle.jpg" alt="누르기 전: 상태 칩이 정지, 오른쪽 위에 초록색 ▶ 시작 버튼, pkt/s 0"><figcaption>① 누르기 전 · 상태 칩 <b>정지</b>, 오른쪽 위 초록색 <b>▶ 시작</b> 버튼, pkt/s 0</figcaption></figure>
+          <figure><img src="/static/guide/dash.jpg" alt="누른 후: 상태 칩이 실행 중으로 바뀌고 pkt/s가 올라갑니다"><figcaption>② 누른 후 · 상태 칩 <b>실행 중</b>, pkt/s가 올라가고 <b>■ 정지</b> 버튼이 빨간색으로 켜집니다</figcaption></figure>
+          <ol class="gsteps"><li>오른쪽 위 <span class="kbd">▶ 시작</span>을 누릅니다.</li><li>두 번째 줄 칩이 <i>실행 중</i>, pkt/s가 0보다 크면 성공입니다.</li><li><span class="kbd">■ 정지</span>를 누르면 파형 생성과 화면 갱신이 모두 멈춥니다.</li></ol>
+          <div class="gsub">처음이면 1시간 루프 파일이 먼저 만들어집니다(Pi4 5~10분). 대시보드에 진행률이 보입니다.</div></div>
+        <div class="gitem" id="g101-2"><h4>2. 시나리오 탭에서 규모 정하기 <button class="small" data-goto="scn">탭 열기</button></h4>
+          <figure><img src="/static/guide/scn.jpg" alt="맨 위 카드의 숫자 버튼이 환자 수 프리셋입니다"><figcaption>맨 위 카드의 숫자 버튼이 환자 수 프리셋입니다</figcaption></figure>
+          <ol class="gsteps"><li><i>모니터링 환자 수</i>: 50 · 100 · 200 · 500 · 1000 · 2000 중 하나를 누릅니다.</li><li><i>MCOT 환자 수</i>(원외): 10 · 50 · 100 · 200.</li><li>상단 칩 <i>환자 n / 패치 연결 n</i>으로 확인합니다. 바로 반영됩니다.</li></ol></div>
+        <div class="gitem" id="g101-3"><h4>3. 전송 탭에서 라우터 서버 붙이기 <button class="small" data-goto="tx">탭 열기</button></h4>
+          <figure><img src="/static/guide/tx.jpg" alt="서버 IP와 포트만 넣으면 워커가 바로 소켓을 엽니다"><figcaption>서버 IP와 포트만 넣으면 워커가 바로 소켓을 엽니다</figcaption></figure>
+          <ol class="gsteps"><li><i>서버 IP</i>와 <i>포트</i>(기본 9100)를 입력합니다. IP를 비우면 "생성만"(전송 없음).</li><li>라우터가 없으면 참고 수신기로 확인: <code>python tools/receiver.py --port 9100</code> 후 IP에 <code>127.0.0.1</code>.</li><li>전송 통계의 <i>백로그 드롭</i>·<i>미연결 드롭</i>이 0에 가까우면 정상입니다.</li></ol></div>
+        <div class="gitem" id="g101-4"><h4>4. 신호 탭 둘러보기 <button class="small" data-goto="sig">탭 열기</button></h4>
+          <figure><img src="/static/guide/sig.jpg" alt="환자를 고르면 ECG·호흡·가속도 파형과 수치가 실시간으로 흐릅니다"><figcaption>환자를 고르면 ECG·호흡·가속도 파형과 수치가 실시간으로 흐릅니다</figcaption></figure>
+          <ol class="gsteps"><li>환자 검색(이름·병상·MRN) 후 선택.</li><li>위쪽 동그란 체크는 <i>모든 환자</i>의 전송 채널 스위치입니다.</li><li>수치 카드 끝 ▸ 버튼: 1·2·3일 추세 그래프.</li></ol></div>
+        <div class="gitem" id="g101-5"><h4>5. 환자 탭 둘러보기 <button class="small" data-goto="pat">탭 열기</button></h4>
+          <figure><img src="/static/guide/pat.jpg" alt="왼쪽 목록(정렬·검색·10명씩), 오른쪽 상세"><figcaption>왼쪽 목록(정렬·검색·10명씩), 오른쪽 상세</figcaption></figure>
+          <ol class="gsteps"><li>열 이름 클릭 = 정렬, 검색은 이름·환자번호·리듬·병동·진료과·패치.</li><li>행을 누르면 오른쪽에 상세(페이스메이커·기기 세트·패치 이력).</li></ol></div>
+        <div class="gitem" id="g101-6"><h4>6. 병원 탭 둘러보기 <button class="small" data-goto="hosp">탭 열기</button></h4>
+          <figure><img src="/static/guide/hosp.jpg" alt="위: 검색·건물층·표시 모드 / 왼쪽: 도면 / 오른쪽: 측면도"><figcaption>위: 검색·건물층·표시 모드 / 왼쪽: 도면 / 오른쪽: 측면도</figcaption></figure>
+          <ol class="gsteps"><li>측면도의 층을 누르면 도면이 바뀝니다. 도면 클릭 = 확대, 드래그 = 이동.</li><li>환자 아이콘 → 신호 탭, <b>게이트웨이 아이콘 → 중앙 모니터</b>.</li><li>표시 모드 <i>게이트웨이 음영지역</i>은 전파 사각지대를 빗금으로 보여 줍니다.</li></ol></div>
+        <div class="gitem" id="g101-7"><h4>7. 중앙 모니터 열어 보기</h4>
+          <figure><img src="/static/guide/mon.jpg" alt="게이트웨이를 누르면 연결된 환자 전원의 파형·수치가 한 화면에"><figcaption>게이트웨이를 누르면 연결된 환자 전원의 파형·수치가 한 화면에</figcaption></figure>
+          <ol class="gsteps"><li>헤더 <i>Auto</i> 또는 n-up 드롭다운으로 격자를 고릅니다.</li><li>종 아이콘 = 알람 묵음 토글, ↻ = 다시 불러오기, Close = 닫기.</li><li>타일을 누르면 단일 침상 뷰어가 열립니다.</li></ol>
+          <figure><img src="/static/guide/bed.jpg" alt="단일 침상 뷰어: 큰 파형 3개, 수치 타일, 6시간 추세표, 이벤트"><figcaption>단일 침상 뷰어: 큰 파형 3개, 수치 타일, 6시간 추세표, 이벤트</figcaption></figure></div>
+        <div class="gitem" id="g101-8"><h4>8. 로그와 저장</h4>
+          <figure><img src="/static/guide/log.jpg" alt="입퇴원·리듬·패치·게이트웨이·네트워크 이벤트가 시간순으로 쌓입니다"><figcaption>입퇴원·리듬·패치·게이트웨이·네트워크 이벤트가 시간순으로 쌓입니다</figcaption></figure>
+          <ol class="gsteps"><li>설정은 바꾸는 즉시 저장됩니다(<code>data/config.json</code>).</li><li>☀️/🌙 버튼으로 테마 전환.</li></ol></div>
+      </div>
+
+      <div class="card gsec" data-id="g201" data-title="201 · 시나리오 조작">
+        <h3>201 · 시나리오 조작 <span class="right sub">장애·아티팩트·이벤트 주입</span></h3>
+        <div class="gitem" id="g201-1"><h4>시나리오 탭 카드 한눈에</h4>
+          <ol class="gsteps"><li><i>운영 형태</i> 병원/원외/혼합, <i>리듬 에피소드</i>(발작성 부정맥), <i>변형 순환</i>(시간 반복 방지).</li><li><i>기기 세트</i>: 증상별 자동 배정, SpO₂ 센서 비율.</li><li><i>네트워크 장애</i>·<i>아티팩트</i>·<i>패치</i>·<i>게이트웨이 장애</i> 카드: 체크 + 강도 슬라이더. 각 카드의 버튼은 즉시 1회 주입.</li></ol></div>
+        <div class="gitem" id="g201-2"><h4>특정 환자에게 이벤트 주입 (신호 탭)</h4>
+          <ol class="gsteps"><li>스위치 켜기 = 리드오프 60초 · 부정맥 180초 · 심실세동 120초 · MRI 이동(단계·남은 시간 표시).</li><li>시간이 끝나면 자동으로 풀리고, 끄면 즉시 취소됩니다.</li><li>패치 교체·퇴원 버튼도 같은 카드에 있습니다. MRI 후에는 패치 번호가 바뀝니다.</li></ol></div>
+        <div class="gitem" id="g201-3"><h4>중앙 모니터 알람 읽기</h4>
+          <ol class="gsteps"><li><b class="red">적색</b>: VFib · VT · 무수축 · 3도 차단 · SpO₂&lt;88 · HR&gt;150/&lt;40 · NIBP≥190/&lt;80 · 신호 없음.</li><li><b class="yel">황색</b>: AFib 등 리듬 · 리드오프 · 한계 이탈(HR 50–120, RR 8–30, SpO₂≥90, NIBP 90–160, 체온 &lt;38.3) · 배터리 ≤15 %.</li><li>12-up 이상은 수치가 2열 매트릭스로, 48 초과는 숫자 전용 보드로 바뀝니다.</li></ol></div>
+        <div class="gitem" id="g201-4"><h4>데이터 탭 <button class="small" data-goto="data">탭 열기</button></h4>
+          <figure><img src="/static/guide/data.jpg" alt="패치 레지스트리, SQLite 콘솔, 루프 은행, 구조 설정"><figcaption>패치 레지스트리, SQLite 콘솔, 루프 은행, 구조 설정</figcaption></figure>
+          <ol class="gsteps"><li><i>구조 설정</i>(병상 수·프로필·시드)은 바꾼 뒤 [병원·환자 재구성].</li><li><i>패치 레지스트리</i>: 발급된 모든 패치 이력, 열 정렬.</li><li><i>SQLite DB</i>: 읽기 전용 SQL. 예 <code>SELECT ward, COUNT(*) FROM admissions WHERE discharged_at IS NULL GROUP BY ward</code></li></ol></div>
+        <div class="gitem" id="g201-5"><h4>프로토콜 탭 <button class="small" data-goto="proto">탭 열기</button></h4>
+          <figure><img src="/static/guide/proto.jpg" alt="프레임 헤더·레코드·채널 블록 구조와 채널 ID"><figcaption>프레임 헤더·레코드·채널 블록 구조와 채널 ID</figcaption></figure>
+          <ol class="gsteps"><li>라우터는 이 문서와 <code>GET /api/v1</code>(디스커버리 JSON)을 기준으로 구현합니다.</li></ol></div>
+      </div>
+
+      <div class="card gsec" data-id="gtest" data-title="시나리오 테스트 항목">
+        <h3>시나리오 테스트 항목 <span class="right sub">각 항목의 [이 설정 적용]을 누르면 에뮬레이터가 그 환경으로 바뀝니다</span></h3>
+        <div class="gsub">적용 전에 라우터(또는 <code>tools/receiver.py --strict</code>)를 붙여 두면 결과를 바로 볼 수 있습니다. 끝나면 시나리오 탭의 <b>전체 파라미터 초기화</b>로 되돌립니다.</div>
+        <div class="gitem" id="t01"><h4>T-01 기본 병동 모니터링 (기준선) <button class="small apply" data-apply='{"general":{"active_patients":200,"outpatient_count":0},"scenario":{"site":"hospital","network":{"enabled":false},"artifacts":{"enabled":false},"gateway":{"fault_enabled":false},"patch":{"lead_off_enabled":false,"battery_drain_enabled":false}},"transport":{"fuzz":{"enabled":false}}}'>이 설정 적용</button></h4>
+      <div class="gsub">장애 없이 200명 스트림이 안정적으로 들어오는지.</div><ol class="gsteps"><li>적용 후 시작 버튼이 켜져 있는지 확인.</li><li>수신기에서 gws·patches 수가 안정되는지 1분 관찰.</li></ol><div class="gexp"><b>확인 포인트</b> 프레임/초 ≈ 게이트웨이 수 × 5, 드롭 0, 오류 GW 0.</div></div>
+        <div class="gitem" id="t02"><h4>T-02 무선 노이즈·간섭 <button class="small apply" data-apply='{"scenario":{"network":{"enabled":true,"intensity":60,"wireless_noise":true,"wired_failure":false,"latency":false,"power_outage":false}}}'>이 설정 적용</button></h4>
+      <div class="gsub">BLE/무선 구간 잡음으로 손실·지연·지터가 섞인 스트림.</div><ol class="gsteps"><li>상단 칩 NET 장애 ON 확인.</li><li>로그 탭에서 "무선 노이즈/간섭" 이벤트가 층 단위로 생기는지.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터가 seq gap을 손실로 집계하고 늦게 오는 프레임을 버리지 않는지.</div></div>
+        <div class="gitem" id="t03"><h4>T-03 유선 장애 · 순간 정전 <button class="small apply" data-apply='{"scenario":{"network":{"enabled":true,"intensity":50,"wireless_noise":false,"wired_failure":true,"latency":false,"power_outage":true}},"transport":{"store_forward":{"enabled":true}}}'>이 설정 적용</button></h4>
+      <div class="gsub">한 층 또는 한 동의 게이트웨이가 동시에 끊겼다가 복구.</div><ol class="gsteps"><li>복구 시 저장 후 전송 버스트가 도착합니다(전송 탭 통계 <i>재전송 프레임</i>).</li><li>라우터 접속 수가 떨어졌다가 돌아오는지.</li></ol><div class="gexp"><b>확인 포인트</b> 복구 후 과거 타임스탬프 프레임이 순서대로 들어오고 중복이 없어야 함.</div></div>
+        <div class="gitem" id="t04"><h4>T-04 네트워크 지연·지터 <button class="small apply" data-apply='{"scenario":{"network":{"enabled":true,"intensity":70,"wireless_noise":false,"wired_failure":false,"latency":true,"power_outage":false}}}'>이 설정 적용</button></h4>
+      <div class="gsub">수백 ms 지연과 지터.</div><ol class="gsteps"><li>대시보드 게이트웨이 표의 지연 열을 봅니다.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터 타임스탬프 정렬·버퍼링 정책 확인.</div></div>
+        <div class="gitem" id="t05"><h4>T-05 아티팩트 최대 <button class="small apply" data-apply='{"scenario":{"artifacts":{"enabled":true,"intensity":100,"motion":true,"shower":true,"exam_trips":true,"patch_reattach":true,"transfer":true,"patch_replace":true,"home_interference":true}}}'>이 설정 적용</button></h4>
+      <div class="gsub">움직임·샤워·검사 이동·재부착·전동·패치 교체·가정 간섭을 최대 빈도로.</div><ol class="gsteps"><li>신호 탭에서 파형 왜곡·리드오프·재부착 안정화 구간을 봅니다.</li><li>환자 탭 패치 이력에서 교체 기록을 봅니다.</li></ol><div class="gexp"><b>확인 포인트</b> 레코드 flags(LEAD_OFF, MOTION, NEW_PATCH)와 패치 번호 변경 처리.</div></div>
+        <div class="gitem" id="t06"><h4>T-06 패치 수명 가속 <button class="small apply" data-apply='{"scenario":{"patch":{"battery_days":0.02,"battery_drain_enabled":true,"lead_off_enabled":true,"replace_below_pct":5}}}'>이 설정 적용</button></h4>
+      <div class="gsub">배터리를 30분 만에 소모시켜 교체·반납 사이클을 빠르게.</div><ol class="gsteps"><li>데이터 탭 패치 레지스트리에서 새 시리얼 발급을 봅니다.</li><li>중앙 모니터의 배터리 아이콘·BATTERY LOW 알람.</li></ol><div class="gexp"><b>확인 포인트</b> LOW_BATTERY 플래그 → 교체 → 새 patch_id로 스트림 이어짐, 번호 재사용 없음.</div></div>
+        <div class="gitem" id="t07"><h4>T-07 게이트웨이 장애·교체 <button class="small apply" data-apply='{"scenario":{"gateway":{"fault_enabled":true,"fault_intensity":90,"outage":true,"degrade":true,"replace":true}}}' data-trig='{"what":"gateway_fault"}'>이 설정 적용</button></h4>
+      <div class="gsub">무응답·성능 저하·하드웨어 고장을 높은 빈도로.</div><ol class="gsteps"><li>병원 탭 도면에서 붉은 게이트웨이와 이웃으로 옮겨 붙는 환자.</li><li>교체 후 새 gw_no/MAC으로 META 재전송.</li></ol><div class="gexp"><b>확인 포인트</b> 패치 핸드오버 시 patch_id 연속성, 새 gw_id 인식.</div></div>
+        <div class="gitem" id="t08"><h4>T-08 부정맥 폭풍 <button class="small apply" data-apply='{"scenario":{"rhythm_episodes":true,"variant_hopping":true}}' data-script="arrhythmia_sweep.json">이 설정 적용</button></h4>
+      <div class="gsub">에피소드 자동 발생 + 스크립트로 연속 주입.</div><ol class="gsteps"><li>스크립트 arrhythmia_sweep이 자동으로 시작됩니다(시나리오 탭 패널에서 진행 확인).</li><li>중앙 모니터 알람 헤더가 황색/적색으로 바뀌는지.</li></ol><div class="gexp"><b>확인 포인트</b> HR 수치 채널과 ECG 파형이 같은 리듬을 가리키는지, 페이스 마크 처리.</div></div>
+        <div class="gitem" id="t09"><h4>T-09 원외(MCOT) 100명 <button class="small apply" data-apply='{"general":{"outpatient_count":100},"scenario":{"site":"mcot","artifacts":{"enabled":true,"intensity":50,"home_interference":true}}}'>이 설정 적용</button></h4>
+      <div class="gsub">휴대폰 게이트웨이, 가정 간섭, 이동.</div><ol class="gsteps"><li>대시보드의 MCOT 환자 수, 게이트웨이 유형 mobile.</li></ol><div class="gexp"><b>확인 포인트</b> 모바일 게이트웨이(용량 1)의 잦은 재접속 처리.</div></div>
+        <div class="gitem" id="t10"><h4>T-10 혼합 대규모 2000 + 200 <button class="small apply" data-apply='{"general":{"active_patients":2000,"outpatient_count":200},"scenario":{"site":"mixed"}}'>이 설정 적용</button></h4>
+      <div class="gsub">최대 규모 부하.</div><ol class="gsteps"><li>대시보드 워커 표: overrun 0, build/send µs.</li><li>필요하면 전송 탭에서 워커 수·번들 주기 조정.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터 수신 프레임/초 ≈ 게이트웨이 수 × 5 유지, 소켓 수 = 게이트웨이 수.</div></div>
+        <div class="gitem" id="t11"><h4>T-11 저장 후 전송 검증 <button class="small apply" data-apply='{"transport":{"store_forward":{"enabled":true,"max_bytes_per_gw":2097152,"burst_frames_per_cycle":40},"capture":{"enabled":true},"storm_smoothing":true}}' data-trig='{"what":"gateway_fault"}'>이 설정 적용</button></h4>
+      <div class="gsub">장애 중 버퍼링 → 복구 후 버스트 재전송을 정답 캡처와 대조.</div><ol class="gsteps"><li>수신기를 <code>--strict --save-frames recv/</code>로 띄웁니다.</li><li>적용 후 [임의 게이트웨이 장애 90s]가 자동 주입됩니다.</li><li>끝나면 <code>python tools/verify_capture.py --capture data/runtime/capture --received recv/</code>.</li></ol><div class="gexp"><b>확인 포인트</b> missing 0 · duplicate 0, out_of_order는 재전송 구간에서만.</div></div>
+        <div class="gitem" id="t12"><h4>T-12 파서 퍼징 <button class="small apply" data-apply='{"transport":{"fuzz":{"enabled":true,"rate_per_1000":20,"kinds":["bad_magic","bad_version","bad_len","truncated","oversize","garbage","dup","reorder","seq_gap","bad_record"]}}}'>이 설정 적용</button></h4>
+      <div class="gsub">프레임 1000개당 20개를 10종으로 오염.</div><ol class="gsteps"><li>엄격 수신기의 strict 줄에서 종류별 검출 수를 봅니다.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터 프로세스가 죽지 않고 재동기화, 오류 카운터 증가.</div></div>
+        <div class="gitem" id="t13"><h4>T-13 연결 폭주 · 반열림 · gw_id 중복 <button class="small apply" data-apply='{"transport":{"storm_smoothing":false}}' data-script="storm_drill.json">이 설정 적용</button></h4>
+      <div class="gsub">접속 처리 내구성 3종을 한 번에.</div><ol class="gsteps"><li>적용과 함께 storm_drill 스크립트가 시작됩니다(캡처→네트워크→폭주→반열림→중복→장애→교체).</li><li>라우터의 동시 accept, 유휴 연결 타임아웃, 중복 ID 정책을 봅니다.</li></ol><div class="gexp"><b>확인 포인트</b> 폭주 후 접속 수가 게이트웨이 수로 회복, 반열림 연결이 타임아웃으로 정리, 중복 ID 경고.</div></div>
+        <div class="gitem" id="t14"><h4>T-14 채널 축소 전송 <button class="small apply" data-apply='{"signals":{"enabled":["ecg","hr","spo2"]}}'>이 설정 적용</button></h4>
+      <div class="gsub">ECG·HR·SpO₂만 보내는 최소 채널 구성.</div><ol class="gsteps"><li>프로토콜 탭의 채널 마스크와 META channels_enabled 확인.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터가 채널 마스크 변경(META)에 맞춰 파서를 갱신하는지.</div></div>
+      </div>
+
+      <div class="card gsec" data-id="g301" data-title="301 · 고급 · 자동화">
+        <h3>301 · 고급 <span class="right sub">스크립트 · API · 테스트 · 배포</span></h3>
+        <div class="gitem" id="g301-1"><h4>시나리오 스크립트</h4>
+          <ol class="gsteps"><li><code>scenarios/*.json</code>: <code>{"at": 초, "what": 트리거, "target": 선택, "params": {...}}</code> 목록.</li><li>시나리오 탭 패널에서 시작/중지, 진행 로그. API: <code>POST /api/v1/control/script {"file":"storm_drill.json"}</code></li><li>같은 시드 + 같은 스크립트 = 재현 가능한 회귀 테스트.</li></ol></div>
+        <div class="gitem" id="g301-2"><h4>API 자동화</h4>
+          <ol class="gsteps"><li><code>GET /api/v1</code> 디스커버리, <code>PATCH /api/v1/config</code>, <code>POST /api/v1/control/start|stop|trigger</code>, <code>GET /api/v1/status</code>, <code>GET /api/v1/events?since=</code>.</li><li>EMR: <code>/emr/hospital|floors|gateways|admissions|patients|patches|layout</code>, DB: <code>POST /api/v1/db/query</code>.</li><li>실시간: <code>ws://host/ws/live</code> + <code>{"rows":[...]}</code>(숫자만 <code>"numeric":true</code>).</li></ol>
+          <pre>curl -X POST localhost:8080/api/v1/control/trigger -H 'Content-Type: application/json' -d '{"what":"storm","duration":20}'</pre></div>
+        <div class="gitem" id="g301-3"><h4>자동 최적화와 성능</h4>
+          <ol class="gsteps"><li>대시보드 [자동 최적화]: 환자 수를 단계적으로 올려 안정 최대치를 찾습니다.</li><li>워커 수(0=자동)·번들 주기·백로그는 전송 탭. Pi4 기준 워커 3, 200 ms.</li></ol></div>
+        <div class="gitem" id="g301-4"><h4>자동 테스트 · 배포</h4>
+          <ol class="gsteps"><li><code>.venv/bin/python -m pytest -q tests</code></li><li>Pi: <code>python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt</code>, 최초 <code>python run.py --pregen</code>, 이후 <code>python run.py --port 8080</code>.</li></ol></div>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+<div class="toast" id="toast"></div>
+<!-- generic confirm dialog (in-app; no browser confirm()) -->
+<div id="confirmDlg" class="cdlg" hidden><div class="cdlg-box"><h3 id="confirmTitle">확인</h3><div id="confirmMsg" class="sub"></div><div class="row tight" style="justify-content:flex-end;margin-top:12px"><button class="small" id="confirmNo">취소</button><button class="small primary" id="confirmYes">실행</button></div></div></div>
+<!-- Central Station (gateway click on the floor plan) — design: ui_mockups/Central Station*.dc.html -->
+<div id="monModal" class="ds dark cs" hidden>
+  <header class="nav">
+    <div class="cs-brand nav-brand"><span>CENTRAL</span><span class="ds-unit" id="csUnit"></span></div>
+    <div class="cs-legend" id="csLegend"></div>
+    <div class="cs-right">
+      <span class="cs-presets" id="csPresets"></span>
+      <span class="cs-pager" id="csPager" hidden><button class="btn btn-secondary" id="csPrev" aria-label="이전 페이지">‹</button><span id="csPage"></span><button class="btn btn-secondary" id="csNext" aria-label="다음 페이지">›</button></span>
+      <span class="cs-alarms ds-none" id="csAlarms">0 alarms</span><span class="cs-clock" id="csClock"></span><button class="btn btn-secondary ds-icon" id="csSilence" title="알람 묵음 (전체) 켜기/끄기" aria-label="Silence all" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg></button><button class="btn btn-secondary ds-icon" id="csReload" title="모니터 다시 불러오기" aria-label="다시 불러오기"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button><button class="btn btn-secondary" id="monClose">Close</button></div>
+  </header>
+  <main class="cs-grid" id="monGrid"></main>
+</div>
+<!-- Vitals Monitor Viewer (one bed, opened from a central-station tile) — design: ui_mockups/Vitals Monitor Viewer.dc.html -->
+<div id="vmModal" class="ds vm" hidden>
+  <header class="nav">
+    <div class="vm-brand nav-brand"><span id="vmBed">BED</span><span class="ds-unit" id="vmUnit"></span></div>
+    <div class="vm-who"><span class="ds-nm" id="vmName"></span><span class="ds-meta" id="vmMeta"></span><span class="ds-meta" id="vmMrn"></span><span id="vmTags" style="display:inline-flex;gap:8px;flex-wrap:wrap"></span></div>
+    <div class="vm-right">
+      <span class="vm-alarm" id="vmAlarm" hidden></span>
+      <span class="vm-quiet" id="vmQuiet"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg>No active alarms</span>
+      <span class="vm-clock" id="vmClock"></span>
+      <button class="btn btn-secondary ds-icon" id="vmSilence" title="알람 묵음 켜기/끄기" aria-label="Silence" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg></button>
+      <button class="btn btn-primary" id="vmTrends">Trends</button>
+      <button class="btn btn-secondary" id="vmNight">Night</button>
+      <button class="btn btn-secondary ds-icon" id="vmReload" title="다시 불러오기" aria-label="다시 불러오기"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+      <button class="btn btn-secondary" id="vmBack">Back</button>
+    </div>
+  </header>
+  <main class="vm-main">
+    <section class="vm-waves">
+      <div class="vm-row cs-ecg"><div class="vm-ttl"><b>ECG · Lead II</b><span class="ds-dim" id="vmSweep">25 mm/s · 10 mm/mV</span><span class="ds-dim">Filter 0.5–40 Hz</span><span class="ds-dim vm-r" id="vmPacer">Pacer off</span></div><div class="vm-box"><canvas id="vm_e"></canvas><div class="ds-off">LEAD OFF</div></div></div>
+      <div class="vm-row"><div class="vm-ttl"><b>Pleth · SpO₂</b><span class="ds-dim" id="vmSpo2Src"></span></div><div class="vm-box"><canvas id="vm_p"></canvas></div></div>
+      <div class="vm-row"><div class="vm-ttl"><b>Resp · Impedance</b><span class="ds-dim" id="vmRespSrc"></span></div><div class="vm-box"><canvas id="vm_r"></canvas></div></div>
+    </section>
+    <aside class="vm-aside" id="vmAside"></aside>
+  </main>
+  <section class="vm-bottom" id="vmBottom">
+    <div><div class="vm-cap"><h6>Vitals trend · last 6 h</h6><span>Hourly spot check</span></div>
+      <table class="table"><thead><tr><th>Time</th><th>HR</th><th>SpO₂</th><th>RR</th><th>NIBP</th><th>MAP</th><th>Temp</th><th>GLU</th></tr></thead><tbody id="vmTrendBody"></tbody></table></div>
+    <div><h6>Events</h6><div id="vmEvents" style="display:flex;flex-direction:column"></div></div>
+  </section>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
