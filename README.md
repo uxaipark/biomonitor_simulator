@@ -13,7 +13,7 @@
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 python run.py --pregen          # 1시간 루프 파일 은행 생성 (최초 1회, Pi4 약 5~10분)
-python run.py --port 8080       # 웹 GUI: http://<pi-ip>:8080
+python run.py --port 5445       # 웹 GUI: http://<pi-ip>:5445
 python tools/receiver.py --port 9100 [--save DIR]   # 참고용 수신기(라우터 구현 레퍼런스)
 ```
 
@@ -155,7 +155,7 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 
 ## 라우터 서버 (2단계 초안, `router/`)
 
-`python -m router --port 9100 --api-port 9200 --data data/router --emulator-url http://localhost:8080`. 게이트웨이 TCP 스트림을 받아 프로토콜 검증기로 확인하고 패치별 시간 단위 파일(`data/router/patches/<id>/…rec`)과 게이트웨이별 META를 저장하며, `/status`·`/gateways`·`/patches`·`/anomalies` API와 에뮬레이터 상태 보고를 제공합니다. 자세한 내용은 `router/README.md`.
+`python -m router --port 9100 --api-port 9200 --data data/router --emulator-url http://localhost:5445`. 게이트웨이 TCP 스트림을 받아 프로토콜 검증기로 확인하고 패치별 시간 단위 파일(`data/router/patches/<id>/…rec`)과 게이트웨이별 META를 저장하며, `/status`·`/gateways`·`/patches`·`/anomalies` API와 에뮬레이터 상태 보고를 제공합니다. 자세한 내용은 `router/README.md`.
 
 ## 라우터 서버(2단계) 연동 포인트
 

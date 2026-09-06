@@ -435,11 +435,11 @@
           <ol class="gsteps"><li><code>scenarios/*.json</code>: <code>{"at": 초, "what": 트리거, "target": 선택, "params": {...}}</code> 목록.</li><li>시나리오 탭 패널에서 시작/중지, 진행 로그. API: <code>POST /api/v1/control/script {"file":"storm_drill.json"}</code></li><li>같은 시드 + 같은 스크립트 = 재현 가능한 회귀 테스트.</li></ol></div>
         <div class="gitem" id="g301-2"><h4>API 자동화</h4>
           <ol class="gsteps"><li><code>GET /api/v1</code> 디스커버리, <code>PATCH /api/v1/config</code>, <code>POST /api/v1/control/start|stop|trigger</code>, <code>GET /api/v1/status</code>, <code>GET /api/v1/events?since=</code>.</li><li>EMR: <code>/emr/hospital|floors|gateways|admissions|patients|patches|layout</code>, DB: <code>POST /api/v1/db/query</code>.</li><li>실시간: <code>ws://host/ws/live</code> + <code>{"rows":[...]}</code>(숫자만 <code>"numeric":true</code>).</li></ol>
-          <pre>curl -X POST localhost:8080/api/v1/control/trigger -H 'Content-Type: application/json' -d '{"what":"storm","duration":20}'</pre></div>
+          <pre>curl -X POST localhost:5445/api/v1/control/trigger -H 'Content-Type: application/json' -d '{"what":"storm","duration":20}'</pre></div>
         <div class="gitem" id="g301-3"><h4>자동 최적화와 성능</h4>
           <ol class="gsteps"><li>대시보드 [자동 최적화]: 환자 수를 단계적으로 올려 안정 최대치를 찾습니다.</li><li>워커 수(0=자동)·번들 주기·백로그는 전송 탭. Pi4 기준 워커 3, 200 ms.</li></ol></div>
         <div class="gitem" id="g301-4"><h4>자동 테스트 · 배포</h4>
-          <ol class="gsteps"><li><code>.venv/bin/python -m pytest -q tests</code></li><li>Pi: <code>python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt</code>, 최초 <code>python run.py --pregen</code>, 이후 <code>python run.py --port 8080</code>.</li></ol></div>
+          <ol class="gsteps"><li><code>.venv/bin/python -m pytest -q tests</code></li><li>Pi: <code>python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt</code>, 최초 <code>python run.py --pregen</code>, 이후 <code>python run.py --port 5445</code>.</li></ol></div>
       </div>
     </div>
   </div>

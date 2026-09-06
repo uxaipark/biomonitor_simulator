@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Quick health report of a running emulator (default port 8080): status, load, moving patients, gateway summary.
-PORT="${1:-8080}"; H="http://127.0.0.1:$PORT/api/v1"
+# Quick health report of a running emulator (default port 5445): status, load, moving patients, gateway summary.
+PORT="${1:-5445}"; H="http://127.0.0.1:$PORT/api/v1"
 python3 - "$H" <<'PY'
 import json, sys, urllib.request
 h = sys.argv[1]

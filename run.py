@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bio-Signal Emulator entry point.
 
-  python run.py                      # web GUI + APIs on http://0.0.0.0:8080
+  python run.py                      # web GUI + APIs on http://0.0.0.0:5445
   python run.py --pregen             # only pre-generate the 1-hour loop bank and exit
   python run.py --port 8090 --workers 3
 """
@@ -27,7 +27,7 @@ def main():
     _check_ws_support()
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="0.0.0.0")
-    ap.add_argument("--port", type=int, default=8080)
+    ap.add_argument("--port", type=int, default=5445)
     ap.add_argument("--pregen", action="store_true", help="generate loop bank and exit")
     ap.add_argument("--gen-workers", type=int, default=0)
     ap.add_argument("--data-dir", default=None)

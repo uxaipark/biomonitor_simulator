@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Autostart the kiosk with the desktop session of the login user (reTerminal: user "pi" on the 5" display).
 set -euo pipefail
-PORT="${1:-8080}"
+PORT="${1:-5445}"
 LOGIN_USER="${SUDO_USER:-pi}"; HOME_DIR="$(getent passwd "$LOGIN_USER" | cut -d: -f6)"
 apt-get install -y -qq chromium-browser x11-xserver-utils >/dev/null 2>&1 || apt-get install -y -qq chromium x11-xserver-utils
 install -m 0755 "$(dirname "$0")/kiosk.sh" /opt/biosim/kiosk.sh

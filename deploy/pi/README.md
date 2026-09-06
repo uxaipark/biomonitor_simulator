@@ -32,9 +32,9 @@ sudo biosim-pi-<버전>/install.sh --pregen     # 루프 은행을 지금 생성
 sudo biosim-pi-<버전>/install.sh --kiosk      # reTerminal 터치 화면에 Chromium 키오스크 자동 실행
 ```
 
-설치 후 GUI는 `http://<pi-ip>:8080`, API 문서는 `/api/v1` 입니다. 처음 시작 시 루프 은행이 없으면 서비스가 스스로 생성하며 대시보드에 진행률이 보입니다.
+설치 후 GUI는 `http://<pi-ip>:5445`, API 문서는 `/api/v1` 입니다. 처음 시작 시 루프 은행이 없으면 서비스가 스스로 생성하며 대시보드에 진행률이 보입니다.
 
-옵션(환경 변수): `BIOSIM_HOME`(기본 /opt/biosim), `BIOSIM_DATA`(기본 /var/lib/biosim), `BIOSIM_USER`(기본 biosim), `BIOSIM_PORT`(기본 8080). 8080을 다른 프로세스가 쓰고 있으면(`sudo ss -ltnp | grep 8080`) `sudo env BIOSIM_PORT=8090 ./install.sh --update`처럼 포트를 바꿔 다시 실행하면 서비스 유닛이 새 포트로 갱신됩니다. `--no-service`는 파일과 venv만 설치하고 서비스는 만들지 않습니다. `--dry-run`은 실행할 명령만 출력합니다.
+옵션(환경 변수): `BIOSIM_HOME`(기본 /opt/biosim), `BIOSIM_DATA`(기본 /var/lib/biosim), `BIOSIM_USER`(기본 biosim), `BIOSIM_PORT`(기본 5445). 5445을 다른 프로세스가 쓰고 있으면(`sudo ss -ltnp | grep 5445`) `sudo env BIOSIM_PORT=8090 ./install.sh --update`처럼 포트를 바꿔 다시 실행하면 서비스 유닛이 새 포트로 갱신됩니다. `--no-service`는 파일과 venv만 설치하고 서비스는 만들지 않습니다. `--dry-run`은 실행할 명령만 출력합니다.
 
 ## 3. 운영
 

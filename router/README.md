@@ -3,7 +3,7 @@
 에뮬레이터의 게이트웨이 TCP 스트림(프로토콜 v1)을 받아 검증하고, 패치별 파일로 저장하는 서버입니다. 에뮬레이터와 같은 `StreamChecker`를 써서 손상 바이트 재동기화, seq 누락·중복·역전, 타임스탬프 역행, 알 수 없는 채널/자료형을 계수합니다.
 
 ```bash
-.venv/bin/python -m router --port 9100 --api-port 9200 --data data/router --emulator-url http://localhost:8080
+.venv/bin/python -m router --port 9100 --api-port 9200 --data data/router --emulator-url http://localhost:5445
 ```
 
 * 게이트웨이 소켓: `--port`(기본 9100, 에뮬레이터 `transport.target_port`). 게이트웨이당 소켓 모드와 공유 소켓 모드 모두 헤더의 gw_id로 구분합니다. 백로그 4096, 파일 한도는 `ulimit -n 65535`와 `deploy/pi/99-biosim.conf` sysctl을 같이 적용하세요.

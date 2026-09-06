@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 APP_HOME="${BIOSIM_HOME:-/opt/biosim}"
 DATA_DIR="${BIOSIM_DATA:-/var/lib/biosim}"
 SVC_USER="${BIOSIM_USER:-biosim}"
-PORT="${BIOSIM_PORT:-8080}"
+PORT="${BIOSIM_PORT:-5445}"
 UPDATE=0; PREGEN=0; KIOSK=0; SERVICE=1; DRY=0
 for a in "$@"; do
   case "$a" in
@@ -60,7 +60,7 @@ run sysctl -q --system || true
 if [ "$SERVICE" = 1 ]; then
   if [ "$DRY" = 1 ]; then echo "+ install biosim.service (port $PORT, user $SVC_USER)"; else
     sed -e "s#/opt/biosim#$APP_HOME#g" -e "s#/var/lib/biosim#$DATA_DIR#g" -e "s#User=biosim#User=$SVC_USER#" -e "s#Group=biosim#Group=$SVC_USER#" \
-        -e "s#--port 8080#--port $PORT#" "$HERE/deploy/pi/biosim.service" > /etc/systemd/system/biosim.service
+        -e "s#--port 5445#--port $PORT#" "$HERE/deploy/pi/biosim.service" > /etc/systemd/system/biosim.service
     systemctl daemon-reload
     systemctl enable biosim.service >/dev/null
   fi
