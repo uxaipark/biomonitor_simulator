@@ -1,5 +1,9 @@
 # Bio-Signal Emulator (1단계: Bio-Signal Generator)
 
+> **Bio-Signal Emulator** is an open-source hospital-scale vital-sign traffic generator: thousands of simulated patients wearing
+> ECG/SpO₂ patches, a procedurally generated hospital with BLE gateways on every floor, and a binary streaming protocol that a
+> router/collector server can be developed and load-tested against, on a Raspberry Pi 4 or any Linux/macOS box.
+
 라즈베리파이 4 / reTerminal 에서 동작하는 대규모 생체신호 입력 에뮬레이터입니다.
 1만 명 환자 프로필·병원 물리 모델·BLE 패치/게이트웨이 시나리오를 만들고, 게이트웨이별 TCP 소켓으로
 200 ms 단위 바이너리 프레임을 라우터 서버에 전송합니다. 웹 제어판(반응형, 터치 친화)과
@@ -12,6 +16,31 @@ python run.py --pregen          # 1시간 루프 파일 은행 생성 (최초 1�
 python run.py --port 8080       # 웹 GUI: http://<pi-ip>:8080
 python tools/receiver.py --port 9100 [--save DIR]   # 참고용 수신기(라우터 구현 레퍼런스)
 ```
+
+## 화면 한눈에 보기
+
+| 대시보드 | 병원 탭 (건축 도면 · 이동 중 환자 · 게이트웨이) |
+|---|---|
+| ![대시보드](docs/images/dashboard.jpg) | ![병원 탭](docs/images/hospital.jpg) |
+| 전송률·데이터량·이벤트 로그. 오른쪽 위 ▶ 시작 한 번이면 2000명 스트리밍이 시작됩니다. | 층별 도면 위에 침대 점유, 이동 중 환자(점선 링, 넘버 배지), 게이트웨이 상태와 커버리지·음영지역을 보여 주고, 아래 목록에서 환자·게이트웨이를 바로 엽니다. |
+
+| Central Station (게이트웨이 클릭) | 신호 탭 |
+|---|---|
+| ![중앙 모니터](docs/images/central.jpg) | ![신호 탭](docs/images/signals.jpg) |
+| 게이트웨이에 연결된 환자들의 ECG·Pleth·Resp 파형과 HR/SpO₂/RR/NIBP/Temp/GLU를 2×1부터 16×10까지 n-up으로. 타일을 누르면 단일 침상 뷰어가 열립니다. | 환자 한 명의 실시간 파형·수치와 리듬/이벤트 주입, 아티팩트·리드오프 스위치. |
+
+| 시나리오 탭 | 시작 매뉴얼 (101/201/301) |
+|---|---|
+| ![시나리오 탭](docs/images/scenario.jpg) | ![시작 매뉴얼](docs/images/manual.jpg) |
+| 환자 수 프리셋, 병원 규모(환자 수 기준 자동), 네트워크/아티팩트/게이트웨이 장애 시나리오, 라우터 테스트 드릴과 스크립트. | 왼쪽 목차 + 검색, 단계별 화면과 "이 설정 적용" 버튼이 있는 T-01~T-14 시나리오 테스트 항목. |
+
+**무엇을 할 수 있나**
+
+* 병원 하나를 통째로 흉내 냅니다: 환자 프로필 1만 명, 건축 템플릿 10종(환자 수에 맞춰 1~3동 자동 규모 산정), 병동·검사실·엘리베이터, 이동 중 환자(검사·진료·화장실·샤워·재활·음영 구간), 입퇴원.
+* 패치 신호는 1시간 루프 은행에서 memmap 슬라이스로 꺼내므로 런타임 수학이 없고, Pi 4에서도 수천 패치를 200 ms 프레임으로 내보냅니다(ECG 250/500 Hz, PPG, 호흡, 가속도, HR/SpO₂/RR/체온/혈당, 페이스메이커 펄스).
+* 라우터 개발용 드릴: 무선 노이즈, 유선 장애·정전, 지연/지터, 게이트웨이 장애·교체, 저장 후 전송, 프레임 퍼징, 연결 폭주·반열림·gw_id 중복, 정답 캡처와 검증 도구(`tools/receiver.py --strict`, `tools/verify_capture.py`).
+* 진입점 API(`GET /api/v1`)로 라우터가 프로토콜·채널·게이트웨이 수를 스스로 읽어 설정하고, `router/`에 2단계 라우터 서버 초안(수신·검증·패치별 저장·상태 API)이 있습니다.
+* `deploy/pi/`로 라즈베리파이에 systemd 서비스로 설치하고 reTerminal 키오스크로 띄웁니다.
 
 ## 구조
 

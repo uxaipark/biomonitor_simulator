@@ -761,21 +761,20 @@ async function loadFloor() {
   // nursing-unit zones: each ward (department) is one tinted zone; its boundary crossing a corridor is a compartment door
   const ZONE_COL = ['#2b7fc2', '#2e9e6b', '#c2702b', '#8a4fc2'];
   let zoneLabels = '';
+  const zoneCands = [];                                     // ward tags placed after gateways/fixtures are known
   (m.wards || []).forEach((wd, wi) => {
     const col = ZONE_COL[wi % ZONE_COL.length];
     (wd.zones || []).forEach(z => {
       out += `<polygon class="zone" points="${pts(z)}" fill="${col}" fill-opacity="0.07" stroke="${col}" stroke-opacity="0.55" stroke-width="0.14" stroke-dasharray="0.8 0.45" pointer-events="none"/>`;
     });
-    // ward label: on the largest corridor inside the zone, 30 % along its long axis (clear of the central display)
+    // ward label: on the largest corridor inside the zone; the exact spot along the corridor is chosen later (zoneLabelsAt),
+    // once the gateway markers and corridor fixtures (central displays, desks) are known, so the tag never covers them
+    // corridor with the most of its long axis inside this ward's zone (a shared corridor may belong half to each ward)
     let best = null;
-    m.corridors.forEach(c => { const [cx0, cy0, cx1, cy1] = bbox(c.poly); const cc = [(cx0 + cx1) / 2, (cy0 + cy1) / 2]; const a = (cx1 - cx0) * (cy1 - cy0);
-      if ((wd.zones || []).some(z => ptIn(cc[0], cc[1], z)) && (!best || a > best.a)) best = { a, bb: [cx0, cy0, cx1, cy1] }; });
-    if (best) {
-      const [cx0, cy0, cx1, cy1] = best.bb, horiz = (cx1 - cx0) >= (cy1 - cy0);
-      const lx = horiz ? cx0 + (cx1 - cx0) * 0.3 : (cx0 + cx1) / 2, ly = horiz ? (cy0 + cy1) / 2 : cy0 + (cy1 - cy0) * 0.3;
-      const txt = `${wd.name}`, fs = 0.62, tw = textWidth(txt, fs) + 0.9;
-      zoneLabels += `<g class="zlbl" transform="translate(${lx.toFixed(2)},${ly.toFixed(2)})${horiz ? '' : ' rotate(-90)'}"><rect x="${(-tw / 2).toFixed(2)}" y="-0.55" width="${tw.toFixed(2)}" height="1.1" rx="0.55" fill="${col}" fill-opacity="0.9"/><text x="0" y="0.22" text-anchor="middle" font-size="${fs}px" font-weight="700" fill="#fff">${esc(txt)}</text><title>${esc(wd.name)} · ${esc(wd.specialty || '')} · 병실 ${(wd.rooms || []).length}</title></g>`;
-    }
+    m.corridors.forEach(c => { const [cx0, cy0, cx1, cy1] = bbox(c.poly); const horiz = (cx1 - cx0) >= (cy1 - cy0); const a = (cx1 - cx0) * (cy1 - cy0);
+      const inside = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].filter(t => { const x = horiz ? cx0 + (cx1 - cx0) * t : (cx0 + cx1) / 2, y = horiz ? (cy0 + cy1) / 2 : cy0 + (cy1 - cy0) * t; return (wd.zones || []).some(z => ptIn(x, y, z)); });
+      if (inside.length && (!best || inside.length > best.inside.length || (inside.length === best.inside.length && a > best.a))) best = { a, bb: [cx0, cy0, cx1, cy1], inside }; });
+    if (best) zoneCands.push({ bb: best.bb, col, txt: `${wd.name}`, zones: wd.zones || [], inside: best.inside });
   });
   // occupancy lookup: bed id -> patient
   const patByBed = {}; (m.patients || []).forEach(p => { if (p.at_bed && p.bed) patByBed[p.bed] = p; });
@@ -906,7 +905,7 @@ async function loadFloor() {
       if (r.kind === 'toilet') out += `<text class="lbl small" x="${r.cx}" y="${r.cy + 1.2}">♿</text>`;
     }
   });
-  out += `<g class="labels">${labels}</g><g class="zones">${zoneLabels}</g><g class="covLayer"></g>`;
+  out += `<g class="labels">${labels}</g><g class="zones" id="zoneTags"></g><g class="covLayer"></g>`;
   // RF coverage context for gateway hover: every drawn room edge is a wall; corridors are open space
   covCtx = { W, D, segs: [], gws: {} };
   m.rooms.forEach(r => { if (r.ensuite || !r.poly) return; const q = r.poly; for (let i = 0; i < q.length; i++) { const a = q[i], b = q[(i + 1) % q.length]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.05) covCtx.segs.push([a[0], a[1], b[0], b[1]]); } });
@@ -1036,6 +1035,30 @@ async function loadFloor() {
   });
   // static layer (rooms, corridors, fixtures, labels) is parsed once per floor/mode/theme; the dynamic layer (beds with occupancy,
   // moving patients, count badges, gateways) is swapped on every refresh -> ~3000 static nodes are not rebuilt every 6 s
+  // ward name tags: walk the corridor's long axis (30 %, 50 %, 70 %, 20 %, 80 %, ...) and take the first spot whose pill clears
+  // every gateway marker (pie + arc + '#no' label) and every corridor fixture (central display, desk); rotated on vertical corridors
+  const gwBoxes = gwFinal.map(g => [g.x - 1.0, g.y - 1.0, g.x + 1.0, g.y + 1.4]);
+  const fixBoxes = allFix.map(f => f.box).filter(Boolean);
+  zoneCands.forEach(zc => {
+    const [cx0, cy0, cx1, cy1] = zc.bb, horiz = (cx1 - cx0) >= (cy1 - cy0);
+    const fs = 0.62, tw = textWidth(zc.txt, fs) + 0.9;
+    const box = (lx, ly) => horiz ? [lx - tw / 2, ly - 0.55, lx + tw / 2, ly + 0.55] : [lx - 0.55, ly - tw / 2, lx + 0.55, ly + tw / 2];
+    const clear = (bx) => !gwBoxes.some(g => hit(bx, g)) && !fixBoxes.some(f => hit(bx, f));
+    let lx, ly, ok = false;
+    const order = [0.3, 0.5, 0.7, 0.2, 0.8, 0.4, 0.6, 0.15, 0.85, 0.1, 0.9].filter(t => !zc.inside || zc.inside.some(u => Math.abs(u - t) < 0.06)).concat([0.3, 0.5, 0.7]);
+    for (const t of order) {                                       // only spots that lie inside the ward's own zone
+      lx = horiz ? cx0 + (cx1 - cx0) * t : (cx0 + cx1) / 2; ly = horiz ? (cy0 + cy1) / 2 : cy0 + (cy1 - cy0) * t;
+      if (clear(box(lx, ly))) { ok = true; break; }
+    }
+    if (!ok) {                                                     // nothing free on the axis: slide toward one corridor edge
+      for (const t of [0.3, 0.5, 0.7]) for (const off of [-0.7, 0.7]) {
+        const x = horiz ? cx0 + (cx1 - cx0) * t : (cx0 + cx1) / 2 + off, y = horiz ? (cy0 + cy1) / 2 + off : cy0 + (cy1 - cy0) * t;
+        if (clear(box(x, y))) { lx = x; ly = y; ok = true; break; }
+      }
+    }
+    zoneLabels += `<g class="zlbl" transform="translate(${lx.toFixed(2)},${ly.toFixed(2)})${horiz ? '' : ' rotate(-90)'}"><rect x="${(-tw / 2).toFixed(2)}" y="-0.55" width="${tw.toFixed(2)}" height="1.1" rx="0.55" fill="${zc.col}" fill-opacity="0.9"/><text x="0" y="0.22" font-size="${fs}" fill="#fff" text-anchor="middle" font-weight="700">${esc(zc.txt)}</text></g>`;
+  });
+  out = out.replace('<g class="zones" id="zoneTags"></g>', `<g class="zones" id="zoneTags">${zoneLabels}</g>`);
   const dyn = `<g id="planDyn">${bedsOut}${dynOut}${gwOut}</g>`;
   const staticKey = `${svg.dataset.floorKey}|${mode}|${document.documentElement.dataset.theme || ''}`;
   const dynEl = svg.dataset.staticKey === staticKey ? svg.querySelector('#planDyn') : null;
