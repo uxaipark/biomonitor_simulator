@@ -1,4 +1,4 @@
-"""python -m router --port 9100 --api-port 9200 --data data/router [--emulator-url http://<emulator>:8080]"""
+"""python -m router --port 9100 --api-port 9200 --data data/router [--emulator-url http://<emulator>:5445]"""
 from __future__ import annotations
 
 import argparse
