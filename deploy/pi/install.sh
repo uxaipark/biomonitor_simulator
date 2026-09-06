@@ -39,7 +39,7 @@ run mkdir -p "$APP_HOME/app" "$DATA_DIR"
 
 # 3) code (rsync keeps the venv; --delete removes stale modules)
 run rsync -a --delete --exclude 'venv' --exclude '__pycache__' \
-  "$HERE/emulator" "$HERE/tools" "$HERE/scenarios" "$HERE/run.py" "$HERE/requirements.txt" "$HERE/README.md" "$HERE/deploy" "$HERE/VERSION" "$APP_HOME/app/"
+  "$HERE/emulator" "$HERE/router" "$HERE/tools" "$HERE/scenarios" "$HERE/run.py" "$HERE/requirements.txt" "$HERE/README.md" "$HERE/deploy" "$HERE/VERSION" "$APP_HOME/app/"
 
 # 4) python venv with piwheels (prebuilt ARM wheels: no compiler, minutes instead of hours)
 if [ ! -x "$APP_HOME/venv/bin/python" ]; then run python3 -m venv "$APP_HOME/venv"; fi

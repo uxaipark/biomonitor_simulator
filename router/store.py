@@ -103,9 +103,9 @@ class PatchStore:
         for pid, buf in batch.items():
             f = self._file(pid, fname)
             f.write(buf)
+            f.flush()                                              # one OS write per patch per flush interval
             n += len(buf)
         self.bytes_written += n
-        self.records_written += sum(1 for _ in ())  # counted in write()
         if force or now - self.last_index_save > 10:
             self._save_index()
         return n

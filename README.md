@@ -45,6 +45,8 @@ python tools/receiver.py --port 9100 [--save DIR]   # 참고용 수신기(라우
 
 **자원 상한과 정리** (2026-09-06): 템플릿 재생성·병원 재구성은 엔진의 읽기/쓰기 잠금 아래에서만 실행되어(요청 스레드는 읽기, 재구성은 쓰기) 공유메모리 배열이 교체되는 순간 API 요청이 옛 배열을 읽던 SIGSEGV가 사라졌습니다. 저장 후 전송 버퍼는 게이트웨이당 2 MB 외에 워커당 `transport.saf_worker_max_mb`(기본 64 MB) 상한이 있고, 정답 캡처는 `transport.capture_max_mb`(기본 256 MB, 워커 합계)에 닿으면 탭이 스스로 꺼집니다. 시작 시 `general.db_retention_days`(기본 7일)보다 오래된 반납 패치·퇴원 입원·이벤트가 DB에서 정리되고, 메모리에는 활성 패치와 최근 반납 2만 건까지만 올립니다. `/api/v1/status`는 1 Hz 폴링용이라 300개 이력을 싣지 않고(`/api/v1/stats`에만 포함) `world_step_ms`(월드 1초 스텝 소요, 최대치 감쇠)를 함께 줍니다. 월드 루프는 절대 시각 기준 1 Hz이며 패치 이벤트 DB 기록은 초당 한 번 배치입니다.
 
+**환자 수 즉시 맞춤 · 도면 부분 갱신 · 압축** (2026-09-06): 시나리오 환자 수를 바꾸면 초당 최대 500명씩 즉시 퇴원/입원해 몇 초 안에 목표에 맞춥니다(시간당 입퇴원율은 그 위의 자연 변동). 병원 탭 도면은 정적 레이어(방·복도·설비·라벨)를 층/모드/테마별로 한 번만 만들고 6초마다 침대·이동 환자·배지·게이트웨이 레이어만 교체합니다. API 응답은 2 KB 이상이면 gzip으로 나가며(게이트웨이 목록 199 KB → 19 KB), 프레임 빌더는 게이트웨이별 바이트 범위를 numpy로 한 번에 계산해 게이트웨이당 ndarray 슬라이스가 없습니다(엄격 수신기로 388 GW·499 패치 무이상 확인).
+
 ## 스트림 프로토콜 (v1, little-endian)
 
 ```
@@ -117,6 +119,10 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 ## SQLite DB (`data/emulator.db`)
 
 `emulator/db.py` 가 환자 프로필, 입퇴원(admissions: 환자번호 = 입원마다 새로 발급되는 고유 번호), 패치 레지스트리(patches, patch_events), 검사 일정(exams), 게이트웨이 장비 이력(gateways: 하드웨어 번호 gw_no, 교체 시 새 번호·MAC), 이벤트 로그(events), 전송 실행 기록(runs)을 WAL 모드로 저장합니다. 구조 설정(시드·병상·프로필 수)이 같으면 재시작 후에도 이력이 유지되고 패치·게이트웨이·환자 번호가 이어집니다. `GET /api/v1/db/stats`, `POST /api/v1/db/query {sql}` (SELECT 전용) 로 라우터나 GUI(데이터 탭 SQL 콘솔)에서 조회할 수 있습니다. 전송 프레임의 `patient_id` 는 환자번호(admissions.id), `gw_id` 는 gw_no 입니다.
+
+## 라우터 서버 (2단계 초안, `router/`)
+
+`python -m router --port 9100 --api-port 9200 --data data/router --emulator-url http://localhost:8080`. 게이트웨이 TCP 스트림을 받아 프로토콜 검증기로 확인하고 패치별 시간 단위 파일(`data/router/patches/<id>/…rec`)과 게이트웨이별 META를 저장하며, `/status`·`/gateways`·`/patches`·`/anomalies` API와 에뮬레이터 상태 보고를 제공합니다. 자세한 내용은 `router/README.md`.
 
 ## 라우터 서버(2단계) 연동 포인트
 

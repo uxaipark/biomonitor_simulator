@@ -24,7 +24,7 @@ mkdir -p "$STAGE" "$ROOT/dist"
 
 # 1) application code
 rsync -a --exclude '__pycache__' --exclude '*.pyc' --exclude '.DS_Store' \
-  "$ROOT/emulator" "$ROOT/tools" "$ROOT/scenarios" "$ROOT/run.py" "$ROOT/requirements.txt" "$ROOT/README.md" "$STAGE/"
+  "$ROOT/emulator" "$ROOT/router" "$ROOT/tools" "$ROOT/scenarios" "$ROOT/run.py" "$ROOT/requirements.txt" "$ROOT/README.md" "$STAGE/"
 # 2) deployment files
 mkdir -p "$STAGE/deploy"
 rsync -a --exclude '__pycache__' "$ROOT/deploy/pi" "$STAGE/deploy/"
