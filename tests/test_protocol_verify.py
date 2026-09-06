@@ -6,15 +6,15 @@ from emulator.runtime.verify import StreamChecker
 from emulator.config import CH_HR
 
 
-def rec(patch_id=1, patient_id=2, hr=77):
-    head = struct.pack("<IIBBbB", patch_id, patient_id, 0, 90, -50, 1)
+def rec(patch_id=1, patient_id=2, hr=77, pseq=0):
+    head = struct.pack("<IIIBBbB", patch_id, patient_id, pseq, 0, 90, -50, 1)
     return head + struct.pack("<BBH", CH_HR, 2, 1) + bytes([hr])
 
 
 def good(seq, gw=7, ts=1000, meta=False, gwstat=False):
     flags = (F_META if meta else 0) | (F_GWSTAT if gwstat else 0)
     pre = (gwstat_block(10, 20, 30, -40, 2, 0, 100, 35) if gwstat else b"") + (meta_block({"gw": "x"}) if meta else b"")
-    return frame(gw, seq, ts, 1, pre + rec(), flags)
+    return frame(gw, seq, ts, 1, pre + rec(pseq=seq), flags)   # the patch numbers its packets too
 
 
 def run(chunks):
@@ -67,7 +67,17 @@ def test_oversize_length_and_bad_record():
     over = HEADER.pack(magic, ver, flags, gw, seq, ts, n_rec, 0x7FFFFFF0) + f1[HEADER.size:]
     s = run([over, good(2, ts=2)])
     assert s["oversize"] == 1
-    bogus = struct.pack("<IIBBbB", 0xFFFFFFF0, 0, 0, 100, -40, 1) + struct.pack("<BBH", 250, 9, 4) + b"\x00" * 8
+    bogus = struct.pack("<IIIBBbB", 0xFFFFFFF0, 0, 0, 0, 100, -40, 1) + struct.pack("<BBH", 250, 9, 4) + b"\x00" * 8
     bad = HEADER.pack(magic, ver, flags, gw, seq, ts, n_rec + 1, plen + len(bogus)) + f1[HEADER.size:] + bogus
     s = run([bad])
     assert s["unknown_channel"] == 1
+
+
+def test_patch_seq_gap_is_counted():
+    """A patch's own packet counter skipping numbers = packets lost between patch and router (not a gateway frame gap)."""
+    chk = StreamChecker()
+    for i, pseq in enumerate([1, 2, 3, 6, 7]):                      # 4 and 5 never arrived
+        chk.feed(frame(7, i + 1, 1000 + i, 1, rec(patch_id=42, pseq=pseq), 0))
+    sm = chk.summary()
+    assert sm["seq_gap"] == 0 and sm["patch_seq_gap"] == 1 and sm["patch_seq_missing"] == 2
+    assert chk.per_patch[42]["missing"] == 2

@@ -13,10 +13,16 @@ from router.server import RouterServer
 from router.store import PatchStore, iter_entries
 
 
-def _record(patch_id, patient_id, n_ecg=50):
+_PSEQ = {}
+
+
+def _record(patch_id, patient_id, n_ecg=50, pseq=None):
+    if pseq is None:
+        _PSEQ[patch_id] = _PSEQ.get(patch_id, 0) + 1
+        pseq = _PSEQ[patch_id]
     ecg = (np.arange(n_ecg, dtype=np.int16) * 3).tobytes()
     hr = struct.pack("<H", 72)
-    body = struct.pack("<IIBBbB", patch_id, patient_id, 0, 97, -55, 2)
+    body = struct.pack("<IIIBBbB", patch_id, patient_id, pseq, 0, 97, -55, 2)
     body += struct.pack("<BBH", 1, 1, n_ecg) + ecg          # ch1 ECG int16
     body += struct.pack("<BBH", 2, 3, 1) + hr               # ch2 HR uint16
     return body
@@ -58,14 +64,18 @@ def test_router_stores_records_and_tracks_gateways(tmp_path):
     files = list((tmp_path / "router" / "patches" / "00001001").glob("*.rec"))
     assert len(files) == 1
     entries = list(iter_entries(files[0]))
-    assert len(entries) == 5 and entries[0][1] == 7 and entries[0][2] == 55 and 1 in entries[0][6] and 2 in entries[0][6]
+    assert len(entries) == 5 and entries[0][1] == 7 and entries[0][2] == 55 and 1 in entries[0][7] and 2 in entries[0][7]
+    assert [e[3] for e in entries] == [1, 2, 3, 4, 5]               # the patch's own packet numbers, in order
     assert json.load(open(tmp_path / "router" / "meta" / "gw_7.json"))["gw"] == 7
     # sequence gap and a second socket claiming the same gw_id are flagged
-    c.sendall(frame(7, 9, 9000, 1, _record(1001, 55), 0))
+    c.sendall(frame(7, 9, 9000, 1, _record(1001, 55, pseq=9), 0))   # patch packets 6..8 lost somewhere upstream
     c2 = socket.create_connection(("127.0.0.1", port))
     c2.sendall(frame(7, 10, 9200, 1, _record(1001, 55), 0))
     time.sleep(0.5)
     st = rs.status()
     assert st["anomalies"].get("seq_gap", 0) >= 1
+    assert st["anomalies"].get("patch_seq_gap", 0) >= 1
     assert st["dup_gw_frames"] >= 1
+    store.flush(force=True)
+    assert store.patch(1001)["lost"] >= 3
     c.close(); c2.close(); rs.stop()

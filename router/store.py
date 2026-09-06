@@ -5,7 +5,8 @@ Layout:  <root>/patches/<patch_id 8 digits>/<YYYYMMDD-HH>.rec   (hourly files, a
          <root>/meta/gw_<gw_id>.json                            (last META block of every gateway)
 
 Record file format (little-endian), one entry per patch record received:
-  [ts_ms u64][gw_id u32][patient_id u32][flags u8][battery u8][rssi i8][n_ch u8]  then n_ch x ([ch u8][dtype u8][n u16][data])
+  [ts_ms u64][gw_id u32][patient_id u32][seq u32][flags u8][battery u8][rssi i8][n_ch u8]  then n_ch x ([ch u8][dtype u8][n u16][data])
+  (seq = the patch's own packet counter: a gap in a patch file = lost packets, located exactly)
 Writes are buffered per patch and flushed once a second (one write per patch per second instead of one per frame: SD-card
 friendly); file handles are kept in a small LRU so thousands of patches do not mean thousands of open files.
 """
@@ -19,12 +20,12 @@ import threading
 import time
 from pathlib import Path
 
-ENTRY = struct.Struct("<QIIBBbB")
+ENTRY = struct.Struct("<QIIIBBbB")
 CH_HDR = struct.Struct("<BBH")
 
 
-def encode_entry(ts_ms: int, gw_id: int, patient_id: int, flags: int, battery: int, rssi: int, chans: dict) -> bytes:
-    parts = [ENTRY.pack(ts_ms, gw_id, patient_id, flags & 0xFF, battery & 0xFF, max(-128, min(127, rssi)), len(chans))]
+def encode_entry(ts_ms: int, gw_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, chans: dict) -> bytes:
+    parts = [ENTRY.pack(ts_ms, gw_id, patient_id, seq & 0xFFFFFFFF, flags & 0xFF, battery & 0xFF, max(-128, min(127, rssi)), len(chans))]
     for ch, (dt, n, data) in chans.items():
         parts.append(CH_HDR.pack(ch, dt, n))
         parts.append(data)
@@ -32,12 +33,12 @@ def encode_entry(ts_ms: int, gw_id: int, patient_id: int, flags: int, battery: i
 
 
 def iter_entries(path: str | os.PathLike):
-    """Yield (ts_ms, gw_id, patient_id, flags, battery, rssi, {ch: (dtype, n, bytes)}) from a .rec file."""
+    """Yield (ts_ms, gw_id, patient_id, seq, flags, battery, rssi, {ch: (dtype, n, bytes)}) from a .rec file."""
     with open(path, "rb") as f:
         buf = f.read()
     off = 0
     while off + ENTRY.size <= len(buf):
-        ts, gw, pid, fl, bat, rssi, n_ch = ENTRY.unpack_from(buf, off)
+        ts, gw, pid, seq, fl, bat, rssi, n_ch = ENTRY.unpack_from(buf, off)
         off += ENTRY.size
         chans = {}
         for _ in range(n_ch):
@@ -46,7 +47,7 @@ def iter_entries(path: str | os.PathLike):
             size = n * {1: 2, 2: 1, 3: 2, 4: 1, 5: 4}.get(dt, 1) * (3 if ch == 7 else 1)
             chans[ch] = (dt, n, buf[off: off + size])
             off += size
-        yield ts, gw, pid, fl, bat, rssi, chans
+        yield ts, gw, pid, seq, fl, bat, rssi, chans
 
 
 class PatchStore:
@@ -69,8 +70,8 @@ class PatchStore:
         self._load_index()
 
     # ---- ingest (called from the network thread; cheap: append to a per-patch buffer)
-    def write(self, patch_id: int, ts_ms: int, gw_id: int, patient_id: int, flags: int, battery: int, rssi: int, chans: dict) -> None:
-        entry = encode_entry(ts_ms, gw_id, patient_id, flags, battery, rssi, chans)
+    def write(self, patch_id: int, ts_ms: int, gw_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, chans: dict) -> None:
+        entry = encode_entry(ts_ms, gw_id, patient_id, seq, flags, battery, rssi, chans)
         with self.lock:
             self.pending[patch_id] += entry
             ix = self.index.get(patch_id)
@@ -81,6 +82,12 @@ class PatchStore:
             ix["bytes"] += len(entry)
             ix["patient_id"] = patient_id
             ix["gw_id"] = gw_id
+            last = ix.get("last_seq")
+            if last is not None:                                   # per-patch loss accounting from the patch's own packet counter
+                d = (seq - last) & 0xFFFFFFFF
+                if 1 < d < 0x80000000:
+                    ix["lost"] = ix.get("lost", 0) + d - 1
+            ix["last_seq"] = seq
             self.dirty_index.add(patch_id)
 
     def set_meta(self, gw_id: int, meta: dict) -> None:

@@ -353,6 +353,8 @@ class FrameBuilder:
         numeric_sel = ((tick + active) % ticks_per_sec == 0) if active.size else np.zeros(0, dtype=bool)
         num_bits = sum(1 << ch for ch in (CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE))
         nums = self.g.numerics(active[numeric_sel], tick, bundle_ms) if (chan_mask & num_bits and numeric_sel.any()) else None
+        if active.size:
+            P["seq"][active] += 1                                    # one packet per patch per frame; SAF replays keep their original numbers
         pa = P[active]
         flags = pa["flags"].astype(np.uint8)
         # ---- structured record arrays per (effective mask, with numerics)
@@ -375,6 +377,7 @@ class FrameBuilder:
                 fill_constants(rec, m, with_num, bundle_ms, fs)
                 rec["patch_id"] = pa["patch_id"][sel]
                 rec["patient_id"] = pa["patient_id"][sel]
+                rec["seq"] = pa["seq"][sel]
                 rec["flags"] = flags[sel]
                 rec["battery"] = pa["battery"][sel]
                 rec["rssi"] = pa["rssi"][sel]
@@ -410,7 +413,7 @@ class FrameBuilder:
                     pr = P[r]
                     enc = (marks.astype(np.uint16) & 0x3FFF) | (types.astype(np.uint16) << 14)     # bits 0-13 offset, 14-15 type
                     pace_by_gw.setdefault(int(pr["gw"]), []).append(
-                        pace_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), enc))
+                        pace_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), enc))
         # per-gateway byte ranges of every record array, computed with numpy once per tick: for each key the selected rows
         # are contiguous per gateway (rows are sorted by gateway), so a gateway's block is one slice of the array's bytes
         blocks: list[tuple[memoryview, int, np.ndarray, np.ndarray, np.ndarray]] = []
@@ -639,7 +642,7 @@ class Sender:
         magic, ver, flags, gw_id, seq, ts_ms, n_rec, plen = HEADER.unpack(data[:HEADER.size])
         if flags & F_KEEPALIVE:
             return data
-        bogus = struct.pack("<IIBBbB", 0xFFFFFFF0, 0, 0, 100, -40, 1) + struct.pack("<BBH", 250, 9, 4) + b"\xde\xad\xbe\xef\x00\x01\x02\x03"
+        bogus = struct.pack("<IIIBBbB", 0xFFFFFFF0, 0, 0, 0, 100, -40, 1) + struct.pack("<BBH", 250, 9, 4) + b"\xde\xad\xbe\xef\x00\x01\x02\x03"
         self.st.stat["fuzz"][gw] += 1
         return HEADER.pack(magic, ver, flags, gw_id, seq, ts_ms, n_rec + 1, plen + len(bogus)) + data[HEADER.size:] + bogus
 

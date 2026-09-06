@@ -111,8 +111,8 @@ class RouterServer:
                 self.totals["meta"] += 1
             except Exception:
                 self.totals["anom_meta_json"] += 1
-        for patch_id, patient_id, fl, batt, rssi, chans in recs:
-            self.store.write(patch_id, ts_ms, gw_id, patient_id, fl, batt, rssi, chans)
+        for patch_id, patient_id, pseq, fl, batt, rssi, chans in recs:
+            self.store.write(patch_id, ts_ms, gw_id, patient_id, pseq, fl, batt, rssi, chans)
         row["records"] += len(recs)
         self.totals["records"] += len(recs)
 
@@ -163,6 +163,7 @@ class RouterServer:
                 "connections": len(self.conns), "gateways": len(self.gws), "gateways_connected": sum(1 for g in self.gws.values() if g["connected"]),
                 "patches": len(self.store.index), "frames": self.totals["frames"], "records": self.totals["records"], "bytes": self.totals["bytes"],
                 "meta_blocks": self.totals["meta"], "dup_gw_frames": self.totals["dup_gw"],
+                "patch_packets_lost": sum(ix.get("lost", 0) for ix in self.store.index.values()),
                 "rates": {k: round(v, 1) for k, v in self.rates.items()}, "anomalies": anomalies,
                 "store": {"root": str(self.store.root), "bytes_written": self.store.bytes_written, "open_files": len(self.store.files)}}
 

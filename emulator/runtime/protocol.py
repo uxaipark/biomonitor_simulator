@@ -7,7 +7,7 @@ Frame header (24 bytes):
   ts_ms u64  n_rec u16  payload_len u32   (payload_len = bytes following the header)
 flags: bit0 META block present, bit1 GW_STATUS block present, bit2 KEEPALIVE (no records)
 Payload order: [GW_STATUS 12 B] [META u32 len + JSON] [records...]
-Record: patch_id u32, patient_id u32, flags u8, battery u8, rssi i8, n_ch u8, then n_ch channel blocks
+Record: patch_id u32, patient_id u32, seq u32 (per-patch packet counter: a gap = packets lost between patch and router), flags u8, battery u8, rssi i8, n_ch u8, then n_ch channel blocks
 Channel block: ch_id u8, dtype u8, n u16, data (n * axes * itemsize)
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ import numpy as np
 from ..config import CHANNELS, CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE
 
 MAGIC = 0x4742
-VERSION = 1
+VERSION = 2                      # v2: record header carries the per-patch packet sequence (16 bytes, was 12)
 F_META = 0x01
 F_GWSTAT = 0x02
 F_KEEPALIVE = 0x04
@@ -42,7 +42,7 @@ def samples_per_frame(ch: int, bundle_ms: int, fs: dict) -> int:
 def record_dtype(chan_mask: int, with_numerics: bool, bundle_ms: int, ecg_fs: int, ppg_fs: int, resp_fs: int, accel_fs: int) -> np.dtype:
     """Packed structured dtype for one patch record of a given channel set."""
     fs = {"ecg": ecg_fs, "ppg": ppg_fs, "resp": resp_fs, "accel": accel_fs}
-    fields: list = [("patch_id", "<u4"), ("patient_id", "<u4"), ("flags", "u1"), ("battery", "u1"), ("rssi", "i1"), ("n_ch", "u1")]
+    fields: list = [("patch_id", "<u4"), ("patient_id", "<u4"), ("seq", "<u4"), ("flags", "u1"), ("battery", "u1"), ("rssi", "i1"), ("n_ch", "u1")]
     for ch in WAVE_CH:
         if chan_mask & (1 << ch):
             n = samples_per_frame(ch, bundle_ms, fs)
@@ -75,9 +75,9 @@ def fill_constants(rec: np.ndarray, chan_mask: int, with_numerics: bool, bundle_
     rec["n_ch"] = n_ch
 
 
-def pace_record(patch_id: int, patient_id: int, flags: int, battery: int, rssi: int, marks: np.ndarray) -> bytes:
-    """Standalone record carrying only pacemaker spike marks (sample offsets within the frame)."""
-    head = struct.pack("<IIBbbB", patch_id, patient_id, flags, battery, rssi, 1) if False else struct.pack("<IIBBbB", patch_id, patient_id, flags, battery, rssi, 1)
+def pace_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, marks: np.ndarray) -> bytes:
+    """Standalone record carrying only pacemaker spike marks (sample offsets within the frame); same seq as the data record."""
+    head = struct.pack("<IIIBBbB", patch_id, patient_id, seq, flags, battery, rssi, 1)
     return head + struct.pack("<BBH", CH_PACE, DTYPE_CODE["uint16"], len(marks)) + marks.astype("<u2").tobytes()
 
 
@@ -111,7 +111,7 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                          "(0 atrial, 1 ventricular/RV, 2 LV for CRT). Emulates hardware pace detection: bipolar/leadless spikes are tiny in the "
                          "waveform and detection may miss some (see META patches[].pacemaker.detect_pct). Sent as a separate record (n_ch=1) only when spikes occurred.")
         chans.append(d)
-    return {
+    return {"version": VERSION, 
         "transport": {"type": "tcp", "byte_order": "little", "framing": "length-prefixed frames, back-to-back on the stream",
                       "socket_modes": {"per_gateway": "one TCP connection per gateway (default, realistic)",
                                        "shared": "all gateways multiplexed on one TCP connection per worker process"},
@@ -132,7 +132,7 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                                        "patches": [{"patch_id": "u32", "serial": "BP-xxxxxx", "patient_id": "u32", "mrn": "", "fw": "",
                                                     "resp_source": "capacitive|edr|spo2", "spo2_source": "fingertip|ring|wrist_ptt",
                                                     "channels": [{"id": 1, "key": "ecg", "fs": 250, "dtype": "int16", "scale": 0.001, "unit": "mV"}]}]}},
-        "record": {"header": ["patch_id u32", "patient_id u32 (0 = unassigned)", "flags u8", "battery_pct u8", "rssi_dbm i8", "n_ch u8"],
+        "record": {"header": ["patch_id u32", "patient_id u32 (0 = unassigned)", "seq u32 (per-patch packet counter, +1 per record the patch produced; a gap at the router = packets lost anywhere between patch and router, a gateway frame seq gap = lost between gateway and router)", "flags u8", "battery_pct u8", "rssi_dbm i8", "n_ch u8"],
                    "flags": {"0x01": "LEAD_OFF (ECG electrodes detached; ECG rails, HR/RESP invalid)", "0x02": "MOTION", "0x04": "LOW_BATTERY",
                              "0x08": "SPO2_SENSOR_OFF", "0x10": "PACEMAKER_PATIENT", "0x20": "CHARGING", "0x40": "NEW_PATCH (first frames after replacement)"},
                    "channel_block": ["ch_id u8", "dtype_code u8 (1 int16, 2 uint8, 3 uint16, 4 int8, 5 float32)", "n u16 (samples)", "data n*axes*itemsize"],

@@ -32,8 +32,8 @@ checkers = []
 def decode_records(buf: memoryview, n_rec: int):
     off = 0
     for _ in range(n_rec):
-        patch_id, patient_id, flags, batt, rssi, n_ch = struct.unpack_from("<IIBBbB", buf, off)
-        off += 12
+        patch_id, patient_id, pseq, flags, batt, rssi, n_ch = struct.unpack_from("<IIIBBbB", buf, off)
+        off += 16
         chans = {}
         for _ in range(n_ch):
             ch, dt, n = struct.unpack_from("<BBH", buf, off)
@@ -41,7 +41,7 @@ def decode_records(buf: memoryview, n_rec: int):
             size = n * ITEM[dt] * AXES.get(ch, 1)
             chans[ch] = (dt, n, bytes(buf[off: off + size]))
             off += size
-        yield patch_id, patient_id, flags, batt, rssi, chans
+        yield patch_id, patient_id, pseq, flags, batt, rssi, chans
 
 
 def save_frame(gw_id: int, frame: bytes) -> None:
@@ -63,7 +63,7 @@ async def handle_strict(reader, writer):
         stats["bytes"] += HEADER.size + len(payload)
         if flags & 0x04:
             stats["keepalive"] += 1
-        for patch_id, patient_id, fl, batt, rssi, chans in recs:
+        for patch_id, patient_id, pseq, fl, batt, rssi, chans in recs:
             patches_seen.add(patch_id)
             stats["records"] += 1
             for ch in chans:
@@ -116,7 +116,7 @@ async def handle(reader, writer):
                 stats["meta"] += 1
             if flags & 0x04:
                 stats["keepalive"] += 1
-            for patch_id, patient_id, fl, batt, rssi, chans in decode_records(payload[off:], n_rec):
+            for patch_id, patient_id, pseq, fl, batt, rssi, chans in decode_records(payload[off:], n_rec):
                 patches_seen.add(patch_id)
                 stats["records"] += 1
                 if fl & 0x01:

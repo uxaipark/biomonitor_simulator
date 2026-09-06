@@ -76,13 +76,15 @@ python tools/receiver.py --port 9100 [--save DIR]   # 참고용 수신기(라우
 
 **환자 수 즉시 맞춤 · 도면 부분 갱신 · 압축** (2026-09-06): 시나리오 환자 수를 바꾸면 초당 최대 500명씩 즉시 퇴원/입원해 몇 초 안에 목표에 맞춥니다(시간당 입퇴원율은 그 위의 자연 변동). 병원 탭 도면은 정적 레이어(방·복도·설비·라벨)를 층/모드/테마별로 한 번만 만들고 6초마다 침대·이동 환자·배지·게이트웨이 레이어만 교체합니다. API 응답은 2 KB 이상이면 gzip으로 나가며(게이트웨이 목록 199 KB → 19 KB), 프레임 빌더는 게이트웨이별 바이트 범위를 numpy로 한 번에 계산해 게이트웨이당 ndarray 슬라이스가 없습니다(엄격 수신기로 388 GW·499 패치 무이상 확인).
 
-## 스트림 프로토콜 (v1, little-endian)
+## 스트림 프로토콜 (v2, little-endian)
 
 ```
 Frame  : magic u16 0x4742 | ver u8 | flags u8 | gw_id u32 | seq u32 | ts_ms u64 | n_rec u16 | payload_len u32
 flags  : 0x01 META(JSON) 0x02 GW_STATUS 0x04 KEEPALIVE
 payload: [GW_STATUS 12B] [META u32 len + JSON] [record × n_rec]
-Record : patch_id u32 | patient_id u32 | flags u8 | battery u8 | rssi i8 | n_ch u8 | channel × n_ch
+Record : patch_id u32 | patient_id u32 | seq u32 (패치별 패킷 순번) | flags u8 | battery u8 | rssi i8 | n_ch u8 | channel × n_ch
+
+두 종류의 순번이 있습니다. 헤더의 `seq`는 **게이트웨이 프레임** 순번이라 게이트웨이→라우터 구간의 유실을, 레코드의 `seq`는 **패치가 자기 패킷마다 붙이는 순번**이라 패치→게이트웨이(BLE)→라우터 전체 구간에서 어느 패치의 몇 번째 패킷이 사라졌는지를 알려 줍니다. 저장 후 전송 재전송은 원래 번호를 그대로 갖고 오고, 페이스메이커 스파이크 레코드는 같은 프레임의 데이터 레코드와 같은 번호입니다. 엄격 수신기·검증 도구·라우터는 `patch_seq_gap/missing/dup/reorder`로 집계하고 라우터의 패치별 index.json에 `lost`가 누적됩니다.
 Channel: ch_id u8 | dtype u8 | n u16 | data
 ```
 채널: 1 ECG(int16, 0.001 mV) 2 HR 3 체온(int16, 0.01 °C) 4 호흡수 5 SpO2 6 혈당(uint16, 0.1 mg/dL) 7 가속도(int16×3, 0.001 g) 8 PPG 9 호흡파형 10 페이스마커.

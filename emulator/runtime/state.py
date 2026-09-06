@@ -13,6 +13,7 @@ PATCH_FIELDS = [
     ("gw", np.int32),            # gateway row or -1 (no link)
     ("patch_id", np.uint32),
     ("patient_id", np.uint32),
+    ("seq", np.uint32),          # per-patch packet sequence (protocol v2 record header), advanced by the worker that streams the patch
     ("variant", np.int32),       # ecg/ppg/resp/sec bank row
     ("variant_prev", np.int32),
     ("switch_tick", np.int64),   # tick at which variant changed (crossfade)

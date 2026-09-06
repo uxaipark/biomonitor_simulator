@@ -20,12 +20,12 @@ KNOWN_CH = set(CHANNELS.keys())
 
 
 def decode_records(payload: memoryview, off: int, n_rec: int):
-    """Yields (patch_id, patient_id, flags, battery, rssi, {ch: (dtype, n, bytes)}); raises ValueError on malformed data."""
+    """Yields (patch_id, patient_id, seq, flags, battery, rssi, {ch: (dtype, n, bytes)}); raises ValueError on malformed data."""
     for _ in range(n_rec):
-        if off + 12 > len(payload):
+        if off + 16 > len(payload):
             raise ValueError("record header beyond payload")
-        patch_id, patient_id, flags, batt, rssi, n_ch = struct.unpack_from("<IIBBbB", payload, off)
-        off += 12
+        patch_id, patient_id, seq, flags, batt, rssi, n_ch = struct.unpack_from("<IIIBBbB", payload, off)
+        off += 16
         chans = {}
         for _ in range(n_ch):
             if off + 4 > len(payload):
@@ -41,7 +41,7 @@ def decode_records(payload: memoryview, off: int, n_rec: int):
                 raise ValueError("channel data beyond payload")
             chans[ch] = (dt, n, bytes(payload[off: off + size]))
             off += size
-        yield patch_id, patient_id, flags, batt, rssi, chans
+        yield patch_id, patient_id, seq, flags, batt, rssi, chans
     if off != len(payload):
         raise ValueError("trailing bytes after records")
 
@@ -56,6 +56,8 @@ class StreamChecker:
         self.last_seq: dict[int, int] = {}
         self.last_ts: dict[int, int] = {}
         self.seen_seq: dict[int, set] = defaultdict(set)
+        self.patch_seq: dict[int, int] = {}                  # patch_id -> highest per-patch packet seq seen (protocol v2)
+        self.per_patch: dict[int, Counter] = defaultdict(Counter)
         self.on_frame = on_frame
         self.frames = 0
 
@@ -165,9 +167,32 @@ class StreamChecker:
         s.add(seq)
         if len(s) > 4096:
             s.clear()
+        # per-patch packet sequence: the number a patch stamps on every packet it produces.  A gap here means packets were
+        # lost somewhere between patch and router (BLE dropout, gateway drop, SAF eviction); the gateway frame seq above only
+        # covers gateway -> router.  Pace records repeat the data record's seq, so a repeat inside one frame is not a dup.
+        seen_now = set()
+        for patch_id, _pid, pseq, *_ in recs:
+            if patch_id in seen_now:
+                continue
+            seen_now.add(patch_id)
+            pp = self.per_patch[patch_id]
+            pp["records"] += 1
+            last = self.patch_seq.get(patch_id)
+            if last is not None:
+                d = (pseq - last) & 0xFFFFFFFF
+                if d == 0:
+                    self.counts["patch_seq_dup"] += 1; pp["dup"] += 1
+                elif d > 0x80000000:
+                    self.counts["patch_seq_reorder"] += 1; pp["reorder"] += 1
+                    continue
+                elif d > 1:
+                    self.counts["patch_seq_gap"] += 1; pp["gap"] += 1
+                    self.counts["patch_seq_missing"] += d - 1; pp["missing"] += d - 1
+            self.patch_seq[patch_id] = pseq
         if self.on_frame:
             self.on_frame(gw_id, seq, ts_ms, flags, n_rec, recs, payload)
 
     def summary(self) -> dict:
-        keys = ["bad_magic", "bad_version", "bad_len", "oversize", "truncated", "resync", "garbage_bytes", "seq_gap", "seq_dup", "seq_reorder", "ts_backwards", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
+        keys = ["bad_magic", "bad_version", "bad_len", "oversize", "truncated", "resync", "garbage_bytes", "seq_gap", "seq_dup", "seq_reorder", "ts_backwards",
+                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
         return {"frames": self.frames, "gateways": len(self.per_gw), **{k: int(self.counts.get(k, 0)) for k in keys}}
