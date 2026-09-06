@@ -1,0 +1,132 @@
+{
+  "general": {
+    "seed": 20240905,
+    "profile_count": 20000,
+    "bed_capacity": 2000,
+    "active_patients": 500,
+    "outpatient_count": 10,
+    "heart_disease_ratio": 0.7,
+    "korean_ratio": 0.9,
+    "sim_speed": 1.0,
+    "db_retention_days": 7,
+    "admissions_per_hour": 4,
+    "discharges_per_hour": 4
+  },
+  "signals": {
+    "ecg_fs": 250,
+    "ppg_fs": 100,
+    "resp_fs": 25,
+    "accel_fs": 50,
+    "enabled": {
+      "ecg": true,
+      "hr": true,
+      "temp": true,
+      "resp": true,
+      "spo2": true,
+      "glucose": true,
+      "accel": true,
+      "ppg": true,
+      "resp_wave": true,
+      "pace": true
+    },
+    "resp_source": "capacitive",
+    "spo2_source": "fingertip",
+    "pacemaker_ratio": 0.06,
+    "variants_per_rhythm": 12,
+    "loop_seconds": 3600
+  },
+  "transport": {
+    "target_ip": "",
+    "target_port": 9100,
+    "socket_mode": "per_gateway",
+    "bundle_ms": 200,
+    "meta_every_n_frames": 25,
+    "gw_status_every_n_frames": 5,
+    "workers": 0,
+    "capture_max_mb": 256,
+    "saf_worker_max_mb": 64,
+    "max_send_backlog_bytes": 262144,
+    "reconnect_interval_s": 3.0,
+    "router_status_url": "",
+    "store_forward": {
+      "enabled": true,
+      "max_bytes_per_gw": 2097152,
+      "burst_frames_per_cycle": 40
+    },
+    "fuzz": {
+      "enabled": false,
+      "rate_per_1000": 5.0,
+      "kinds": [
+        "bad_magic",
+        "bad_version",
+        "bad_len",
+        "truncated",
+        "oversize",
+        "garbage",
+        "dup",
+        "reorder",
+        "seq_gap",
+        "bad_record"
+      ]
+    },
+    "storm_smoothing": true,
+    "capture": {
+      "enabled": false
+    }
+  },
+  "hospital": {
+    "template": "auto",
+    "layout_file": "",
+    "size_by_patients": true,
+    "headroom_pct": 20.0,
+    "max_buildings": 3
+  },
+  "scenario": {
+    "site": "hospital",
+    "rhythm_episodes": true,
+    "variant_hopping": true,
+    "devices": {
+      "policy": "auto",
+      "spo2_mix": {
+        "fingertip": 55.0,
+        "ring": 35.0,
+        "wrist_ptt": 10.0
+      }
+    },
+    "network": {
+      "enabled": false,
+      "intensity": 30,
+      "wireless_noise": true,
+      "wired_failure": true,
+      "latency": true,
+      "power_outage": true
+    },
+    "exam_trip_ratio": 5.0,
+    "artifacts": {
+      "enabled": false,
+      "intensity": 100,
+      "motion": true,
+      "shower": true,
+      "exam_trips": true,
+      "patch_reattach": true,
+      "transfer": true,
+      "patch_replace": true,
+      "home_interference": true
+    },
+    "patch": {
+      "battery_days": 14.0,
+      "battery_drain_enabled": true,
+      "lead_off_enabled": true,
+      "replace_below_pct": 5
+    },
+    "gateway": {
+      "capacity": 32,
+      "fault_enabled": false,
+      "fault_intensity": 20,
+      "outage": true,
+      "degrade": true,
+      "replace": true,
+      "corridor_gateways": true
+    }
+  }
+}
