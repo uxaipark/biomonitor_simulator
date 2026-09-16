@@ -2,12 +2,12 @@
 
 TCP stream of frames.  All integers little-endian.
 
-Frame header (24 bytes):
+Frame header (26 bytes):
   magic u16 = 0x4742 ('B','G')  ver u8 = 1  flags u8  gw_id u32  seq u32
   ts_ms u64  n_rec u16  payload_len u32   (payload_len = bytes following the header)
 flags: bit0 META block present, bit1 GW_STATUS block present, bit2 KEEPALIVE (no records)
 Payload order: [GW_STATUS 12 B] [META u32 len + JSON] [records...]
-Frame: header (24) + payload + CRC-32 trailer (4).  Control frames (router->gateway, F_CTRL): NACK seq ranges.
+Frame: header (26) + payload + CRC-32 trailer (4).  Control frames (router->gateway, F_CTRL): NACK seq ranges.
 Record: patch_id u32, patient_id u32, seq u32 (per-patch packet counter: a gap = packets lost between patch and router), flags u8, battery u8, rssi i8, n_ch u8, then n_ch channel blocks
 Channel block: ch_id u8, dtype u8, n u16, data (n * axes * itemsize)
 """
@@ -31,7 +31,7 @@ F_CTRL = 0x08                    # control frame (router -> gateway): payload = 
 CTRL_NACK = 1
 CTRL = struct.Struct("<BII")
 CRC = struct.Struct("<I")         # frame trailer: CRC-32 (zlib) over header + payload
-HEADER = struct.Struct("<HBBIIQHI")       # 24 bytes
+HEADER = struct.Struct("<HBBIIQHI")       # 26 bytes
 GWSTAT = struct.Struct("<BBBbBBIB")       # cpu mem net wan_rssi n_conn status uptime temp_c  = 12 bytes
 DTYPE_CODE = {"int16": 1, "uint8": 2, "uint16": 3, "int8": 4, "float32": 5}
 NP_DTYPE = {"int16": np.int16, "uint8": np.uint8, "uint16": np.uint16, "int8": np.int8, "float32": np.float32}

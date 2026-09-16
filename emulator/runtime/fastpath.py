@@ -501,6 +501,7 @@ class Sender:
         self.socks: dict[int, socket.socket | None] = {}
         self.bufs: dict[int, bytearray] = {}
         self.last_try: dict[int, float] = {}
+        self.sent_ok: set[int] = set()       # keys whose peer has accepted data on the current socket
         self.delayed: list[tuple[float, int, int, bytes]] = []
         self._seq = 0
         self.target = ("", 0)
@@ -547,6 +548,7 @@ class Sender:
                     pass
         self.socks.clear()
         self.bufs.clear()
+        self.sent_ok.clear()
         self.st.stat["connected"][self.gw_rows] = 0
 
     def _key(self, gw: int) -> int:
@@ -572,6 +574,7 @@ class Sender:
                 pass
             self.socks[key] = s
             self.bufs[key] = bytearray()
+            self.sent_ok.discard(key)                 # a fresh socket is unconfirmed until a send succeeds
             if self.fb is not None:                       # a (re)connected device announces itself with META first
                 for g in ([key] if key >= 0 else self.gw_rows):
                     self.fb.force_meta[g] = True
@@ -589,6 +592,7 @@ class Sender:
             except Exception:
                 pass
         self.bufs.pop(key, None)
+        self.sent_ok.discard(key)
         self.st.stat["connected"][gws] = 0
 
     # ---------------------------------------------------------------- drills
@@ -906,12 +910,34 @@ class Sender:
                 n = s.send(buf)
                 if n > 0:
                     del buf[:n]
-                    S["connected"][gws] = 1
+                    self.sent_ok.add(key)
             except (BlockingIOError, InterruptedError):
                 continue
             except OSError:
                 S["send_err"][gws] += 1
                 self._drop_conn(key, gws)
+        self._refresh_connected()
+
+    def _refresh_connected(self) -> None:
+        """Mirror the live socket set into stat['connected'].
+
+        The flag used to be a one-way latch: set on the first successful send and cleared only
+        by a socket error, so a gateway that simply went quiet -- an idle MCOT pool unit, a row
+        whose patients moved away, a connect that never completed -- stayed 'connected' for the
+        rest of the run.  Over a week the reported total drifted 200 above the real connection
+        count (every one of the 200 pre-created mobile gateways read as connected while 199 of
+        them had never sent a byte).  A gateway counts as connected when it still holds a socket
+        AND that socket's peer has accepted data.  Only this worker's rows are written; every
+        other row belongs to another worker.
+        """
+        S = self.st.stat.arr
+        if int(self.st.ctl[CTL["socket_mode"]]) == 0:                 # per_gateway: key == gw row
+            live = np.fromiter((1 if (self.socks.get(g) is not None and g in self.sent_ok) else 0
+                                for g in self.gw_rows), dtype=np.uint8, count=len(self.gw_rows))
+            S["connected"][self.gw_rows] = live
+        else:                                                          # shared: one uplink covers the worker's rows
+            key = -1 - self.worker_id
+            S["connected"][self.gw_rows] = 1 if (self.socks.get(key) is not None and key in self.sent_ok) else 0
 
     def close(self):
         self.close_all()

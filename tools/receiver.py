@@ -12,10 +12,13 @@ import argparse
 import asyncio
 import json
 import struct
+import zlib
 import time
 from collections import Counter
 
 HEADER = struct.Struct("<HBBIIQHI")
+CRC = struct.Struct("<I")          # v3 frame trailer: CRC-32 (zlib) over header + payload
+CRC_FROM_VERSION = 3
 GWSTAT = struct.Struct("<BBBbBBIB")
 ITEM = {1: 2, 2: 1, 3: 2, 4: 1, 5: 4}
 AXES = {7: 3}
@@ -100,7 +103,14 @@ async def handle(reader, writer):
                 print("bad magic from", peer)
                 break
             payload = memoryview(await reader.readexactly(plen))
-            save_frame(gw_id, hdr + bytes(payload))
+            trailer = b""
+            if ver >= CRC_FROM_VERSION:
+                # protocol v3 appends a CRC-32 over header+payload; a reader that leaves those
+                # four bytes in the stream slides out of step and rejects every later frame
+                trailer = await reader.readexactly(CRC.size)
+                if (zlib.crc32(hdr + bytes(payload)) & 0xFFFFFFFF) != CRC.unpack(trailer)[0]:
+                    stats["crc_bad"] += 1            # framing is intact: count it and keep reading
+            save_frame(gw_id, hdr + bytes(payload) + trailer)
             gws_seen.add(gw_id)
             stats["frames"] += 1
             stats["bytes"] += HEADER.size + plen
