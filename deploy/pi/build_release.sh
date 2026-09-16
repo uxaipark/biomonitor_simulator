@@ -31,6 +31,8 @@ rsync -a --exclude '__pycache__' "$ROOT/deploy/pi" "$STAGE/deploy/"
 cp "$ROOT/deploy/pi/install.sh" "$STAGE/install.sh"
 chmod +x "$STAGE/install.sh" "$STAGE/deploy/pi/"*.sh "$STAGE/deploy/pi/kiosk/"*.sh
 echo "$VERSION" > "$STAGE/VERSION"
+# manifest of shipped source files: install.sh --update uses it to detect (and save) edits made on the device
+( cd "$STAGE" && find emulator router tools scenarios run.py requirements.txt -type f ! -name '*.pyc' | sort | xargs shasum -a 256 ) > "$STAGE/MANIFEST"
 
 # 3) optional loop bank (must match config.pi.json: ecg_fs / variants_per_rhythm / loop_seconds / seed)
 if [ "$WITH_BANK" = 1 ]; then

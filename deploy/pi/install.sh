@@ -38,8 +38,23 @@ if ! id "$SVC_USER" >/dev/null 2>&1; then run useradd --system --home "$APP_HOME
 run mkdir -p "$APP_HOME/app" "$DATA_DIR"
 
 # 3) code (rsync keeps the venv; --delete removes stale modules)
+#    Before overwriting: any file edited on the device since the last release is saved as a patch so nothing is lost
+#    (edits belong in the git repo -> next release; the patch makes that easy).  Uses the previous release's MANIFEST.
+if [ "$DRY" = 0 ] && [ -f "$APP_HOME/app/MANIFEST" ] && [ -d "$APP_HOME/app" ]; then
+  CHANGED="$(cd "$APP_HOME/app" && shasum -a 256 -c MANIFEST 2>/dev/null | grep -v ': OK$' | sed 's/: FAILED.*//' || true)"
+  if [ -n "$CHANGED" ]; then
+    PATCH="$DATA_DIR/local-changes-$(date +%Y%m%d-%H%M%S).patch"
+    : > "$PATCH"
+    for f in $CHANGED; do
+      if [ -f "$APP_HOME/app/$f" ] && [ -f "$HERE/$f" ]; then diff -u "$HERE/$f" "$APP_HOME/app/$f" --label "a/$f" --label "b/$f" >> "$PATCH" || true; else echo "# $f: changed on device (no counterpart in release)" >> "$PATCH"; fi
+    done
+    echo "   !! files edited on this device since the last release: $(echo "$CHANGED" | wc -l | tr -d ' ')"
+    echo "$CHANGED" | sed 's/^/      /'
+    echo "   !! saved as $PATCH  -> apply it to the git repo (git apply) so the next release keeps it"
+  fi
+fi
 run rsync -a --delete --exclude 'venv' --exclude '__pycache__' \
-  "$HERE/emulator" "$HERE/router" "$HERE/tools" "$HERE/scenarios" "$HERE/run.py" "$HERE/requirements.txt" "$HERE/README.md" "$HERE/deploy" "$HERE/VERSION" "$APP_HOME/app/"
+  "$HERE/emulator" "$HERE/router" "$HERE/tools" "$HERE/scenarios" "$HERE/run.py" "$HERE/requirements.txt" "$HERE/README.md" "$HERE/deploy" "$HERE/VERSION" "$HERE/MANIFEST" "$APP_HOME/app/"
 
 # 4) python venv with piwheels (prebuilt ARM wheels: no compiler, minutes instead of hours)
 if [ ! -x "$APP_HOME/venv/bin/python" ]; then run python3 -m venv "$APP_HOME/venv"; fi

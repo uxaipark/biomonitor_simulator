@@ -45,7 +45,7 @@ sudo systemctl restart biosim
 /opt/biosim/app/deploy/pi/healthcheck.sh   # 실행 여부 · pkt/s · 이동 중 환자 · 게이트웨이 요약
 ```
 
-업데이트는 개발 PC에서 한 줄입니다(코드만 교체, 데이터 유지):
+업데이트는 개발 PC에서 한 줄입니다(코드만 교체, 데이터 유지). 장비에서 직접 고친 파일이 있으면 덮어쓰기 전에 `/var/lib/biosim/local-changes-<시각>.patch`로 저장하고 목록을 출력하므로, 그 패치를 저장소에 `git apply`한 뒤 다시 릴리스하면 됩니다(장비 수정은 항상 저장소로 되돌려 놓아야 다음 배포에 남습니다):
 
 ```bash
 deploy/pi/update.sh pi@<pi-host>                       # 새 릴리스 빌드 후 전송 + install.sh --update
