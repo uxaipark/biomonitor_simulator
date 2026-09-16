@@ -33,6 +33,12 @@ def make_app(rs: RouterServer) -> FastAPI:
             raise HTTPException(404, "unknown patch")
         return p
 
+    @app.get("/patches/{pid}/verify")
+    def patch_verify(pid: int):
+        """Walk the patch's record files checking every entry CRC (silent disk corruption shows up as bad > 0)."""
+        rs.store.flush(force=True)
+        return rs.store.verify_patch(pid)
+
     @app.get("/events")
     def events(limit: int = 200):
         return {"events": list(rs.events)[-limit:]}

@@ -167,6 +167,8 @@ class Engine:
         if n_workers == 1 and t["workers"] == 1:
             os.environ["BIOSIM_CAPTURE_WORKER_MAX"] = str(int(self.cfg.get("transport").get("capture_max_mb", 256) * 1024 * 1024 / max(1, n_workers)))
             os.environ["BIOSIM_SAF_WORKER_MAX"] = str(int(self.cfg.get("transport").get("saf_worker_max_mb", 64) * 1024 * 1024))
+            os.environ["BIOSIM_RESEND_KEEP_S"] = str(float(self.cfg.get("transport").get("resend_keep_s", 10)))
+            os.environ["BIOSIM_RESEND_KEEP_MAX"] = str(int(self.cfg.get("transport").get("resend_keep_mb", 64) * 1024 * 1024))
             self.inproc_thread = threading.Thread(target=worker_main, args=(0, {**st.names(), "capture_dir": str(CAPTURE_DIR)}, shards[0].tolist(), self.bank_args(), str(META_PATH)),
                                                   daemon=True, name="fastpath")
             self.inproc_thread.start()
@@ -249,7 +251,8 @@ class Engine:
                "drop_backlog": int(S["drop_backlog"].sum()), "drop_noconn": int(S["drop_noconn"].sum()), "send_err": int(S["send_err"].sum()), "connected": int(S["connected"].sum()),
                "overruns": int(W["overruns"].sum()), "ticks": int(W["ticks"].sum()),
                "saf_bytes": int(S["saf_bytes"].sum()), "saf_replayed": int(S["saf_replayed"].sum()), "drop_saf": int(S["drop_saf"].sum()), "fuzz": int(S["fuzz"].sum()),
-               "saf_gateways": int((S["saf_bytes"] > 0).sum())}
+               "saf_gateways": int((S["saf_bytes"] > 0).sum()),
+               "nack_rx": int(S["nack_rx"].sum()), "resent": int(S["resent"].sum()), "resend_miss": int(S["resend_miss"].sum()), "bad_ctrl": int(S["bad_ctrl"].sum())}
         now = time.time()
         prev = self._last_totals
         dt = now - prev.get("t", now - 1) if prev else 1.0

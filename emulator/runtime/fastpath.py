@@ -20,7 +20,8 @@ from ..config import (CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE,
                       RESP_SOURCES, SPO2_SOURCES)
 from ..signals.accel import POSTURES
 from ..signals.loops import LoopBank
-from .protocol import (record_dtype, fill_constants, pace_record, frame, gwstat_block, meta_block, F_META, F_GWSTAT, F_KEEPALIVE, HEADER)
+from .protocol import (record_dtype, fill_constants, pace_record, frame, gwstat_block, meta_block, F_META, F_GWSTAT, F_KEEPALIVE, HEADER,
+                       CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl)
 from collections import deque
 from .state import SharedState, CTL, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
 
@@ -511,6 +512,13 @@ class Sender:
         self.saf: dict[int, deque] = {}
         self.saf_bytes: dict[int, int] = {}
         self.saf_total = 0                                   # worker-wide SAF bytes (capped: a whole-site outage must not eat RAM)
+        # keep buffer (protocol v3): every frame handed to the wire stays here for resend_keep_s so a router NACK can be answered
+        self.keep: dict[int, deque] = {}                     # gw -> deque[(seq, t_sent, bytes)]
+        self.keep_total = 0
+        self.keep_s = float(os.environ.get("BIOSIM_RESEND_KEEP_S", "10"))
+        self.keep_max = int(os.environ.get("BIOSIM_RESEND_KEEP_MAX", str(64 * 1024 * 1024)))
+        self.rx: dict[int, bytearray] = {}                   # per socket: bytes received from the router (control frames)
+        self._id2row: dict[int, int] = {}
         self.saf_worker_max = int(names_saf_max) if (names_saf_max := os.environ.get("BIOSIM_SAF_WORKER_MAX", "")) else 64 * 1024 * 1024
         # fuzz drill: a held frame per gateway for the 'reorder' kind
         self.held: dict[int, bytes] = {}
@@ -573,6 +581,7 @@ class Sender:
             return None
 
     def _drop_conn(self, key: int, gws: list[int]):
+        self.rx.pop(key, None)
         s = self.socks.pop(key, None)
         if s:
             try:
@@ -756,6 +765,7 @@ class Sender:
             if G["silent"][gw]:                                     # half-open drill: socket up, nothing sent
                 S["drop_backlog"][gw] += 1
                 continue
+            self._keep_push(gw, data, now)
             loss = float(G["loss"][gw])
             if loss > 0 and self.rng.random() < loss:
                 S["drop_emul"][gw] += 1
@@ -773,7 +783,81 @@ class Sender:
             self._enqueue(gw, data, now, max_backlog)
         self.flush(now)
 
-    def _enqueue(self, gw: int, data: bytes, now: float, max_backlog: int):
+    # ---- protocol v3: keep buffer + NACK handling
+    def _keep_push(self, gw: int, data: bytes, now: float) -> None:
+        if self.keep_s <= 0:
+            return
+        seq = HEADER.unpack_from(data, 0)[4]
+        q = self.keep.setdefault(gw, deque())
+        q.append((seq, now, data))
+        self.keep_total += len(data)
+        while q and now - q[0][1] > self.keep_s:
+            self.keep_total -= len(q.popleft()[2])
+        while self.keep_total > self.keep_max:                    # worker-wide cap: oldest frames of the fullest queue go first
+            g2, q2 = max(self.keep.items(), key=lambda kv: len(kv[1]))
+            if not q2:
+                break
+            self.keep_total -= len(q2.popleft()[2])
+
+    def _read_ctrl(self, key: int, s: socket.socket, gws, now: float, max_backlog: int) -> None:
+        """Drain what the router sent back on this socket and act on control frames (NACK -> resend from the keep buffer)."""
+        try:
+            data = s.recv(65536)
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError:
+            return
+        if not data:
+            return
+        buf = self.rx.setdefault(key, bytearray())
+        buf += data
+        S = self.st.stat.arr
+        while len(buf) >= HEADER.size:
+            magic, ver, flags, gw_id, seq, ts_ms, n_rec, plen = HEADER.unpack_from(buf, 0)
+            if magic != MAGIC or ver != VERSION or plen > 65536:
+                S["bad_ctrl"][gws] += 1
+                del buf[:1]
+                continue
+            tot = HEADER.size + plen + CRC.size
+            if len(buf) < tot:
+                break
+            body = bytes(buf[:HEADER.size + plen]); trailer = bytes(buf[HEADER.size + plen: tot])
+            del buf[:tot]
+            if not frame_crc_ok(body, trailer):
+                S["bad_ctrl"][gws] += 1
+                continue
+            if flags & F_CTRL:
+                c = parse_ctrl(body[HEADER.size:])
+                if c and c[0] == CTRL_NACK:
+                    self._resend(int(gw_id), int(c[1]), int(c[2]), now, max_backlog)
+
+    def _row_of_gw_id(self, gw_id: int) -> int:
+        """Control frames name the gateway by its on-wire id (GW_ID), not by its row: map it back (ids change on a replace)."""
+        row = self._id2row.get(gw_id, -1)
+        if row < 0 or int(self.st.gw["gw_id"][row]) != gw_id:
+            ids = self.st.gw["gw_id"]
+            self._id2row = {int(ids[r]): int(r) for r in self.gw_rows}
+            row = self._id2row.get(gw_id, -1)
+        return row
+
+    def _resend(self, gw_id: int, seq_from: int, seq_to: int, now: float, max_backlog: int) -> None:
+        S = self.st.stat.arr
+        gw = self._row_of_gw_id(gw_id)
+        if gw < 0:
+            return
+        S["nack_rx"][gw] += 1
+        q = self.keep.get(gw)
+        want = set(range(seq_from, seq_to + 1)) if seq_to >= seq_from else {seq_from}
+        found = 0
+        if q:
+            for sq, _t, data in q:
+                if sq in want:
+                    self._enqueue(gw, data, now, max_backlog, resend=True)
+                    found += 1
+        S["resent"][gw] += found
+        S["resend_miss"][gw] += max(0, len(want) - found)
+
+    def _enqueue(self, gw: int, data: bytes, now: float, max_backlog: int, resend: bool = False):
         S = self.st.stat.arr
         saf_on = self.st.ctl[CTL["saf_enabled"]] > 0
         if self.st.gw["status"][gw] == 2:          # gateway down: connection dropped; frames go to the local buffer
@@ -797,7 +881,7 @@ class Sender:
             self._saf_push(gw, data)
             return
         buf = self.bufs[key]
-        chunks = self._fuzz(gw, self._fuzz_record(gw, data))
+        chunks = [data] if resend else self._fuzz(gw, self._fuzz_record(gw, data))   # a resend goes out clean
         for d in chunks:
             if len(buf) + len(d) > max_backlog:
                 if saf_on:
@@ -809,11 +893,13 @@ class Sender:
 
     def flush(self, now: float):
         S = self.st.stat.arr
+        max_backlog = int(self.st.ctl[CTL["max_backlog"]])
         for key, s in list(self.socks.items()):
             if s is None:
                 continue
             buf = self.bufs.get(key)
             gws = [key] if key >= 0 else self.gw_rows
+            self._read_ctrl(key, s, gws, now, max_backlog)
             if not buf:
                 continue
             try:

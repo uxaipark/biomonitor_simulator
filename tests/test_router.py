@@ -8,9 +8,9 @@ import time
 
 import numpy as np
 
-from emulator.runtime.protocol import frame, gwstat_block, meta_block, F_GWSTAT, F_META
+from emulator.runtime.protocol import frame, gwstat_block, meta_block, F_GWSTAT, F_META, HEADER, CRC, parse_ctrl, CTRL_NACK
 from router.server import RouterServer
-from router.store import PatchStore, iter_entries
+from router.store import PatchStore, iter_entries, verify_file
 
 
 _PSEQ = {}
@@ -79,3 +79,51 @@ def test_router_stores_records_and_tracks_gateways(tmp_path):
     store.flush(force=True)
     assert store.patch(1001)["lost"] >= 3
     c.close(); c2.close(); rs.stop()
+
+
+def _read_frame(sock, timeout=3.0):
+    sock.settimeout(timeout)
+    buf = b""
+    while len(buf) < HEADER.size:
+        buf += sock.recv(4096)
+    plen = HEADER.unpack_from(buf, 0)[7]
+    while len(buf) < HEADER.size + plen + CRC.size:
+        buf += sock.recv(4096)
+    return buf
+
+
+def test_router_nacks_gaps_and_counts_recovery(tmp_path):
+    """v3: a seq gap makes the router send a NACK control frame back on the gateway's socket; the resent frames are counted
+    as recovered (not as reorders), and a corrupt frame is NACKed by its seq.  Store entries carry a CRC that verifies."""
+    rs, store, port = _start(tmp_path)
+    c = socket.create_connection(("127.0.0.1", port))
+    c.sendall(frame(9, 1, 1000, 1, _record(3001, 88), 0))
+    c.sendall(frame(9, 2, 1200, 1, _record(3001, 88), 0))
+    c.sendall(frame(9, 5, 1800, 1, _record(3001, 88), 0))          # 3 and 4 lost on the way
+    nack = _read_frame(c)
+    hdr = HEADER.unpack_from(nack, 0)
+    assert hdr[2] & 0x08 and hdr[3] == 9
+    assert parse_ctrl(nack[HEADER.size: -CRC.size]) == (CTRL_NACK, 3, 4)
+    c.sendall(frame(9, 3, 1400, 1, _record(3001, 88, pseq=3), 0))  # the gateway answers from its keep buffer
+    c.sendall(frame(9, 4, 1600, 1, _record(3001, 88, pseq=4), 0))
+    time.sleep(0.6)
+    st = rs.status()
+    assert st["nack_tx"] == 1 and st["recovered"] == 2 and st["resend_pending"] == 0
+    assert st["anomalies"].get("seq_reorder", 0) == 0 and st["anomalies"].get("resend_ok", 0) == 2
+    # corrupt frame -> bad_crc + NACK for that seq
+    bad = bytearray(frame(9, 6, 2000, 1, _record(3001, 88), 0)); bad[HEADER.size + 2] ^= 0xFF
+    time.sleep(0.6)                                                 # NACK rate limit
+    c.sendall(bytes(bad)); c.sendall(frame(9, 7, 2200, 1, _record(3001, 88), 0))
+    nack2 = _read_frame(c)
+    assert parse_ctrl(nack2[HEADER.size: -CRC.size])[1:] == (6, 6)
+    time.sleep(0.3)
+    assert rs.status()["anomalies"].get("bad_crc", 0) == 1
+    store.flush(force=True)
+    f = next((tmp_path / "router" / "patches" / "00003001").glob("*.rec"))
+    v = verify_file(f)
+    assert v["ok"] and v["entries"] == 6 and v["bad"] == 0
+    raw = bytearray(f.read_bytes()); raw[40] ^= 0x01; f.write_bytes(bytes(raw))   # flip a bit on disk
+    v2 = verify_file(f)
+    assert v2["bad"] >= 1 and not v2["ok"]
+    assert store.verify_patch(3001)["bad"] >= 1
+    c.close(); rs.stop()

@@ -19,7 +19,7 @@ import time
 import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from emulator.runtime.protocol import HEADER, GWSTAT, F_GWSTAT, F_META, F_KEEPALIVE   # noqa: E402
+from emulator.runtime.protocol import HEADER, GWSTAT, F_GWSTAT, F_META, F_KEEPALIVE, ctrl_frame, CTRL_NACK   # noqa: E402
 from emulator.runtime.verify import StreamChecker                                     # noqa: E402
 from .store import PatchStore                                                          # noqa: E402
 
@@ -34,6 +34,8 @@ class RouterServer:
         self.conns: dict[int, dict] = {}                  # conn id -> {addr, gws:set, frames, bytes, checker}
         self.gws: dict[int, dict] = {}                    # gw_id -> table row
         self.events: collections.deque = collections.deque(maxlen=500)
+        self.pending_nack: dict[int, dict[int, tuple[float, int]]] = {}   # gw -> {seq: (first asked, times asked)}
+        self.last_nack: dict[int, float] = {}
         self.totals = collections.Counter()
         self._rate_prev = (time.time(), collections.Counter())
         self.rates: dict[str, float] = {}
@@ -46,8 +48,9 @@ class RouterServer:
         self._conn_seq += 1
         cid = self._conn_seq
         addr = writer.get_extra_info("peername")
-        conn = {"id": cid, "addr": f"{addr[0]}:{addr[1]}" if addr else "?", "gws": set(), "frames": 0, "bytes": 0, "opened": time.time()}
+        conn = {"id": cid, "addr": f"{addr[0]}:{addr[1]}" if addr else "?", "gws": set(), "frames": 0, "bytes": 0, "opened": time.time(), "writer": writer}
         chk = StreamChecker(lambda *a, _c=conn: self._on_frame(_c, *a))
+        chk.on_corrupt = lambda gw_id, seq, _c=conn: self._nack(_c, gw_id, seq, seq, "crc")
         conn["checker"] = chk
         self.conns[cid] = conn
         self.totals["connections"] += 1
@@ -91,8 +94,21 @@ class RouterServer:
             row["conn"] = conn["id"]; row["addr"] = conn["addr"]; row["connected"] = True
         conn["gws"].add(gw_id)
         row["frames"] += 1
-        row["last_seq"] = seq
-        row["last_ts"] = ts_ms
+        # gateway frame gap -> ask for the missing range (protocol v3 NACK); frames that come back are counted as recovered
+        last = row.get("last_seq")
+        if last is not None and 1 < ((seq - last) & 0xFFFFFFFF) <= 200:
+            self._nack(conn, gw_id, (last + 1) & 0xFFFFFFFF, (seq - 1) & 0xFFFFFFFF, "gap")
+        pend = self.pending_nack.get(gw_id)
+        if pend and seq in pend:
+            pend.pop(seq, None)
+            row["recovered"] = row.get("recovered", 0) + 1
+            self.totals["recovered"] += 1
+            return_after = True
+        else:
+            return_after = False
+        if not return_after:
+            row["last_seq"] = seq
+        row["last_ts"] = max(ts_ms, row.get("last_ts", 0))
         row["last_seen"] = time.time()
         if flags & F_KEEPALIVE:
             row["keepalive"] += 1
@@ -116,6 +132,27 @@ class RouterServer:
         row["records"] += len(recs)
         self.totals["records"] += len(recs)
 
+    def _nack(self, conn: dict, gw_id: int, seq_from: int, seq_to: int, why: str) -> None:
+        """Ask the gateway (on its own socket) to resend seq_from..seq_to.  Rate-limited: one request per gateway per
+        0.5 s, a range is asked at most 3 times, and never more than 200 frames at once."""
+        now = time.time()
+        pend = self.pending_nack.setdefault(gw_id, {})
+        rng = [q & 0xFFFFFFFF for q in range(seq_from, seq_from + ((seq_to - seq_from) & 0xFFFFFFFF) + 1)][:200]
+        fresh = [q for q in rng if pend.get(q, (0, 0))[1] < 3]
+        if not fresh or now - self.last_nack.get(gw_id, 0.0) < 0.5:
+            return
+        for q in fresh:
+            t0, n = pend.get(q, (now, 0))
+            pend[q] = (t0, n + 1)
+        self.last_nack[gw_id] = now
+        conn["checker"].expect(gw_id, fresh[0], fresh[-1])
+        try:
+            conn["writer"].write(ctrl_frame(gw_id, CTRL_NACK, fresh[0], fresh[-1], int(now * 1000)))
+            self.totals["nack_tx"] += 1
+            self._event("nack", f"gw {gw_id}: resend {fresh[0]}..{fresh[-1]} ({why})")
+        except Exception as ex:
+            self._event("error", f"nack to gw {gw_id} failed: {type(ex).__name__}")
+
     def _event(self, kind: str, msg: str) -> None:
         self.events.append({"t": time.time(), "kind": kind, "msg": msg})
 
@@ -133,6 +170,12 @@ class RouterServer:
             dt = max(1e-3, now - t0)
             self.rates = {k: (self.totals[k] - prev.get(k, 0)) / dt for k in ("frames", "bytes", "records")}
             self._rate_prev = (now, collections.Counter(self.totals))
+            for gw_id, pend in list(self.pending_nack.items()):   # requests that were never answered: the frames are gone
+                for q, (t0, n) in list(pend.items()):
+                    if now - t0 > 15:
+                        pend.pop(q, None); self.totals["resend_lost"] += 1
+                if not pend:
+                    self.pending_nack.pop(gw_id, None)
             for g in self.gws.values():                  # gateway silence: no frame for 10 s while its socket is up
                 if g["connected"] and now - g.get("last_seen", now) > 10 and not g.get("silent"):
                     g["silent"] = True; self._event("warn", f"gw {g['gw_id']} silent for 10 s")
@@ -164,6 +207,8 @@ class RouterServer:
                 "patches": len(self.store.index), "frames": self.totals["frames"], "records": self.totals["records"], "bytes": self.totals["bytes"],
                 "meta_blocks": self.totals["meta"], "dup_gw_frames": self.totals["dup_gw"],
                 "patch_packets_lost": sum(ix.get("lost", 0) for ix in self.store.index.values()),
+                "nack_tx": self.totals["nack_tx"], "recovered": self.totals["recovered"], "resend_lost": self.totals["resend_lost"],
+                "resend_pending": sum(len(p) for p in self.pending_nack.values()),
                 "rates": {k: round(v, 1) for k, v in self.rates.items()}, "anomalies": anomalies,
                 "store": {"root": str(self.store.root), "bytes_written": self.store.bytes_written, "open_files": len(self.store.files)}}
 

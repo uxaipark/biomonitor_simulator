@@ -32,12 +32,25 @@ def main() -> int:
         uvicorn.run(make_app(rs), host=args.api_host, port=args.api_port, log_level="warning")
     threading.Thread(target=api, daemon=True, name="router-api").start()
     print(f"[router] gateways on {args.host}:{args.port} · API http://{args.api_host}:{args.api_port}/status · store {args.data}", flush=True)
+    async def run():
+        import signal
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):                 # systemd stop / Ctrl-C: close sockets, flush the store, exit 0
+            try:
+                loop.add_signal_handler(sig, rs.stop)
+            except (NotImplementedError, RuntimeError):
+                pass
+        try:
+            await rs.serve()
+        except asyncio.CancelledError:
+            pass
     try:
-        asyncio.run(rs.serve())
+        asyncio.run(run())
     except KeyboardInterrupt:
         pass
     finally:
         store.close()
+    print("[router] stopped", flush=True)
     return 0
 
 

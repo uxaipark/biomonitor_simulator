@@ -7,6 +7,7 @@ Frame header (24 bytes):
   ts_ms u64  n_rec u16  payload_len u32   (payload_len = bytes following the header)
 flags: bit0 META block present, bit1 GW_STATUS block present, bit2 KEEPALIVE (no records)
 Payload order: [GW_STATUS 12 B] [META u32 len + JSON] [records...]
+Frame: header (24) + payload + CRC-32 trailer (4).  Control frames (router->gateway, F_CTRL): NACK seq ranges.
 Record: patch_id u32, patient_id u32, seq u32 (per-patch packet counter: a gap = packets lost between patch and router), flags u8, battery u8, rssi i8, n_ch u8, then n_ch channel blocks
 Channel block: ch_id u8, dtype u8, n u16, data (n * axes * itemsize)
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import json
 import struct
+import zlib
 from functools import lru_cache
 
 import numpy as np
@@ -21,10 +23,14 @@ import numpy as np
 from ..config import CHANNELS, CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE
 
 MAGIC = 0x4742
-VERSION = 2                      # v2: record header carries the per-patch packet sequence (16 bytes, was 12)
+VERSION = 3                      # v3: CRC-32 trailer on every frame + control frames (router -> gateway NACK); v2 added the per-patch seq
 F_META = 0x01
 F_GWSTAT = 0x02
 F_KEEPALIVE = 0x04
+F_CTRL = 0x08                    # control frame (router -> gateway): payload = <B kind><I from><I to>; kind 1 = NACK (resend frames from..to)
+CTRL_NACK = 1
+CTRL = struct.Struct("<BII")
+CRC = struct.Struct("<I")         # frame trailer: CRC-32 (zlib) over header + payload
 HEADER = struct.Struct("<HBBIIQHI")       # 24 bytes
 GWSTAT = struct.Struct("<BBBbBBIB")       # cpu mem net wan_rssi n_conn status uptime temp_c  = 12 bytes
 DTYPE_CODE = {"int16": 1, "uint8": 2, "uint16": 3, "int8": 4, "float32": 5}
@@ -82,7 +88,23 @@ def pace_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: i
 
 
 def frame(gw_id: int, seq: int, ts_ms: int, n_rec: int, payload: bytes, flags: int) -> bytes:
-    return HEADER.pack(MAGIC, VERSION, flags, gw_id, seq, ts_ms, n_rec, len(payload)) + payload
+    body = HEADER.pack(MAGIC, VERSION, flags, gw_id, seq, ts_ms, n_rec, len(payload)) + payload
+    return body + CRC.pack(zlib.crc32(body) & 0xFFFFFFFF)
+
+
+def frame_crc_ok(body: bytes, trailer: bytes) -> bool:
+    return (zlib.crc32(body) & 0xFFFFFFFF) == CRC.unpack(trailer)[0]
+
+
+def ctrl_frame(gw_id: int, kind: int, seq_from: int, seq_to: int, ts_ms: int = 0) -> bytes:
+    """Router -> gateway control frame (same framing + CRC, F_CTRL flag, n_rec = 0)."""
+    return frame(gw_id, 0, ts_ms, 0, CTRL.pack(kind, seq_from & 0xFFFFFFFF, seq_to & 0xFFFFFFFF), F_CTRL)
+
+
+def parse_ctrl(payload: bytes) -> tuple[int, int, int] | None:
+    if len(payload) < CTRL.size:
+        return None
+    return CTRL.unpack_from(payload, 0)
 
 
 def gwstat_block(cpu: int, mem: int, net: int, wan_rssi: int, n_conn: int, status: int, uptime: int, temp_c: int) -> bytes:
@@ -121,6 +143,9 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                                     "ts_ms u64 (unix epoch ms, gateway clock)", "n_rec u16", "payload_len u32 (bytes after header)"],
                          "flags": {"0x01": "META block present", "0x02": "GW_STATUS block present", "0x04": "KEEPALIVE"}},
         "payload_order": ["GW_STATUS (if flag)", "META (if flag)", "records x n_rec"],
+        "trailer": "crc32 u32 (zlib CRC-32 over header + payload; a mismatch = corrupt frame, the receiver resyncs and may NACK it)",
+        "control_frames": {"direction": "router -> gateway on the same socket", "flag": "0x08 F_CTRL", "payload": "<B kind><I seq_from><I seq_to>",
+                           "kinds": {"1": "NACK: resend gateway frames seq_from..seq_to (the gateway keeps the last transport.resend_keep_s seconds of sent frames)"}},
         "gw_status_block": {"size": GWSTAT.size, "struct": "<BBBbBBIB",
                             "fields": ["cpu_pct u8", "mem_pct u8", "net_load_pct u8", "wan_rssi_dbm i8", "ble_connections u8",
                                        "status u8 (0 ok,1 degraded,2 down)", "uptime_s u32", "temp_c u8"],

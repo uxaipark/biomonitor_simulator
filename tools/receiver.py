@@ -55,6 +55,7 @@ async def handle_strict(reader, writer):
     import os, sys
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from emulator.runtime.verify import StreamChecker
+    from emulator.runtime.protocol import frame
     stats["connections"] += 1
 
     def on_frame(gw_id, seq, ts_ms, flags, n_rec, recs, payload):
@@ -68,7 +69,7 @@ async def handle_strict(reader, writer):
             stats["records"] += 1
             for ch in chans:
                 stats[f"ch{ch}"] += 1
-        save_frame(gw_id, HEADER.pack(0x4742, 1, flags, gw_id, seq, ts_ms, n_rec, len(payload)) + bytes(payload))
+        save_frame(gw_id, frame(gw_id, seq, ts_ms, n_rec, bytes(payload), flags))          # re-framed with the v3 CRC trailer
 
     chk = StreamChecker(on_frame)
     checkers.append(chk)

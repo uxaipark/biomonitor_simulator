@@ -10,6 +10,8 @@
 * 저장: `data/router/patches/<patch_id 8자리>/<YYYYMMDD-HH>.rec`(시간별 append), `index.json`(첫/마지막 시각, 레코드·바이트 수, 파일 목록), `data/router/meta/gw_<gw_id>.json`(게이트웨이의 마지막 META). 레코드 파일 형식은 `router/store.py` 상단에, 읽기는 `iter_entries()`로 합니다. 쓰기는 패치별로 1초 버퍼링 후 한 번에 기록하고 열린 파일은 LRU 256개로 제한합니다.
 * API(`--api-port`): `/status`(연결·게이트웨이·패치 수, 초당 프레임/레코드/바이트, 이상 카운터), `/gateways`, `/patches`, `/patches/{id}`, `/events`, `/anomalies`(연결별 카운터).
 * 에뮬레이터 보고: `--emulator-url`을 주면 5초마다 `POST /api/v1/router/status`로 같은 상태를 보냅니다. 에뮬레이터 GUI 전송 탭에서 보입니다.
+* 재전송 요청(v3): 게이트웨이 프레임 순번에 갭이 있거나 CRC가 틀린 프레임이 오면 그 소켓으로 NACK 제어 프레임(`F_CTRL`, `<B 1><I from><I to>`)을 보냅니다. 게이트웨이당 0.5초에 한 번, 한 구간은 최대 3회, 한 번에 200프레임까지입니다. 돌아온 프레임은 `recovered`, 15초 안에 안 오면 `resend_lost`로 집계되며 `/status`에 `nack_tx / recovered / resend_lost / resend_pending`이 나옵니다.
+* 저장 무결성: 항목마다 CRC-32가 붙고 `GET /patches/{id}/verify`가 파일을 훑어 손상 항목 수를 돌려줍니다.
 * 탐지: 같은 gw_id가 다른 소켓에서 동시에 오면 `dup_gw_frames`와 이벤트, 소켓은 살아 있는데 10초간 프레임이 없으면 `silent` 이벤트. 저장 후 전송 재전송은 seq가 이어지므로 정상 프레임으로 받고, 오래된 seq는 `seq_reorder`로 계수합니다.
 
 검증: `tests/test_router.py`(소켓으로 프레임 전송 → 패치 파일·게이트웨이 표·META·seq 갭·중복 gw 탐지). 에뮬레이터를 `target_ip=127.0.0.1, target_port=9100`으로 두고 시작하면 실제 부하로 확인할 수 있습니다.

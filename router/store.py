@@ -5,7 +5,8 @@ Layout:  <root>/patches/<patch_id 8 digits>/<YYYYMMDD-HH>.rec   (hourly files, a
          <root>/meta/gw_<gw_id>.json                            (last META block of every gateway)
 
 Record file format (little-endian), one entry per patch record received:
-  [ts_ms u64][gw_id u32][patient_id u32][seq u32][flags u8][battery u8][rssi i8][n_ch u8]  then n_ch x ([ch u8][dtype u8][n u16][data])
+  [ts_ms u64][gw_id u32][patient_id u32][seq u32][flags u8][battery u8][rssi i8][n_ch u8]  then n_ch x ([ch u8][dtype u8][n u16][data])  then [crc32 u32]
+  (crc32 = zlib CRC-32 over the whole entry before it; verify_file() detects silent disk corruption)
   (seq = the patch's own packet counter: a gap in a patch file = lost packets, located exactly)
 Writes are buffered per patch and flushed once a second (one write per patch per second instead of one per frame: SD-card
 friendly); file handles are kept in a small LRU so thousands of patches do not mean thousands of open files.
@@ -18,6 +19,7 @@ import os
 import struct
 import threading
 import time
+import zlib
 from pathlib import Path
 
 ENTRY = struct.Struct("<QIIIBBbB")
@@ -29,7 +31,34 @@ def encode_entry(ts_ms: int, gw_id: int, patient_id: int, seq: int, flags: int, 
     for ch, (dt, n, data) in chans.items():
         parts.append(CH_HDR.pack(ch, dt, n))
         parts.append(data)
-    return b"".join(parts)
+    body = b"".join(parts)
+    return body + struct.pack("<I", zlib.crc32(body) & 0xFFFFFFFF)
+
+
+def verify_file(path: str | os.PathLike) -> dict:
+    """Walk a .rec file checking every entry CRC: {'entries', 'bad', 'bytes', 'ok'}."""
+    ok = bad = 0
+    with open(path, "rb") as f:
+        buf = f.read()
+    off = 0
+    while off + ENTRY.size <= len(buf):
+        start = off
+        try:
+            ts, gw, pid, seq, fl, bat, rssi, n_ch = ENTRY.unpack_from(buf, off)
+            off += ENTRY.size
+            for _ in range(n_ch):
+                ch, dt, n = CH_HDR.unpack_from(buf, off)
+                off += CH_HDR.size + n * {1: 2, 2: 1, 3: 2, 4: 1, 5: 4}.get(dt, 1) * (3 if ch == 7 else 1)
+            crc = struct.unpack_from("<I", buf, off)[0]
+            off += 4
+            if (zlib.crc32(buf[start: off - 4]) & 0xFFFFFFFF) == crc:
+                ok += 1
+            else:
+                bad += 1
+        except struct.error:
+            bad += 1
+            break
+    return {"entries": ok + bad, "bad": bad, "bytes": len(buf), "ok": bad == 0}
 
 
 def iter_entries(path: str | os.PathLike):
@@ -47,6 +76,7 @@ def iter_entries(path: str | os.PathLike):
             size = n * {1: 2, 2: 1, 3: 2, 4: 1, 5: 4}.get(dt, 1) * (3 if ch == 7 else 1)
             chans[ch] = (dt, n, buf[off: off + size])
             off += size
+        off += 4                                                   # entry CRC (checked by verify_file)
         yield ts, gw, pid, seq, fl, bat, rssi, chans
 
 
@@ -178,6 +208,12 @@ class PatchStore:
         with self.lock:
             ix = self.index.get(pid)
             return {"patch_id": pid, **ix} if ix else None
+
+    def verify_patch(self, pid: int) -> dict:
+        d = self.root / "patches" / f"{pid:08d}"
+        files = sorted(d.glob("*.rec")) if d.exists() else []
+        res = {f.name: verify_file(f) for f in files}
+        return {"patch_id": pid, "files": res, "entries": sum(r["entries"] for r in res.values()), "bad": sum(r["bad"] for r in res.values()), "ok": all(r["ok"] for r in res.values())}
 
     def disk_bytes(self) -> int:
         total = 0

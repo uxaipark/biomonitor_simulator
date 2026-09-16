@@ -71,6 +71,10 @@ STAT_FIELDS = [                 # per gateway, written by workers
     ("saf_replayed", np.uint64), # frames replayed from the buffer after reconnect
     ("drop_saf", np.uint64),     # frames evicted from a full store-and-forward buffer
     ("fuzz", np.uint32),         # corrupt/duplicate/reordered frames injected (fuzz drill)
+    ("nack_rx", np.uint32),      # NACK control frames received from the router
+    ("resent", np.uint64),       # frames re-sent from the keep buffer on request
+    ("resend_miss", np.uint32),  # requested frames no longer in the keep buffer
+    ("bad_ctrl", np.uint32),     # control frames that failed CRC / parsing
 ]
 WSTAT_FIELDS = [                # per worker
     ("ticks", np.uint64), ("overruns", np.uint64), ("build_us", np.float64), ("send_us", np.float64),

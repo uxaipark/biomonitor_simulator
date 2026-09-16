@@ -10,7 +10,7 @@ from __future__ import annotations
 import struct
 from collections import Counter, defaultdict
 
-from .protocol import HEADER, GWSTAT, MAGIC, VERSION, F_META, F_GWSTAT, F_KEEPALIVE
+from .protocol import HEADER, GWSTAT, CRC, MAGIC, VERSION, F_META, F_GWSTAT, F_KEEPALIVE, F_CTRL, frame_crc_ok
 from ..config import CHANNELS
 
 ITEM = {1: 2, 2: 1, 3: 2, 4: 1, 5: 4}
@@ -59,7 +59,13 @@ class StreamChecker:
         self.patch_seq: dict[int, int] = {}                  # patch_id -> highest per-patch packet seq seen (protocol v2)
         self.per_patch: dict[int, Counter] = defaultdict(Counter)
         self.on_frame = on_frame
+        self.on_corrupt = None                                # callback(gw_id, seq) for CRC failures
+        self.expected: dict[int, set] = defaultdict(set)     # gw -> seqs we asked to be resent (arrive "late" on purpose)
         self.frames = 0
+
+    def expect(self, gw_id: int, seq_from: int, seq_to: int) -> None:
+        """Mark a seq range as requested (NACK): when those frames arrive they count as resend_ok, not seq_reorder."""
+        self.expected[gw_id].update(range(seq_from, seq_to + 1))
 
     # -- stream handling
     def feed(self, data: bytes) -> None:
@@ -79,10 +85,23 @@ class StreamChecker:
                     self.per_gw[gw_id]["oversize"] += 1
                 self._resync()
                 continue
-            if len(self.buf) < HEADER.size + plen:
+            tot = HEADER.size + plen + CRC.size
+            if len(self.buf) < tot:
                 return                                        # wait for the rest (or EOF -> truncated)
-            payload = memoryview(bytes(self.buf[HEADER.size: HEADER.size + plen]))
-            del self.buf[: HEADER.size + plen]
+            body = bytes(self.buf[: HEADER.size + plen])
+            if not frame_crc_ok(body, bytes(self.buf[HEADER.size + plen: tot])):
+                # corrupt bytes (or a wrong length): count, tell the owner (it may NACK this seq) and resync on the next header
+                self.counts["bad_crc"] += 1
+                self.per_gw[gw_id]["bad_crc"] += 1
+                if self.on_corrupt:
+                    self.on_corrupt(gw_id, seq)
+                self._resync()
+                continue
+            payload = memoryview(body[HEADER.size:])
+            del self.buf[:tot]
+            if flags & F_CTRL:
+                self.counts["ctrl"] += 1                      # control frames only travel router -> gateway; harmless if seen
+                continue
             self._frame(flags, gw_id, seq, ts_ms, n_rec, payload)
 
     def close(self) -> None:
@@ -155,6 +174,10 @@ class StreamChecker:
                     g["seq_gap"] += 1
                     g["seq_missing"] += d - 1
                 self.last_seq[gw_id] = seq
+            elif seq in self.expected.get(gw_id, ()):
+                self.expected[gw_id].discard(seq)
+                self.counts["resend_ok"] += 1
+                g["resend_ok"] += 1
             else:
                 self.counts["seq_reorder"] += 1
                 g["seq_reorder"] += 1
@@ -194,5 +217,5 @@ class StreamChecker:
 
     def summary(self) -> dict:
         keys = ["bad_magic", "bad_version", "bad_len", "oversize", "truncated", "resync", "garbage_bytes", "seq_gap", "seq_dup", "seq_reorder", "ts_backwards",
-                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
+                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "bad_crc", "resend_ok", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
         return {"frames": self.frames, "gateways": len(self.per_gw), **{k: int(self.counts.get(k, 0)) for k in keys}}

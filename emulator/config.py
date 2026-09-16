@@ -83,6 +83,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "workers": 0,                  # 0 = auto (cpu_count-1), 1 = in-process
         "capture_max_mb": 256,         # ground-truth capture files, total across workers; the tap switches itself off at the cap
         "saf_worker_max_mb": 64,       # store-and-forward buffer per worker (on top of the 2 MB per gateway)
+        "resend_keep_s": 10,           # sent frames are kept this long so a router NACK can be answered (protocol v3)
+        "resend_keep_mb": 64,          # ... bounded per worker
         "max_send_backlog_bytes": 262144,
         "reconnect_interval_s": 3.0,
         "router_status_url": "",       # optional: GET url of router status (part 2)

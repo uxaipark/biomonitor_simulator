@@ -76,13 +76,17 @@ python tools/receiver.py --port 9100 [--save DIR]   # 참고용 수신기(라우
 
 **환자 수 즉시 맞춤 · 도면 부분 갱신 · 압축** (2026-09-06): 시나리오 환자 수를 바꾸면 초당 최대 500명씩 즉시 퇴원/입원해 몇 초 안에 목표에 맞춥니다(시간당 입퇴원율은 그 위의 자연 변동). 병원 탭 도면은 정적 레이어(방·복도·설비·라벨)를 층/모드/테마별로 한 번만 만들고 6초마다 침대·이동 환자·배지·게이트웨이 레이어만 교체합니다. API 응답은 2 KB 이상이면 gzip으로 나가며(게이트웨이 목록 199 KB → 19 KB), 프레임 빌더는 게이트웨이별 바이트 범위를 numpy로 한 번에 계산해 게이트웨이당 ndarray 슬라이스가 없습니다(엄격 수신기로 388 GW·499 패치 무이상 확인).
 
-## 스트림 프로토콜 (v2, little-endian)
+## 스트림 프로토콜 (v3, little-endian)
 
 ```
 Frame  : magic u16 0x4742 | ver u8 | flags u8 | gw_id u32 | seq u32 | ts_ms u64 | n_rec u16 | payload_len u32
 flags  : 0x01 META(JSON) 0x02 GW_STATUS 0x04 KEEPALIVE
 payload: [GW_STATUS 12B] [META u32 len + JSON] [record × n_rec]
 Record : patch_id u32 | patient_id u32 | seq u32 (패치별 패킷 순번) | flags u8 | battery u8 | rssi i8 | n_ch u8 | channel × n_ch
+Trailer: crc32 u32 (헤더+페이로드에 대한 zlib CRC-32) — 모든 프레임 끝에 붙음
+Control: 라우터→게이트웨이, 같은 소켓, 헤더 flags 0x08(F_CTRL), payload <B kind><I seq_from><I seq_to>; kind 1 = NACK(프레임 재전송 요청)
+
+**오류 검출과 재전송 (v3)**: 프레임마다 CRC-32 트레일러가 붙어 수신 측이 파싱 전에 손상을 확정합니다(검증기 `bad_crc`, 다음 헤더로 재동기화). TCP 위에서 오류정정 부호(FEC)는 쓰지 않습니다. 회선 오류는 TCP가 이미 재전송으로 고치고, 실제 유실은 끊김·버퍼 넘침이라 패리티로 복구되지 않기 때문입니다. 대신 라우터가 게이트웨이 프레임 순번 갭이나 CRC 실패를 보면 같은 소켓으로 NACK 제어 프레임을 돌려보내고, 게이트웨이(에뮬레이터)는 최근 `transport.resend_keep_s`초(기본 10초, 워커당 `resend_keep_mb` 64 MB) 동안 보낸 프레임을 보관하다가 요청 구간을 그대로 다시 보냅니다(통계 `nack_rx`, `resent`, `resend_miss`). 라우터는 요청한 순번이 돌아오면 `recovered`로 세고(검증기 `resend_ok`, 재정렬로 오인하지 않음), 15초 안에 오지 않으면 `resend_lost`로 확정합니다. 라우터가 저장하는 패치별 파일 항목에도 CRC-32가 붙어 `GET /patches/{id}/verify`로 디스크 손상을 검사합니다. 패치→게이트웨이(BLE) 구간의 유실은 게이트웨이도 갖고 있지 않으므로 패치 순번 갭으로 기록만 됩니다.
 
 두 종류의 순번이 있습니다. 헤더의 `seq`는 **게이트웨이 프레임** 순번이라 게이트웨이→라우터 구간의 유실을, 레코드의 `seq`는 **패치가 자기 패킷마다 붙이는 순번**이라 패치→게이트웨이(BLE)→라우터 전체 구간에서 어느 패치의 몇 번째 패킷이 사라졌는지를 알려 줍니다. 저장 후 전송 재전송은 원래 번호를 그대로 갖고 오고, 페이스메이커 스파이크 레코드는 같은 프레임의 데이터 레코드와 같은 번호입니다. 엄격 수신기·검증 도구·라우터는 `patch_seq_gap/missing/dup/reorder`로 집계하고 라우터의 패치별 index.json에 `lost`가 누적됩니다.
 Channel: ch_id u8 | dtype u8 | n u16 | data

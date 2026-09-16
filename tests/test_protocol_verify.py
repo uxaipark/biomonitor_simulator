@@ -68,9 +68,39 @@ def test_oversize_length_and_bad_record():
     s = run([over, good(2, ts=2)])
     assert s["oversize"] == 1
     bogus = struct.pack("<IIIBBbB", 0xFFFFFFF0, 0, 0, 0, 100, -40, 1) + struct.pack("<BBH", 250, 9, 4) + b"\x00" * 8
-    bad = HEADER.pack(magic, ver, flags, gw, seq, ts, n_rec + 1, plen + len(bogus)) + f1[HEADER.size:] + bogus
+    bad = frame(gw, seq, ts, n_rec + 1, f1[HEADER.size: HEADER.size + plen] + bogus, flags)     # well-framed (CRC ok), bad record inside
     s = run([bad])
     assert s["unknown_channel"] == 1
+
+
+def test_crc_trailer_detects_corruption_and_control_frames_parse():
+    """v3: a flipped byte anywhere in header or payload fails the CRC (bad_crc, resync), and the checker's owner is told
+    which gateway/seq to NACK; control frames round-trip through ctrl_frame/parse_ctrl."""
+    from emulator.runtime.protocol import ctrl_frame, parse_ctrl, CTRL_NACK, CRC
+    f1, f2, f3 = good(1, ts=1), good(2, ts=2), good(3, ts=3)
+    flipped = bytearray(f2); flipped[HEADER.size + 3] ^= 0x55
+    chk = StreamChecker(); told = []
+    chk.on_corrupt = lambda gw, seq: told.append((gw, seq))
+    for c in (f1, bytes(flipped), f3):
+        chk.feed(c)
+    sm = chk.summary()
+    assert sm["bad_crc"] == 1 and sm["frames"] == 2 and told == [(7, 2)]
+    assert sm["seq_gap"] == 1                                       # frame 2 never counted -> 1..3 shows a gap
+    cf = ctrl_frame(7, CTRL_NACK, 10, 12)
+    assert len(cf) == HEADER.size + 9 + CRC.size
+    assert parse_ctrl(cf[HEADER.size: -CRC.size]) == (CTRL_NACK, 10, 12)
+    chk2 = StreamChecker(); chk2.feed(cf)
+    assert chk2.summary()["frames"] == 0 and chk2.counts["ctrl"] == 1
+
+
+def test_expected_resend_is_not_a_reorder():
+    chk = StreamChecker()
+    chk.feed(good(1, ts=1)); chk.feed(good(4, ts=4))                # 2, 3 missing
+    chk.expect(7, 2, 3)
+    chk.feed(good(2, ts=2)); chk.feed(good(3, ts=3))
+    sm = chk.summary()
+    assert sm["seq_gap"] == 1 and sm["resend_ok"] == 2 and sm["seq_reorder"] == 0
+
 
 
 def test_patch_seq_gap_is_counted():
