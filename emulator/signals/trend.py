@@ -12,6 +12,7 @@ Circadian terms use local clock hours; drift terms are sums of sinusoids with
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import math
 
 import numpy as np
@@ -21,12 +22,27 @@ MEAL_AMP = {"normal": 35.0, "prediabetic": 55.0, "diabetic": 90.0, "hypo_risk": 
 _PERIODS_H = (6.3, 13.1, 29.7, 71.0)
 
 
-def _drift(seed: int, t: float, scale: float, k: int = 4) -> float:
+@functools.lru_cache(maxsize=65536)
+def _coeffs(seed: int, k: int) -> tuple[tuple[float, float], ...]:
+    """Amplitude/phase of each sinusoid for a seed -- the only thing the RNG was ever used for.
+
+    Building a Generator costs ~16 us and state() did it seven times per patient; every 10 s the
+    world refreshed 2,000 patients in one step and stalled it for ~600 ms (the 10 s CPU peak).
+    The draws are a pure function of the seed, so keep them.  Same draw order -> same numbers."""
     rng = np.random.default_rng(seed)
+    return tuple((float(rng.uniform(0.3, 1.0)), float(rng.uniform(0, 2 * math.pi))) for _ in range(k))
+
+
+@functools.lru_cache(maxsize=65536)
+def _meal_draws(seed: int) -> tuple[float, ...]:
+    """The per-day meal multipliers in draw order; state() hands them out to the meals it reaches."""
+    rng = np.random.default_rng(seed)
+    return tuple(float(rng.uniform(0.6, 1.2)) for _ in MEALS)
+
+
+def _drift(seed: int, t: float, scale: float, k: int = 4) -> float:
     out = 0.0
-    for j in range(k):
-        amp = rng.uniform(0.3, 1.0)
-        ph = rng.uniform(0, 2 * math.pi)
+    for j, (amp, ph) in enumerate(_coeffs(seed, k)):
         out += amp * math.sin(2 * math.pi * t / (_PERIODS_H[j] * 3600.0) + ph)
     return scale * out / k
 
@@ -43,11 +59,13 @@ def state(pid: int, prof: dict, t: float) -> dict:
     temp_add = circ(17, 0.3) + _drift(base + 4, t, 0.15)
     gl_add = _drift(base + 5, t, 8.0, 3)
     amp = MEAL_AMP.get(prof.get("glucose_profile", "normal"), 40.0)
-    mrng = np.random.default_rng(base + 6 + int(t // 86400))
+    draws = _meal_draws(base + 6 + int(t // 86400))
+    n_draw = 0                                        # the original drew only for meals it reached, in order
     for i, mh in enumerate(MEALS):
         dd = ((hour - mh + 12) % 24) - 12
         if dd > -1.2:
-            gl_add += amp * float(mrng.uniform(0.6, 1.2)) * math.exp(-0.5 * (dd / 0.9) ** 2)
+            gl_add += amp * draws[n_draw] * math.exp(-0.5 * (dd / 0.9) ** 2)
+            n_draw += 1
     return {"hr_scale": max(0.75, min(1.3, hr_scale)), "rr_add": rr_add, "spo2_add": spo2_add, "temp_add": temp_add, "gl_add": gl_add}
 
 
