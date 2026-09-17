@@ -12,6 +12,7 @@ Environment=BIOSIM_DATA_DIR=/var/lib/biosim
 Environment=PYTHONUNBUFFERED=1
 Environment=OMP_NUM_THREADS=1
 Environment=OPENBLAS_NUM_THREADS=1
+ExecStartPre=+/opt/biosim/app/deploy/pi/shm-sweep.sh
 ExecStart=/opt/biosim/venv/bin/python run.py --host 0.0.0.0 --port 5445
 Restart=always
 RestartSec=3
