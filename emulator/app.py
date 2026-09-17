@@ -17,6 +17,7 @@ from .hospital.avatars import render_svg
 from .hospital.devices import describe as describe_devices, DEVICES
 from .hospital import layout as hospital_layout
 from .config import BASE_DIR
+from .chat import ChatHub
 from .runtime.engine import Engine
 from .runtime.protocol import describe as describe_protocol
 from .signals.rhythms import RHYTHMS
@@ -96,6 +97,7 @@ def discovery():
                     "set_devices": "POST /api/v1/emr/patients/{id}/devices {devices:[...]}"},
             "signals": {"catalog": "/api/v1/signals/catalog", "preview": "/api/v1/signals/preview/{row}", "trend": "/api/v1/signals/trend/{patient_id}?days=1|2|3 (합성 다일 추세)", "live_ws": "ws://<host>/ws/live?row=<patch_row>"},
             "router": {"status_report": "POST /api/v1/router/status (라우터 → 에뮬레이터 상태 보고)", "status_get": "GET /api/v1/router/status"},
+            "chat": {"read": "GET /api/v1/chat?since=<seq>&limit= (에뮬레이터·라우터·GUI 공용 채팅)", "send": 'POST /api/v1/chat {"from": "router", "text": "..."}', "ws": "ws://<host>/ws/chat?sender=<이름>&since=<seq> (양방향)"},
             "db": {"stats": "GET /api/v1/db/stats", "query": "POST /api/v1/db/query {sql, params?, limit?} (SQLite, SELECT 전용; 테이블: patients, admissions, patches, patch_events, exams, events, runs)"},
         },
         "transport": {"target_ip": t["target_ip"] or None, "target_port": t["target_port"], "socket_mode": t["socket_mode"], "bundle_ms": t["bundle_ms"],
@@ -381,6 +383,66 @@ def router_status_post(body: dict):
 @app.get("/api/v1/router/status")
 def router_status_get():
     return _router_status
+
+
+# ------------------------------------------------------------------ chat channel (emulator <-> router <-> GUI)
+chat = ChatHub(BASE_DIR / "runtime" / "chat.jsonl")
+
+
+@app.get("/api/v1/chat")
+def chat_get(since: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=500)):
+    """Everything newer than `since`.  A client keeps the last seq it saw and polls with it."""
+    return {"seq": chat.state()["seq"], "messages": chat.since(since, limit)}
+
+
+@app.post("/api/v1/chat")
+def chat_post(body: dict):
+    """{"from": "router", "text": "..."} -- the plain HTTP way in, for clients without a WebSocket."""
+    try:
+        return chat.post(body.get("from", "anon"), body.get("text", ""), body.get("kind", "msg"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.websocket("/ws/chat")
+async def ws_chat(ws: WebSocket, since: int = -1, sender: str = "gui"):
+    """Bidirectional chat.  On connect the backlog is replayed (?since=N to resume, -1 = last page).
+
+    Incoming: a JSON object {"from": ..., "text": ...} or a bare text frame (uses ?sender=).
+    Outgoing: {"messages": [...]} whenever something new arrives.
+    """
+    await ws.accept()
+    seen = chat.state()["seq"] if since < 0 else since
+    try:
+        backlog = chat.since(max(0, seen - 50) if since < 0 else since)
+        if backlog:
+            await ws.send_text(json.dumps({"messages": backlog}, ensure_ascii=False))
+            seen = backlog[-1]["seq"]
+        while True:
+            try:
+                msg = await asyncio.wait_for(ws.receive_text(), timeout=0.3)
+            except asyncio.TimeoutError:
+                msg = None
+            except WebSocketDisconnect:
+                break
+            if msg:
+                try:
+                    d = json.loads(msg)
+                    who, text = d.get("from", sender), d.get("text", "")
+                except ValueError:
+                    who, text = sender, msg          # a bare text frame is a message from ?sender=
+                try:
+                    chat.post(who, text)
+                except ValueError:
+                    pass                              # empty message: ignore, do not drop the socket
+            fresh = chat.since(seen)
+            if fresh:
+                await ws.send_text(json.dumps({"messages": fresh}, ensure_ascii=False))
+                seen = fresh[-1]["seq"]
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
 
 
 # ------------------------------------------------------------------ EMR

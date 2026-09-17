@@ -107,6 +107,7 @@ function showTab(id) {
   if (id === 'data') { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); loadConfigHistory(); }
   if (id === 'scn' || id === 'tx') loadScripts();
   if (id === 'scn') loadDevices();
+  if (id === 'chat') chatOpen();
 }
 nav.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
 sel.addEventListener('change', () => showTab(sel.value));
@@ -2115,3 +2116,71 @@ document.querySelectorAll('.fold[data-fold]').forEach(b => {
   apply();
 });
 function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
+
+// ---------------------------------------------------------------- 채팅 채널 (에뮬레이터 · 라우터 · GUI 공용 방)
+// WebSocket 하나로 송수신한다. 끊기면 지수 백오프로 재접속하고, 마지막 seq 부터 이어받아
+// 재접속 구간의 메시지를 빠뜨리지 않는다. WS 가 아예 안 되면 REST 폴링으로 내려앉는다.
+let chatWs = null, chatSeq = 0, chatRetry = 0, chatTimer = null, chatPoll = null;
+const chatName = () => ($('#chatName').value.trim() || defaultChatName());
+function defaultChatName() {
+  let n = ''; try { n = localStorage.getItem('chatName') || ''; } catch (e) { }
+  if (!n) { n = 'gui-' + Math.random().toString(36).slice(2, 6); try { localStorage.setItem('chatName', n); } catch (e) { } }
+  return n;
+}
+const chatTime = (t) => new Date(t * 1000).toTimeString().slice(0, 8);   // 채팅의 t 는 epoch 초 (hhmmss 는 ISO 문자열용)
+function chatState(t, cls) { const e = $('#chatState'); if (e) { e.textContent = t; e.className = 'sub' + (cls ? ' ' + cls : ''); } }
+function chatRender(msgs) {
+  const box = $('#chatLog'); if (!box || !msgs || !msgs.length) return;
+  const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;   // 사용자가 위를 보고 있으면 끌어내리지 않는다
+  const me = chatName();
+  for (const m of msgs) {
+    if (m.seq <= chatSeq) continue;
+    chatSeq = m.seq;
+    const d = document.createElement('div');
+    d.className = 'm' + (m.kind === 'system' ? ' sys' : (m.from === me ? ' me' : ''));
+    d.innerHTML = `<span class="ts">${chatTime(m.t)}</span><span class="who">${esc(m.from)}</span><span class="tx">${esc(m.text)}</span>`;
+    box.appendChild(d);
+  }
+  while (box.children.length > 600) box.removeChild(box.firstChild);
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+function chatOpen() {
+  if (!$('#chatName').value) $('#chatName').value = defaultChatName();
+  if (chatWs && (chatWs.readyState === 0 || chatWs.readyState === 1)) return;
+  const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host
+    + '/ws/chat?since=' + chatSeq + '&sender=' + encodeURIComponent(chatName());
+  try { chatWs = new WebSocket(url); } catch (e) { chatFallback(); return; }
+  chatWs.onopen = () => { chatRetry = 0; chatState('연결됨', 'ok'); if (chatPoll) { clearInterval(chatPoll); chatPoll = null; } };
+  chatWs.onmessage = ev => { try { chatRender(JSON.parse(ev.data).messages); } catch (e) { } };
+  chatWs.onclose = () => {
+    chatWs = null;
+    chatRetry++;
+    chatState('연결 끊김 · 재접속 중', 'warn');
+    if (chatRetry >= 4) { chatFallback(); return; }
+    clearTimeout(chatTimer);
+    chatTimer = setTimeout(chatOpen, Math.min(8000, 500 * Math.pow(2, chatRetry)));
+  };
+  chatWs.onerror = () => { try { chatWs.close(); } catch (e) { } };
+}
+function chatFallback() {                       // WebSocket 불가(프록시 등): REST 폴링
+  if (chatPoll) return;
+  chatState('폴링 모드 (WebSocket 불가)', 'warn');
+  chatPoll = setInterval(async () => {
+    try { const r = await api('/chat?since=' + chatSeq); chatRender(r.messages); } catch (e) { }
+  }, 2000);
+}
+async function chatSend() {
+  const inp = $('#chatText'), text = inp.value.trim();
+  if (!text) return;
+  inp.value = '';
+  try { localStorage.setItem('chatName', chatName()); } catch (e) { }
+  const body = { from: chatName(), text };
+  if (chatWs && chatWs.readyState === 1) { chatWs.send(JSON.stringify(body)); return; }
+  try { await post('/chat', body); }
+  catch (e) { toast('전송 실패: ' + e.message); inp.value = text; }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const b = $('#chatSend'), t = $('#chatText');
+  if (b) b.addEventListener('click', chatSend);
+  if (t) t.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); } });
+});

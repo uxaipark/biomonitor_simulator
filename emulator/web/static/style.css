@@ -701,3 +701,15 @@ button.primary{background:var(--acc);color:var(--acc-txt);border-color:var(--acc
 .gsec b.red{color:var(--err)}.gsec b.yel{color:var(--warn)}
 mark.ghl{background:color-mix(in srgb,var(--warn) 45%,transparent);color:inherit;border-radius:3px}
 @media (max-width:900px){.guide-wrap{grid-template-columns:1fr}.gtoc{position:static;max-height:none}}
+
+/* ---- 채팅 채널 (에뮬레이터 · 라우터 · GUI 공용 방) */
+.chatlog{height:56vh;overflow-y:auto;overflow-x:hidden;border:1px solid var(--line);border-radius:var(--r);background:var(--panel2);padding:10px;display:flex;flex-direction:column;gap:7px}
+.chatlog .m{display:grid;grid-template-columns:auto 1fr;gap:2px 9px;align-items:baseline}
+.chatlog .who{font-size:11px;font-weight:600;color:var(--acc2);white-space:nowrap;font-variant-numeric:tabular-nums}
+.chatlog .m.me .who{color:var(--acc)}
+.chatlog .m.sys .who{color:var(--muted)}
+.chatlog .tx{font-size:13px;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere;min-width:0}
+.chatlog .m.sys .tx{color:var(--muted);font-style:italic}
+.chatlog .ts{grid-column:1;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chatbar{display:flex;gap:8px;margin-top:8px}
+.chatbar input{flex:1;min-width:0}
