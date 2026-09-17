@@ -527,9 +527,15 @@ async def ws_chat(ws: WebSocket, since: int = -1, sender: str = "gui"):
             if msg:
                 try:
                     d = json.loads(msg)
-                    who, text = d.get("from", sender), d.get("text", "")
                 except ValueError:
-                    who, text = sender, msg          # a bare text frame is a message from ?sender=
+                    d = None
+                if isinstance(d, dict):
+                    who, text = d.get("from", sender), d.get("text", "")
+                else:
+                    # bare text, or valid JSON that is not an object ("123", "[1]", "\"hi\""): a message
+                    # from ?sender=.  Treating those as objects raised AttributeError and the outer
+                    # handler closed the socket without a word (found by the router's channel test).
+                    who, text = sender, msg
                 try:
                     chat.post(who, text)
                 except ValueError:
