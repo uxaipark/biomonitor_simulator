@@ -374,10 +374,25 @@ ol.route li.current{border-left-color:var(--acc2);background:var(--sel);font-wei
 ol.route li.upcoming{border-left-style:dashed}
 /* ---- 이동 중 환자 (responsive: wide = table, narrow card = stacked rows with field labels; container query so it follows the card, not the window) */
 .card:has(#tripTable){container-type:inline-size}
-#tripTable th:nth-child(7){min-width:320px}
+/* The card must never scroll sideways: every cell inherits the global white-space:nowrap, and the
+   timetable column asked for 320px on top of that, so eight columns of unbreakable text pushed the
+   table past the card and raised a horizontal scrollbar.  A fixed layout divides the card's width
+   between the columns instead, and the cells wrap inside their share (keep-all so Korean breaks
+   between words, anywhere as the fallback for a long unbreakable token). */
+#tripBody{overflow-x:hidden}
+#tripTable{table-layout:fixed;width:100%}
+#tripTable th,#tripTable td{white-space:normal;word-break:keep-all;overflow-wrap:anywhere}
+#tripTable th:nth-child(1){width:13%}
+#tripTable th:nth-child(2){width:11%}
+#tripTable th:nth-child(3){width:13%}
+#tripTable th:nth-child(4){width:12%}
+#tripTable th:nth-child(5){width:10%}
+#tripTable th:nth-child(6){width:10%}
+#tripTable th:nth-child(7){width:20%}
+#tripTable th:nth-child(8){width:11%}
 @container (max-width:1180px){
   #tripTable thead{display:none}
-  #tripTable,#tripTable tbody{display:block}
+  #tripTable,#tripTable tbody{display:block;table-layout:auto}
   #tripTable tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 14px;padding:8px 4px;border-bottom:1px solid var(--line)}
   #tripTable td{display:block;border:0;padding:2px 0}
   #tripTable td::before{content:attr(data-l);display:block;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
@@ -391,17 +406,17 @@ ol.route li.upcoming{border-left-style:dashed}
 #tripTable td{vertical-align:top}
 #tripTable tbody tr{cursor:pointer}
 #tripTable tbody tr.sel{background:var(--sel)}
-.tt{display:flex;flex-wrap:wrap;gap:3px 4px;max-width:520px}
+.tt{display:flex;flex-wrap:wrap;gap:3px 4px;max-width:none;min-width:0}
 .tt span{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);font-size:11px;white-space:nowrap;color:var(--muted);background:var(--panel2)}
 .tt span.done{opacity:.45;text-decoration:line-through}
 .tt span.cur{color:var(--txt);border-color:var(--acc2);background:var(--sel);font-weight:600}
 .tt span.mri{border-color:var(--warn);color:var(--warn)}
 .tt span.shadow{border-style:dashed}
 .tt span i{font-style:normal;font-variant-numeric:tabular-nums;opacity:.8}
-.tprog{width:96px;height:8px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);overflow:hidden;display:inline-block;vertical-align:middle}
+.tprog{width:100%;max-width:96px;height:8px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);overflow:hidden;display:inline-block;vertical-align:middle}
 .tprog i{display:block;height:100%;background:var(--acc2)}
 .tprog.shadow i{background:var(--warn)}
-.tnext{display:flex;flex-direction:column;gap:2px;font-size:11px;white-space:nowrap}
+.tnext{display:flex;flex-direction:column;gap:2px;font-size:11px;white-space:normal;word-break:keep-all}
 .troom{display:flex;flex-wrap:wrap;gap:4px 6px;padding:0 0 8px;font-size:11px;color:var(--muted)}
 .troom span{padding:1px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);cursor:pointer}
 .troom span:hover{border-color:var(--acc2);color:var(--txt)}
