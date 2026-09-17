@@ -50,6 +50,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "general": {
         "seed": 20240905,
         "profile_count": 10000,
+        "autostart": True,       # start transmitting as soon as the engine is up (a deploy restarts the service)
         "bed_capacity": 2000,          # hospital beds (== max concurrent in-hospital patches)
         "active_patients": 120,        # currently admitted & monitored
         "outpatient_count": 10,        # MCOT (home) patients
@@ -252,6 +253,7 @@ class Config:
         g["bed_capacity"] = int(max(1, min(5000, g["bed_capacity"])))
         g["active_patients"] = int(max(0, min(g["bed_capacity"], g["active_patients"])))
         g["outpatient_count"] = int(max(0, min(2000, g["outpatient_count"])))
+        g["autostart"] = bool(g.get("autostart", True))
         g["profile_count"] = int(max(g["bed_capacity"] + g["outpatient_count"] + 100, min(50000, g["profile_count"])))
         g["heart_disease_ratio"] = float(min(1.0, max(0.0, g["heart_disease_ratio"])))
         g["korean_ratio"] = float(min(1.0, max(0.0, g["korean_ratio"])))

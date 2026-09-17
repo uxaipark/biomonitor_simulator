@@ -713,3 +713,13 @@ mark.ghl{background:color-mix(in srgb,var(--warn) 45%,transparent);color:inherit
 .chatlog .ts{grid-column:1;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
 .chatbar{display:flex;gap:8px;margin-top:8px}
 .chatbar input{flex:1;min-width:0}
+/* 채팅 탭의 송수신 로그 스트립: 양방향 카운터를 대화 위에 나란히 */
+.linkbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);margin-bottom:8px;overflow:hidden}
+.linkbar .lk{background:var(--panel2);padding:9px 12px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.linkbar .lk b{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.linkbar .lk .v{font-family:inherit;font-size:12.5px;font-variant-numeric:tabular-nums;display:flex;flex-wrap:wrap;gap:2px 12px}
+.linkbar .lk .v i{font-style:normal;color:var(--muted)}
+.linkbar .lk .v em{font-style:normal;color:var(--txt);font-weight:600}
+.linkbar .lk .v em.warn{color:var(--warn)}
+.linkbar .lk .v em.err{color:var(--err)}
+.linkbar .lk[data-side="rx"]{border-left:1px solid var(--line)}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,6 +35,19 @@ engine: Engine | None = None
 async def lifespan(app: FastAPI):
     global engine
     engine = Engine(cfg)
+    if cfg.get("general", "autostart"):
+        # every deploy restarts the service, and the engine used to come up idle -- the GUI then
+        # showed "stopped" and transmission stayed down until somebody noticed and pressed start.
+        def _autostart():
+            try:
+                engine.start()
+                chat.post("link", "전송 자동 시작 (general.autostart)", kind="system")
+            except Exception as e:
+                try:
+                    chat.post("link", f"전송 자동 시작 실패: {e}", kind="system")
+                except Exception:
+                    pass
+        threading.Thread(target=_autostart, daemon=True, name="autostart").start()
     yield
     engine.shutdown()
 
@@ -97,7 +111,7 @@ def discovery():
                     "set_devices": "POST /api/v1/emr/patients/{id}/devices {devices:[...]}"},
             "signals": {"catalog": "/api/v1/signals/catalog", "preview": "/api/v1/signals/preview/{row}", "trend": "/api/v1/signals/trend/{patient_id}?days=1|2|3 (합성 다일 추세)", "live_ws": "ws://<host>/ws/live?row=<patch_row>"},
             "router": {"status_report": "POST /api/v1/router/status (라우터 → 에뮬레이터 상태 보고)", "status_get": "GET /api/v1/router/status"},
-            "chat": {"read": "GET /api/v1/chat?since=<seq>&limit= (에뮬레이터·라우터·GUI 공용 채팅)", "send": 'POST /api/v1/chat {"from": "router", "text": "..."}', "ws": "ws://<host>/ws/chat?sender=<이름>&since=<seq> (양방향)"},
+            "chat": {"read": "GET /api/v1/chat?since=<seq>&limit= (에뮬레이터·라우터·GUI 공용 채팅)", "send": 'POST /api/v1/chat {"from": "router", "text": "..."}', "ws": "ws://<host>/ws/chat?sender=<이름>&since=<seq> (양방향)", "link": "GET /api/v1/chat/link (송신·수신 양쪽 카운터를 한 번에; 채팅 탭 로그 스트립용)"},
             "db": {"stats": "GET /api/v1/db/stats", "query": "POST /api/v1/db/query {sql, params?, limit?} (SQLite, SELECT 전용; 테이블: patients, admissions, patches, patch_events, exams, events, runs)"},
         },
         "transport": {"target_ip": t["target_ip"] or None, "target_port": t["target_port"], "socket_mode": t["socket_mode"], "bundle_ms": t["bundle_ms"],
@@ -402,6 +416,91 @@ def chat_post(body: dict):
         return chat.post(body.get("from", "anon"), body.get("text", ""), body.get("kind", "msg"))
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/v1/chat/link")
+def chat_link():
+    """One view of both directions of the emulator <-> router link, for the chat tab's log strip.
+
+    tx = what this emulator reports sending, rx = the summary the router POSTs to
+    /api/v1/router/status every few seconds.  Counters are cumulative on both sides; the
+    client differences them to get rates, so this stays a cheap read.
+    """
+    out: dict = {"t": time.time(), "tx": None, "rx": None, "rx_age_s": None}
+    try:
+        e = E()
+        st = e.stats()
+        last, tot = st.get("last", {}) or {}, (st.get("last", {}) or {}).get("total", {}) or {}
+        t = cfg.get("transport")
+        out["tx"] = {"running": bool(st.get("running")), "target": f"{t['target_ip'] or '-'}:{t['target_port']}",
+                     "connected": tot.get("connected"), "pkts": tot.get("pkts"), "bytes": tot.get("bytes"),
+                     "pkts_ps": round(last.get("pkts_ps", 0), 1), "bytes_ps": round(last.get("bytes_ps", 0), 1),
+                     "drop_backlog": tot.get("drop_backlog"), "drop_noconn": tot.get("drop_noconn"),
+                     "drop_saf": tot.get("drop_saf"), "send_err": tot.get("send_err"),
+                     "saf_bytes": tot.get("saf_bytes"), "overruns": tot.get("overruns")}
+    except Exception:
+        pass
+    r = _router_status.get("status")
+    if r:
+        g = r.get("gateways") or {}
+        out["rx_age_s"] = round(time.time() - (_router_status.get("reported_at") or 0), 1)
+        out["rx"] = {"name": r.get("name"), "version": r.get("version"), "protocol": r.get("protocol_version"),
+                     "uptime_s": r.get("uptime_s"), "connections": r.get("ingest_connections"),
+                     "rx_bytes": r.get("rx_bytes"), "records": r.get("records"), "patches": r.get("patches"),
+                     "lost_packets": r.get("lost_packets"), "queue_dropped_store": r.get("queue_dropped_store"),
+                     "store_bytes": r.get("store_bytes"),
+                     "frames": g.get("frames"), "keepalive": g.get("keepalive"), "meta_blocks": g.get("meta_blocks"),
+                     "continuation_records": g.get("continuation_records"), "nack_tx": g.get("nack_tx"),
+                     "recovered": g.get("recovered"), "resend_lost": g.get("resend_lost"),
+                     "silent": g.get("silent"), "down": g.get("down"), "degraded": g.get("degraded"),
+                     "anomalies": g.get("anomalies") or {}}
+    return out
+
+
+def _chat_link_watch() -> None:
+    """Post a system line into the chat when the link changes state.
+
+    The chat is the shared log between the two Pis, so anything either side would want to see
+    in hindsight -- transmission stopping, the target moving, the router going quiet, a
+    protocol anomaly showing up -- belongs in it.  Only transitions are posted; a periodic
+    heartbeat would bury the humans' messages.
+    """
+    prev: dict = {}
+    while True:
+        time.sleep(5.0)
+        try:
+            d = chat_link()
+            tx, rx = d.get("tx") or {}, d.get("rx") or {}
+            cur = {"running": tx.get("running"), "target": tx.get("target"),
+                   "rx_up": bool(rx) and (d.get("rx_age_s") or 999) < 20,
+                   "anomalies": tuple(sorted((rx.get("anomalies") or {}).items()))}
+            if not prev:
+                prev = cur
+                continue
+            msgs = []
+            if cur["running"] != prev["running"]:
+                msgs.append("전송 " + ("시작됨" if cur["running"] else "정지됨 (재시작 후에는 control/start 필요)"))
+            if cur["target"] != prev["target"]:
+                msgs.append(f"송신 대상 변경: {prev['target']} → {cur['target']}")
+            if cur["rx_up"] != prev["rx_up"]:
+                msgs.append("라우터 상태 보고 " + ("수신 재개" if cur["rx_up"] else "끊김 (20초 이상 보고 없음)"))
+            if cur["anomalies"] != prev["anomalies"]:
+                new = dict(cur["anomalies"])
+                old = dict(prev["anomalies"])
+                grown = {k: v for k, v in new.items() if v != old.get(k)}
+                if grown:
+                    msgs.append("라우터 이상 카운터: " + ", ".join(f"{k}={v}" for k, v in sorted(grown.items())))
+            for m in msgs:
+                try:
+                    chat.post("link", m, kind="system")
+                except Exception:
+                    pass
+            prev = cur
+        except Exception:
+            pass
+
+
+threading.Thread(target=_chat_link_watch, daemon=True, name="chat-link-watch").start()
 
 
 @app.websocket("/ws/chat")

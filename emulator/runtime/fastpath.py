@@ -9,6 +9,7 @@ import heapq
 import json
 import math
 import os
+import selectors
 import socket
 import time
 import traceback
@@ -502,6 +503,10 @@ class Sender:
         self.bufs: dict[int, bytearray] = {}
         self.last_try: dict[int, float] = {}
         self.sent_ok: set[int] = set()       # keys whose peer has accepted data on the current socket
+        # readiness poll for the return path: with one socket per gateway a blind recv() on every
+        # socket every tick was ~11k syscalls/s (almost all EAGAIN) and the worker's single largest
+        # cost.  epoll hands back only the sockets that actually have bytes waiting.
+        self.sel = selectors.DefaultSelector()
         self.delayed: list[tuple[float, int, int, bytes]] = []
         self._seq = 0
         self.target = ("", 0)
@@ -542,6 +547,7 @@ class Sender:
     def close_all(self):
         for k, s in list(self.socks.items()):
             if s:
+                self._sel_unregister(s)
                 try:
                     s.close()
                 except Exception:
@@ -574,6 +580,7 @@ class Sender:
                 pass
             self.socks[key] = s
             self.bufs[key] = bytearray()
+            self._sel_register(key, s)
             self.sent_ok.discard(key)                 # a fresh socket is unconfirmed until a send succeeds
             if self.fb is not None:                       # a (re)connected device announces itself with META first
                 for g in ([key] if key >= 0 else self.gw_rows):
@@ -586,6 +593,7 @@ class Sender:
     def _drop_conn(self, key: int, gws: list[int]):
         self.rx.pop(key, None)
         s = self.socks.pop(key, None)
+        self._sel_unregister(s)
         if s:
             try:
                 s.close()
@@ -803,6 +811,27 @@ class Sender:
                 break
             self.keep_total -= len(q2.popleft()[2])
 
+    def _sel_register(self, key: int, s: socket.socket) -> None:
+        try:
+            self.sel.register(s, selectors.EVENT_READ, key)
+        except (KeyError, ValueError, OSError):
+            pass                                  # already registered / closed: the poll just won't see it
+
+    def _sel_unregister(self, s) -> None:
+        if s is None:
+            return
+        try:
+            self.sel.unregister(s)
+        except (KeyError, ValueError, OSError):
+            pass
+
+    def _readable(self) -> set[int]:
+        """Keys with bytes (or EOF) waiting, from one epoll call instead of a recv() per socket."""
+        try:
+            return {k.data for k, _ in self.sel.select(0)}
+        except OSError:
+            return set()
+
     def _read_ctrl(self, key: int, s: socket.socket, gws, now: float, max_backlog: int) -> None:
         """Drain what the router sent back on this socket and act on control frames (NACK -> resend from the keep buffer)."""
         try:
@@ -810,8 +839,12 @@ class Sender:
         except (BlockingIOError, InterruptedError):
             return
         except OSError:
+            self._drop_conn(key, gws)
             return
         if not data:
+            # peer closed.  This must drop the socket: a half-closed fd stays readable forever, so
+            # leaving it registered would turn the readiness poll into a busy loop.
+            self._drop_conn(key, gws)
             return
         buf = self.rx.setdefault(key, bytearray())
         buf += data
@@ -898,12 +931,16 @@ class Sender:
     def flush(self, now: float):
         S = self.st.stat.arr
         max_backlog = int(self.st.ctl[CTL["max_backlog"]])
+        ready = self._readable()
         for key, s in list(self.socks.items()):
             if s is None:
                 continue
             buf = self.bufs.get(key)
             gws = [key] if key >= 0 else self.gw_rows
-            self._read_ctrl(key, s, gws, now, max_backlog)
+            if key in ready:
+                self._read_ctrl(key, s, gws, now, max_backlog)
+                if self.socks.get(key) is not s:
+                    continue                      # _read_ctrl dropped it (EOF / error)
             if not buf:
                 continue
             try:
@@ -941,6 +978,10 @@ class Sender:
 
     def close(self):
         self.close_all()
+        try:
+            self.sel.close()
+        except Exception:
+            pass
         self._tap_close()
 
 
