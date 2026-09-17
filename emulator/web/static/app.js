@@ -279,7 +279,7 @@ async function flush() {
   const body = pending; pending = {}; if (!Object.keys(body).length) return;
   try {
     const r = await patch(body); CFG = r.config;
-    if (r.needs_rebuild) toast('구조 설정 변경: [병원·환자 재구성] 버튼으로 반영');
+    if (r.needs_rebuild) toast('구조 설정 변경: 시나리오 탭 [템플릿 재생성]으로 반영');
     else if (r.needs_generate) toast('샘플링/변형 설정 변경: [루프 은행 재생성] 필요');
     else toast('설정 반영');
   } catch (e) { toast('설정 실패: ' + e.message); }
@@ -1876,7 +1876,7 @@ $('#vmTrends').onclick = () => { $('#vmBottom').scrollIntoView({ behavior: 'smoo
     try {
       const body = JSON.parse(b.dataset.apply || '{}');
       const r = await patch(body); CFG = r.config; fillForm();
-      let msg = '설정 적용' + (r.needs_rebuild ? ' (구조 변경: 데이터 탭 [병원·환자 재구성] 필요)' : '');
+      let msg = '설정 적용' + (r.needs_rebuild ? ' (구조 변경: 시나리오 탭 [템플릿 재생성] 필요)' : '');
       if (b.dataset.trig) { const t = await post('/control/trigger', JSON.parse(b.dataset.trig)); msg += ' · ' + t.result; }
       if (b.dataset.script) { await post('/control/script', { file: b.dataset.script }); msg += ' · 스크립트 ' + b.dataset.script + ' 시작'; }
       toast(msg);

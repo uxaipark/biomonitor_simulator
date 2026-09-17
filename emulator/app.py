@@ -259,9 +259,24 @@ async def control_stop():
     return {"result": await asyncio.to_thread(E().stop)}
 
 
+def _after_rebuild() -> None:
+    """A rebuild stops the engine; with general.autostart it should come straight back, the same
+    way a service restart does -- otherwise the GUI shows 'stopped' after every template reset."""
+    if cfg.get("general", "autostart"):
+        try:
+            E().start()
+            chat.post("link", "재구축 후 전송 자동 시작 (general.autostart)", kind="system")
+        except Exception as e:
+            try:
+                chat.post("link", f"재구축 후 자동 시작 실패: {e}", kind="system")
+            except Exception:
+                pass
+
+
 @app.post("/api/v1/control/rebuild")
 async def control_rebuild():
     await asyncio.to_thread(E().rebuild)
+    await asyncio.to_thread(_after_rebuild)
     return {"result": "rebuilt"}
 
 
@@ -592,6 +607,7 @@ async def emr_layout_import(body: dict):
 async def emr_layout_reset():
     cfg.update({"hospital": {"layout_file": ""}})
     await asyncio.to_thread(E().rebuild)
+    await asyncio.to_thread(_after_rebuild)
     return {"result": "generated", "template": E().world.hospital.template}
 
 

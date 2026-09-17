@@ -155,7 +155,6 @@
       <h3>건물 측면도 <span class="right sub">층을 누르면 도면 표시</span></h3>
       <div class="elevwrap"><svg id="elevation" class="elev" preserveAspectRatio="xMidYMin meet"></svg></div>
       <div class="sub" id="elevInfo"></div>
-      <div class="row tight jsonrow"><span class="sub">도면 JSON</span><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><button class="small" id="btnLayoutReset">템플릿 재생성</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
     </div>
   </div>
   <div class="card" style="margin-top:10px">
@@ -175,6 +174,9 @@
     <div class="card"><h3>규모 / 환자</h3>
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="2000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
+      <div class="row"><div class="field"><span>병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
+      <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small" id="btnLayoutReset">템플릿 재생성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
+      <div class="help">병상 수는 구조 값이라 바꾼 뒤 <b>템플릿 재생성</b>을 눌러야 병원이 새 크기로 지어집니다(재원 환자·패치 상태 초기화). 환자 수는 병상 수 이하에서 재생성 없이 즉시 반영됩니다.</div>
       <div class="field"><span>원외 MCOT 환자 수</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
       <div class="presets" id="outPresets"></div>
       <div class="field"><span>장소 시나리오</span><select id="s_site"><option value="hospital">병원 내 연속 모니터링 (BLE 패치 + 게이트웨이)</option><option value="mcot">원외 MCOT (모바일 게이트웨이)</option><option value="mixed">혼합</option></select></div>
@@ -310,7 +312,7 @@
     </div></div>
     <div class="card"><h3>구조 설정 (재구성 필요)</h3>
       <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [병원·환자 재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
-      <div class="row"><div class="field"><span>병상 수 (=최대 패치)</span><input type="number" id="g_beds" min="1" max="5000"></div><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
+      <div class="row"><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
       <div class="row"><div class="field"><span>시드</span><input type="number" id="g_seed"></div><div class="field"><span>GW 최대 BLE 연결</span><input type="number" id="gw_cap" min="1" max="64"></div></div>
       <div class="row"><div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div><div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div></div>
       <div class="row"><div class="field"><span>리듬별 루프 변형 수</span><input type="number" id="s_vpr" min="1" max="200"></div><div class="field"><span>페이스메이커 비율(심장환자)</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div></div>
