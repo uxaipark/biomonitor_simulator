@@ -960,6 +960,8 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
         return meta.get(gw)
 
     def reload_meta():
+        """Pick up a new meta.json and re-announce META only for the gateways whose entry version changed
+        (a handover touches 1-6 gateways; forcing META on all 2000+ made the receiver's META rate swing 200 -> 2000/s)."""
         nonlocal meta, meta_mtime
         if not meta_path or not os.path.exists(meta_path):
             return
@@ -968,9 +970,14 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
-                meta = {int(k): v for k, v in raw.items()}
+                new = {int(k): v for k, v in raw.items()}
+                for g in gw_rows:
+                    g = int(g)
+                    nv = new.get(g, {}).get("v"); ov = meta.get(g, {}).get("v") if meta else None
+                    if nv != ov:
+                        fb.force_meta[g] = True
+                meta = new
                 meta_mtime = m
-                fb.invalidate_meta()
             except Exception:
                 pass
 

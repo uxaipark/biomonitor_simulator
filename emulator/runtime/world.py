@@ -94,6 +94,11 @@ class World:
         self.stats_prev: dict = {}
         self.meta_dirty = True
         self.meta_last_write = 0.0
+        self._meta_cache: dict[int, tuple[int, str]] = {}     # gw -> (signature, serialised entry)
+        self._meta_wlock = threading.Lock()
+        self._meta_pending: str | None = None
+        self._meta_thread: threading.Thread | None = None
+        self.meta_changed_last = 0
         self.meta_versions: dict[int, int] = {}
         self.counters = collections.Counter()
         self._exam_quota_t = 0.0
@@ -138,6 +143,7 @@ class World:
             self.by_id = {p["id"]: p for p in self.profiles}
             n_patch = self.hospital.bed_capacity + self.mobile_pool + 64
             n_gw = len(self.hospital.gateways)
+            self._meta_cache.clear()
             old = self.st
             self.st = SharedState(n_patch, n_gw, 16)
             if old is not None:
@@ -1489,25 +1495,60 @@ class World:
                                                     "fw": PATCH_FW, "resp_source": s["resp_source"], "spo2_source": (SPO2_SOURCES[src] if src is not None else None),
                                                     "devices": [{"key": d, "label": DEVICES[d]["label"]} for d in devs], "channels": p_chans,
                                                     "pacemaker": ({"type": pmi["type"], "mode": pmi["mode"], "lead": pmi["lead"], "detect_pct": pmi["detect_pct"]} if pmi else None)})
-        out = {}
+        # Delta build: a gateway's entry is re-serialised only when its signature (patch set, devices, channels, resp source,
+        # gw number, bundle) changed; every other entry is the cached JSON text.  With 2390 gateways and a few handovers per
+        # second this turns a 2.4 MB json.dump every 2-3 s (world_step spikes to ~280 ms on the Pi) into a few small dumps.
+        # The file itself is written by a background thread so the world loop never waits on disk.
+        cache = self._meta_cache
+        bundle = cfg["transport"]["bundle_ms"]
+        changed = 0
+        parts: list[str] = []
         for g in h.gateways:
             gw = g["idx"]
-            room = h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else ""
             patches = sorted(by_gw.get(gw, []), key=lambda x: x["patch_id"])
-            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"]]))
-            ver = self.meta_versions.get(gw)
-            if ver != sig:
+            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"], bundle]))
+            ent = cache.get(gw)
+            if ent is None or ent[0] != sig:
+                room = h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else ""
+                d = {"v": sig & 0x7FFFFFFF, "gw": g["id"], "gw_no": g["gw_no"], "gw_idx": gw, "type": g["type"], "mac": g["mac"], "ip": g["ip"], "fw": g["fw"],
+                     "location": {"building": g["building"], "floor": g["floor"], "x": g["x"], "y": g["y"], "room": room},
+                     "bundle_ms": bundle, "channels_enabled": en, "patches": patches}
+                ent = (sig, f'"{gw}":' + json.dumps(d, ensure_ascii=False, separators=(",", ":")))
+                cache[gw] = ent
                 self.meta_versions[gw] = sig
-            out[gw] = {"v": sig & 0x7FFFFFFF, "gw": g["id"], "gw_no": g["gw_no"], "gw_idx": gw, "type": g["type"], "mac": g["mac"], "ip": g["ip"], "fw": g["fw"],
-                       "location": {"building": g["building"], "floor": g["floor"], "x": g["x"], "y": g["y"], "room": room},
-                       "bundle_ms": cfg["transport"]["bundle_ms"], "channels_enabled": en, "patches": patches}
-        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = META_PATH.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-        os.replace(tmp, META_PATH)
+                changed += 1
+            parts.append(ent[1])
+        for gw in [k for k in cache if k >= len(h.gateways)]:      # hospital shrank (rebuild): drop stale entries
+            cache.pop(gw, None)
+        text = "{" + ",".join(parts) + "}"
         self.meta_dirty = False
         self.meta_last_write = time.time()
+        self.meta_changed_last = changed
+        if changed or force or not META_PATH.exists():
+            self._meta_write_async(text)
+
+    def _meta_write_async(self, text: str) -> None:
+        """Hand the finished meta.json text to a writer thread (latest text wins); atomic tmp + rename on disk."""
+        with self._meta_wlock:
+            self._meta_pending = text
+            if self._meta_thread is None or not self._meta_thread.is_alive():
+                self._meta_thread = threading.Thread(target=self._meta_writer, daemon=True, name="meta-writer")
+                self._meta_thread.start()
+
+    def _meta_writer(self) -> None:
+        while True:
+            with self._meta_wlock:
+                text, self._meta_pending = self._meta_pending, None
+            if text is None:
+                return
+            try:
+                RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+                tmp = META_PATH.with_suffix(".tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(text)
+                os.replace(tmp, META_PATH)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------ main step
     def step(self, real_dt: float) -> None:
