@@ -996,6 +996,10 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
     bank.load()
     meta: dict = {}
     meta_mtime = 0.0
+    delta_mtime = 0.0
+    base_gen = 0
+    applied_dgen = 0
+    delta_path = (meta_path[:-5] + ".delta.json") if meta_path and meta_path.endswith(".json") else (meta_path or "") + ".delta"
 
     def meta_provider(gw: int):
         return meta.get(gw)
@@ -1003,15 +1007,18 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
     def reload_meta():
         """Pick up a new meta.json and re-announce META only for the gateways whose entry version changed
         (a handover touches 1-6 gateways; forcing META on all 2000+ made the receiver's META rate swing 200 -> 2000/s)."""
-        nonlocal meta, meta_mtime
-        if not meta_path or not os.path.exists(meta_path):
+        nonlocal meta, meta_mtime, delta_mtime, base_gen, applied_dgen
+        if not meta_path:
             return
-        m = os.path.getmtime(meta_path)
+        try:
+            m = os.path.getmtime(meta_path)
+        except OSError:
+            return
         if m != meta_mtime:
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
-                new = {int(k): v for k, v in raw.items()}
+                new = {int(k): v for k, v in raw.items() if not k.startswith("_")}
                 for g in gw_rows:
                     g = int(g)
                     nv = new.get(g, {}).get("v"); ov = meta.get(g, {}).get("v") if meta else None
@@ -1019,8 +1026,36 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
                         fb.force_meta[g] = True
                 meta = new
                 meta_mtime = m
+                base_gen = int(raw.get("_gen", 0))
+                delta_mtime = 0.0
+                applied_dgen = 0
             except Exception:
                 pass
+        # The delta holds every entry changed since the full snapshot it names, so a missed poll costs
+        # nothing; one that names another snapshot is ignored until the next full file lands.
+        try:
+            dm = os.path.getmtime(delta_path)
+        except OSError:
+            return
+        if dm == delta_mtime:
+            return
+        try:
+            with open(delta_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            delta_mtime = dm
+            if int(raw.get("_base", -1)) != base_gen or int(raw.get("_gen", 0)) <= applied_dgen:
+                return
+            for k, v in raw.items():
+                if k.startswith("_"):
+                    continue
+                g = int(k)
+                if v.get("v") != (meta.get(g) or {}).get("v"):
+                    meta[g] = v
+                    if fb.in_set[g]:
+                        fb.force_meta[g] = True
+            applied_dgen = int(raw.get("_gen", 0))
+        except Exception:
+            pass
 
     gw_rows = np.asarray(gw_rows, dtype=np.int64)
     fb = FrameBuilder(bank, st, gw_rows, meta_provider)

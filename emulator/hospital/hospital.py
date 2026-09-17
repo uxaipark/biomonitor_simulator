@@ -177,6 +177,7 @@ class Hospital:
     def _geom(self) -> None:
         self.gw_xyz = np.array([[g["x"], g["y"], g["floor"] * 4.0 + g["building_idx"] * 1000.0] for g in self.gateways], dtype=np.float32)
         self.gw_room = np.array([g["room_idx"] for g in self.gateways], dtype=np.int32)
+        self._cand_cache: dict[int, np.ndarray] = {}   # room_idx -> gateways by expected RSSI; geometry is fixed for the life of this Hospital
 
     def add_mobile_gateway(self, k: int) -> int:
         gidx = len(self.gateways)
@@ -235,6 +236,16 @@ class Hospital:
         return rssi
 
     def candidate_gateways(self, room_idx: int) -> np.ndarray:
+        # _relink asks this for a fifth of the patients every second (400 calls/s at 2,000 patients), and the
+        # answer depends only on the room's position against the fixed gateway grid.  Callers only read it.
+        cached = self._cand_cache.get(room_idx)
+        if cached is not None:
+            return cached
+        out = self._candidate_gateways(room_idx)
+        self._cand_cache[room_idx] = out
+        return out
+
+    def _candidate_gateways(self, room_idx: int) -> np.ndarray:
         r = self.rooms[room_idx]
         key = r["floor"] * 4.0 + r["building_idx"] * 1000.0
         same = np.where(np.abs(self.gw_xyz[:, 2] - key) < 0.5)[0]

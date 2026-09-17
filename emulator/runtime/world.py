@@ -37,6 +37,7 @@ ACT_ID = {a: i for i, a in enumerate(ACTIVITIES)}
 POSTURE_ID = {"supine": 0, "left_lateral": 1, "right_lateral": 2, "sitting": 3, "standing": 4, "prone": 5}
 RUNTIME_DIR = BASE_DIR / "runtime"
 META_PATH = RUNTIME_DIR / "meta.json"
+META_DELTA_PATH = RUNTIME_DIR / "meta.delta.json"
 PATCH_FW = "bp-fw 3.2.0"
 
 
@@ -96,8 +97,11 @@ class World:
         self.meta_last_write = 0.0
         self._meta_cache: dict[int, tuple[int, str]] = {}     # gw -> (signature, serialised entry)
         self._meta_wlock = threading.Lock()
-        self._meta_pending: str | None = None
+        self._meta_pending: list[tuple[Path, str | None]] | None = None   # (path, text) pairs; text None = delete
         self._meta_thread: threading.Thread | None = None
+        self._meta_gen = 0                                    # generation of the last full meta.json
+        self._meta_dgen = 0                                   # generation of the last delta written against it
+        self._meta_delta: dict[int, str] = {}                 # gw -> entry text changed since the last full write
         self.meta_changed_last = 0
         self.meta_versions: dict[int, int] = {}
         self.counters = collections.Counter()
@@ -1516,21 +1520,35 @@ class World:
                 ent = (sig, f'"{gw}":' + json.dumps(d, ensure_ascii=False, separators=(",", ":")))
                 cache[gw] = ent
                 self.meta_versions[gw] = sig
+                self._meta_delta[gw] = ent[1]
                 changed += 1
             parts.append(ent[1])
         for gw in [k for k in cache if k >= len(h.gateways)]:      # hospital shrank (rebuild): drop stale entries
             cache.pop(gw, None)
-        text = "{" + ",".join(parts) + "}"
+            self._meta_delta.pop(gw, None)
         self.meta_dirty = False
         self.meta_last_write = time.time()
         self.meta_changed_last = changed
-        if changed or force or not META_PATH.exists():
-            self._meta_write_async(text)
+        # Only a handful of gateways change per write (4-8 of ~2,000 measured), yet every worker parsed the
+        # whole 2.25 MB file each time -- 74 MB of JSON per 30 s across three workers, their second-largest
+        # cost.  Write the changed entries as a cumulative delta against the last full snapshot; the full
+        # file is rewritten only when the delta stops being the cheaper option or on force/rebuild.
+        full = force or self._meta_gen == 0 or not META_PATH.exists() or len(self._meta_delta) * 4 >= max(1, len(h.gateways))
+        if full:
+            self._meta_gen += 1
+            self._meta_dgen = 0
+            self._meta_delta.clear()
+            text = "{" + f'"_gen":{self._meta_gen},' + ",".join(parts) + "}"
+            self._meta_write_async([(META_PATH, text), (META_DELTA_PATH, None)])
+        elif changed:
+            self._meta_dgen += 1
+            text = "{" + f'"_base":{self._meta_gen},"_gen":{self._meta_dgen},' + ",".join(self._meta_delta.values()) + "}"
+            self._meta_write_async([(META_DELTA_PATH, text)])
 
-    def _meta_write_async(self, text: str) -> None:
-        """Hand the finished meta.json text to a writer thread (latest text wins); atomic tmp + rename on disk."""
+    def _meta_write_async(self, items: list[tuple[Path, str | None]]) -> None:
+        """Hand finished file texts to a writer thread (latest per path wins); atomic tmp + rename on disk."""
         with self._meta_wlock:
-            self._meta_pending = text
+            self._meta_pending = items
             if self._meta_thread is None or not self._meta_thread.is_alive():
                 self._meta_thread = threading.Thread(target=self._meta_writer, daemon=True, name="meta-writer")
                 self._meta_thread.start()
@@ -1538,17 +1556,24 @@ class World:
     def _meta_writer(self) -> None:
         while True:
             with self._meta_wlock:
-                text, self._meta_pending = self._meta_pending, None
-            if text is None:
+                items, self._meta_pending = self._meta_pending, None
+            if items is None:
                 return
-            try:
-                RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-                tmp = META_PATH.with_suffix(".tmp")
-                with open(tmp, "w", encoding="utf-8") as f:
-                    f.write(text)
-                os.replace(tmp, META_PATH)
-            except Exception:
-                pass
+            for path, text in items:
+                try:
+                    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+                    if text is None:
+                        try:
+                            os.unlink(path)
+                        except FileNotFoundError:
+                            pass
+                        continue
+                    tmp = path.with_suffix(path.suffix + ".tmp")
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        f.write(text)
+                    os.replace(tmp, path)
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------ main step
     def step(self, real_dt: float) -> None:
