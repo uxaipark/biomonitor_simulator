@@ -480,37 +480,62 @@ def _chat_link_watch() -> None:
     protocol anomaly showing up -- belongs in it.  Only transitions are posted; a periodic
     heartbeat would bury the humans' messages.
     """
+    # The first version posted on every counter change and, with patch_seq_reorder ticking up a
+    # few times a second, wrote 120 system lines in minutes and buried the conversation.  Now:
+    # anomalies are reported as a rate over a window, at most once per ANOMALY_EVERY seconds and
+    # only when something actually moved; a stale router report must stay stale for STALE_S
+    # (two consecutive checks) before it counts as lost, so a single slow report does not flap.
+    ANOMALY_EVERY = 300.0
+    STALE_S = 45.0
     prev: dict = {}
+    stale_since: float | None = None
+    rx_up_reported = True
+    anom_base: dict = {}
+    anom_t = time.time()
     while True:
         time.sleep(5.0)
         try:
             d = chat_link()
             tx, rx = d.get("tx") or {}, d.get("rx") or {}
-            cur = {"running": tx.get("running"), "target": tx.get("target"),
-                   "rx_up": bool(rx) and (d.get("rx_age_s") or 999) < 20,
-                   "anomalies": tuple(sorted((rx.get("anomalies") or {}).items()))}
-            if not prev:
-                prev = cur
-                continue
+            now = time.time()
+            cur = {"running": tx.get("running"), "target": tx.get("target")}
+            anoms = dict(rx.get("anomalies") or {})
             msgs = []
-            if cur["running"] != prev["running"]:
-                msgs.append("전송 " + ("시작됨" if cur["running"] else "정지됨 (재시작 후에는 control/start 필요)"))
-            if cur["target"] != prev["target"]:
-                msgs.append(f"송신 대상 변경: {prev['target']} → {cur['target']}")
-            if cur["rx_up"] != prev["rx_up"]:
-                msgs.append("라우터 상태 보고 " + ("수신 재개" if cur["rx_up"] else "끊김 (20초 이상 보고 없음)"))
-            if cur["anomalies"] != prev["anomalies"]:
-                new = dict(cur["anomalies"])
-                old = dict(prev["anomalies"])
-                grown = {k: v for k, v in new.items() if v != old.get(k)}
-                if grown:
-                    msgs.append("라우터 이상 카운터: " + ", ".join(f"{k}={v}" for k, v in sorted(grown.items())))
+            if prev:
+                if cur["running"] != prev["running"]:
+                    msgs.append("전송 " + ("시작됨" if cur["running"] else "정지됨"))
+                if cur["target"] != prev["target"]:
+                    msgs.append(f"송신 대상 변경: {prev['target']} → {cur['target']}")
+            prev = cur
+            # router report liveness with hysteresis
+            fresh = bool(rx) and (d.get("rx_age_s") or 999) < 20
+            if fresh:
+                stale_since = None
+                if not rx_up_reported:
+                    msgs.append("라우터 상태 보고 수신 재개")
+                    rx_up_reported = True
+            else:
+                stale_since = stale_since or now
+                if rx_up_reported and now - stale_since >= STALE_S:
+                    msgs.append(f"라우터 상태 보고 끊김 ({int(STALE_S)}초 이상)")
+                    rx_up_reported = False
+            # anomalies: one summary line per window, as deltas (a counter reset shows as the new absolute)
+            if now - anom_t >= ANOMALY_EVERY:
+                delta = {}
+                for k, v in anoms.items():
+                    b = anom_base.get(k)
+                    dv = v if (b is None or v < b) else v - b
+                    if dv:
+                        delta[k] = dv
+                if delta:
+                    mins = int(round((now - anom_t) / 60))
+                    msgs.append(f"라우터 이상 카운터 (최근 {mins}분 증가분): " + ", ".join(f"{k}=+{v}" for k, v in sorted(delta.items())))
+                anom_base, anom_t = anoms, now
             for m in msgs:
                 try:
                     chat.post("link", m, kind="system")
                 except Exception:
                     pass
-            prev = cur
         except Exception:
             pass
 
