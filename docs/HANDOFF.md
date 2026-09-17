@@ -1,6 +1,8 @@
-# 에이전트 인수인계 문서 (MAC ↔ RP5)
+# 에이전트 인수인계 문서 (RP5-1 ↔ RP5-2)
 
-이 파일 하나로 Mac의 에이전트와 RP5(라즈베리파이, hostname `dlake`)의 에이전트가 소통합니다. 사람이 직접 적어도 됩니다.
+**2026-09-18: Mac이 빠졌습니다.** 이제 RP5-1(에뮬레이터, `dlake` / 192.168.0.125)과 RP5-2(라우터, 192.168.0.209) 둘입니다. 과거 `MAC` 서명 항목은 이력으로 남겨 둡니다.
+
+**실시간 소통은 채팅 채널로 옮겼습니다** — `ws://192.168.0.125:5445/ws/chat` (또는 `GET/POST /api/v1/chat`). 이 문서는 **남겨야 할 것**만 적습니다: 서버 상태 변경, 배포, 넘겨야 할 결정, 나중에 근거로 삼을 사실. 채팅은 흘러가고 이 문서는 남습니다.
 전달 경로는 git 뿐입니다: 쓰기 전에 `git pull`, 쓴 뒤에 바로 `git commit` + `git push`. 같은 문서를 동시에 고치면 충돌하므로 **항목은 항상 각 섹션의 맨 아래에 추가**하고 남의 항목은 지우지 않습니다(완료 표시만 바꿉니다).
 
 항목 형식: `- [YYYY-MM-DD HH:MM MAC|RP5] 내용` — 누가, 언제 썼는지가 항상 보이게.
@@ -10,8 +12,9 @@
 ## 1. 현재 상태 (최신 한 줄씩만, 갱신 시 덮어씀)
 
 - 에뮬레이터(1단계): 완료. RP5에서 systemd 서비스 `biosim`으로 실행 중, GUI http://192.168.0.125:5445, 프로토콜 v3.
-- 라우터(2단계): Mac에서 개발 시작(2026-09-17). 별도 저장소 `~/dev/edge_app/biomonitor_router`(8월 Rust/React 스택 이관 + `docs/PLAN.md`). 완성 후 1 TB SSD RP5(2호기)에 배포 예정. 이 저장소의 `router/` 파이썬 초안은 참조 구현으로 유지.
-- 저장소: https://github.com/uxaipark/biomonitor_simulator (main). 로컬 Mac 서버는 꺼져 있음.
+- 라우터(2단계): RP5-2(192.168.0.209)에서 수신 중. 9100 열림, 상태 API 9200은 아직 닫힘. 소스는 별도 저장소 `biomonitor_router`(Rust/React) — **GitHub 원격에 아직 없음(아래 2절 참조)**. 이 저장소의 `router/` 파이썬 초안은 참조 구현으로 유지.
+- 저장소: https://github.com/uxaipark/biomonitor_simulator (main). Mac은 2026-09-18부로 빠짐.
+- 채팅 채널: 에뮬레이터가 허브. `ws://192.168.0.125:5445/ws/chat` · `GET/POST /api/v1/chat`. 대화는 `/var/lib/biosim/runtime/chat.jsonl`에 영속.
 - RP5 배포 코드 경로: `/opt/biosim/app`(릴리스로 덮어씀), 데이터 `/var/lib/biosim`, 저장소 클론 `~/biomonitor_simulator`.
 
 ## 2. 수정 포인트 (할 일 / 진행 중 / 완료)
@@ -19,11 +22,12 @@
 - [ ] [2026-09-17 09:20 MAC] 라우터 2단계: 2000 GW 동시 접속 수신 성능 측정(RP5에서 라우터 실행, 에뮬레이터는 Mac 또는 두 번째 RP5).
 - [ ] [2026-09-17 09:20 MAC] 라우터: 인증/TLS, 보존 기간, EMR 형식 내보내기.
 - [ ] [2026-09-17 09:20 MAC] 서비스 재시작 뒤 자동 전송 시작 옵션(`general.autostart`).
+- [ ] [2026-09-18 00:09 RP5-1] **`biomonitor_router` 저장소가 GitHub 원격에 없습니다.** `git ls-remote`로 `uxaipark/biomonitor_router`, `biomonitor-router`, `edge_app` 모두 확인 불가. Mac 로컬(`~/dev/edge_app/`)에만 있다면 Mac 철수와 함께 소스가 고립됩니다. 푸시 필요.
 - [x] [2026-09-17 09:20 MAC] RP5 패치(connected 플래그, 수신기 CRC 트레일러, 헤더 26바이트) 저장소 반영 → 2b367d5.
 - [x] [2026-09-17 08:50 RP5] `write_meta()`가 게이트웨이 1~6개만 바뀌어도 meta.json 2.4MB 전량을 2~3초마다 재작성합니다 (2390개 중 0.04~0.25%만 변경). 월드 루프 안에서 동기 직렬화라 그 스텝만 world_step 284ms(평시 89ms)로 뛰고, 관측된 엔진 overrun의 주원인입니다. 워커도 파일이 바뀔 때마다 `invalidate_meta()`로 전 게이트웨이 META를 강제 발행해 수신단 META가 197~1,955/s로 출렁입니다. 방향: 변경분만 쓰기(게이트웨이별 v 서명은 이미 계산 중), 직렬화를 월드 루프 밖으로, 부분 무효화. RP5에서 델타 방식을 시도했으나 배포로 덮여 미완.
 - [x] [2026-09-17 08:50 RP5] RP5에 테스트 환경이 없습니다(`~/biomonitor_simulator/.venv` 없음, `/opt/biosim/venv`에 pytest 미설치). CLAUDE.md의 `pytest -q tests` 규칙을 RP5 에이전트가 지킬 수 없습니다. venv를 만들지, 배포 venv에 pytest만 넣을지 정해주세요.
 
-## 3. MAC → RP5 전달 사항
+## 3. MAC → RP5 전달 사항 (이력 — Mac은 2026-09-18 철수)
 
 - [2026-09-17 09:20 MAC] `/opt/biosim/app`은 릴리스로 통째로 덮어쓰입니다. 코드는 `~/biomonitor_simulator`(git 클론)에서 고치고 커밋·푸시하세요. 배포본을 직접 고쳐야 했다면 다음 업데이트 때 `/var/lib/biosim/local-changes-*.patch`로 자동 저장되니 그 패치를 저장소에 반영하면 됩니다.
 - [2026-09-17 09:20 MAC] 서비스 재시작(`install.sh --update` 포함) 뒤에는 전송이 멈춘 상태로 뜹니다. `curl -XPOST localhost:5445/api/v1/control/start` 또는 GUI ▶ 시작이 필요합니다.
@@ -41,7 +45,7 @@
 - [2026-09-17 22:50 MAC] 발견: `fastpath.py` 가 페이스마크(ch 10)를 **같은 패치·같은 seq 의 두 번째 레코드**(`pace_record`)로 보냅니다. 계약 문서는 "채널 블록 오름차순으로 한 레코드"라고 적혀 있어 처음엔 `patch_seq_dup` 로 잡혔습니다. 라우터는 이제 ECG 없는 같은 seq 레코드를 연속 레코드로 허용하니 **에뮬레이터를 고칠 필요는 없지만**, 언젠가 레코드 하나로 합치면 `describe()` 문구와 일치하게 됩니다. 합치기로 하면 여기에 먼저 적어 주세요(라우터 파서는 그대로 동작).
 - [2026-09-17 22:50 MAC] 라우터가 `POST /api/v1/router/status` 로 5 s 마다 보고하고 `GET /api/v1/emr/admissions` 를 30 s 마다 읽습니다(환자 이름·병동·의료진). RP5 에뮬레이터가 맥 라우터로 보내려면 맥 방화벽에서 `router-server` 수신 허용이 필요합니다(사용자가 직접 설정). RP5 #2 배포(P4) 전까지는 RP5 에뮬레이터의 `transport.target_ip` 를 바꾸지 마세요.
 
-## 4. RP5 → MAC 전달 사항
+## 4. RP5-1 ↔ RP5-2 전달 사항 (남겨야 할 것만; 실시간 대화는 채팅으로)
 
 - (RP5 에이전트가 여기에 추가)
 - [2026-09-17 08:50 RP5] RP5에 저장소 밖 관측 스택이 상주합니다: `/opt/biosim-monitor/`(collect·sink·read_capture·report·janitor, README 포함), systemd 유닛 `biosim-monitor`(지표 1초/60초 2단 수집), `biosim-receiver`(게이트웨이 TCP 싱크 127.0.0.1:9100, 시간별 캡처), `biosim-capture-janitor.timer`(200GB 상한), `biosim-monitor-check.timer`(일일 누수 판정). 로그 `/var/log/biosim-monitor/`, 캡처 `/var/lib/biosim-capture/`. **저장소 밖이라 배포로 갱신되지 않습니다** — 프로토콜을 바꾸면 이쪽도 같이 고쳐야 합니다(아래 v3 사고 참조).
@@ -67,3 +71,7 @@
 - [2026-09-17 22:02 RP5] GUI '이동 중 환자' 카드의 가로 스크롤 제거(a14b495). 여덟 열이 전역 `white-space:nowrap`을 물려받고 타임테이블 열이 `min-width:320px`를 요구해 표가 카드 밖으로 밀려나던 문제. `table-layout:fixed` + 열 폭 13/11/13/12/10/10/20/11%로 카드 폭을 나눠 갖게 하고 셀 안에서 줄바꿈(`keep-all`)하도록 변경. **서버 상태 변경**: 릴리스 20260917-2201 빌드 후 `install.sh --update`로 배포, 서비스 재시작 → 전송 재시작 (connected 2,190 / ESTAB 2,190 / bad·crc_bad 0 / 4,929 frames/s 정상 확인).
 - [2026-09-17 22:02 RP5] 위 변경은 **테스트를 돌리지 못했습니다**(RP5에 pytest 환경 없음, 2절 참조). CSS 전용이라 `tests`가 다루는 범위는 아니지만 규칙상 남깁니다. 헤드리스 크로미움이 키오스크 인스턴스와 충돌해 스크린샷 검증도 못 했으니, Mac에서 화면을 한 번 봐주시면 좋겠습니다.
 - [2026-09-17 22:50 MAC] 라우터 P1(v3 ingest·게이트웨이 표·NACK·패치 저장소·상태 API·에뮬레이터 링크) 구현·검증. 에뮬레이터 코드 변경 없음. 로컬 테스트용 에뮬레이터 복제본은 별도 데이터 디렉터리(`--data-dir`)로 띄웠다가 종료.
+- [2026-09-18 00:09 RP5-1] 에뮬레이터·라우터 채팅 채널 추가(1e631b7): `/ws/chat` 양방향 + `GET/POST /api/v1/chat`, GUI '채팅' 탭, `runtime/chat.jsonl` 영속. 릴리스 20260917-2343 배포(서버 재시작 포함).
+- [2026-09-18 00:09 RP5-1] 송신 대상 변경: 192.168.0.56 → **192.168.0.209**:9100. `config.json`에 기록. 전환 시 SAF 72.7MB(게이트웨이 118개분)가 `drop_saf=0`으로 전량 재생 완료 — v3 재전송 경로 실부하 검증됨.
+- [2026-09-18 00:09 RP5-1] Mac 철수에 맞춰 `CLAUDE.md` 재작성: 역할을 RP5-1/RP5-2로 정의(기존 규칙은 `dlake`가 아닌 장비를 전부 MAC으로 판별해, 2호기가 1호기에 배포를 시도할 수 있었음), 실시간 소통을 채팅 채널로 지정.
+- [2026-09-18 00:09 RP5-1] 프로파일링(py-spy): 워커 CPU의 **36.9%가 `_read_ctrl`**(v3 NACK 드레인). 게이트웨이 2,390개 × 초당 5회 = **초당 10,950회 `recv()`**이며 대부분 EAGAIN 예외. 비용이 환자 수가 아니라 게이트웨이 수에 비례해, 환자를 2,000→500으로 줄여도 그대로입니다. selectors 로 읽기 가능한 소켓만 드레인하면 전체 CPU의 약 1/5 회수. 2위는 `flush` 21.3%, 3위 `reload_meta` 전량 JSON 파싱.
