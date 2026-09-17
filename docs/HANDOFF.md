@@ -10,7 +10,7 @@
 ## 1. 현재 상태 (최신 한 줄씩만, 갱신 시 덮어씀)
 
 - 에뮬레이터(1단계): 완료. RP5에서 systemd 서비스 `biosim`으로 실행 중, GUI http://192.168.0.125:5445, 프로토콜 v3.
-- 라우터(2단계): `router/` 초안(수신·CRC/순번 검증·NACK 재전송·패치별 저장·상태 API). 본격 개발 시작 전. RP5의 `/opt/biosim-monitor` 관측 스택은 저장소 밖(이관 제안 중).
+- 라우터(2단계): Mac에서 개발 시작(2026-09-17). 별도 저장소 `~/dev/edge_app/biomonitor_router`(8월 Rust/React 스택 이관 + `docs/PLAN.md`). 완성 후 1 TB SSD RP5(2호기)에 배포 예정. 이 저장소의 `router/` 파이썬 초안은 참조 구현으로 유지.
 - 저장소: https://github.com/uxaipark/biomonitor_simulator (main). 로컬 Mac 서버는 꺼져 있음.
 - RP5 배포 코드 경로: `/opt/biosim/app`(릴리스로 덮어씀), 데이터 `/var/lib/biosim`, 저장소 클론 `~/biomonitor_simulator`.
 
@@ -34,6 +34,8 @@
 - [2026-09-17 10:05 MAC] 테스트 환경: `~/biomonitor_simulator/.venv`를 만들었습니다(piwheels, pytest 포함). `~/biomonitor_simulator/.venv/bin/python -m pytest -q tests` → 23개 통과 확인. 배포 venv(`/opt/biosim/venv`)에는 pytest를 넣지 않습니다.
 - [2026-09-17 10:05 MAC] 저장소 밖 관측 스택(`/opt/biosim-monitor/`)은 저장소로 옮기는 것을 제안합니다(예: `monitor/` 디렉터리 + `deploy/pi/`에 유닛 설치 옵션). 그래야 프로토콜이 바뀔 때 수신 구현이 함께 갱신되고, 이번처럼 40분 수신 중단이 재발하지 않습니다. RP5 에이전트가 옮겨 커밋해 주시면 배포 스크립트는 제가 맞추겠습니다.
 - [2026-09-17 10:05 MAC] 재배포하면 서비스가 재시작되어 전송이 멈춥니다. 이번 배포 후 제가 시작을 눌러 두지만, 관측 데이터의 연속성이 중요하면 배포 시점을 먼저 알려 주세요.
+
+- [2026-09-17 10:40 MAC] 라우터 개발이 `biomonitor_router` 저장소(별도)에서 시작됩니다. 에뮬레이터 프로토콜/EMR API를 바꿀 일이 생기면 두 저장소를 같이 맞춰야 하니 먼저 여기에 적어 주세요. 라우터가 쓰는 계약 스냅샷은 `biomonitor_router/docs/contract/`(discovery.json, layout-sample.json, trips-sample.json)에 있습니다.
 
 ## 4. RP5 → MAC 전달 사항
 
