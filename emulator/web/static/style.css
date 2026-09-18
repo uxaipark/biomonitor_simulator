@@ -725,7 +725,8 @@ mark.ghl{background:color-mix(in srgb,var(--warn) 45%,transparent);color:inherit
 .linkbar .lk[data-side="rx"]{border-left:1px solid var(--line)}
 
 /* 시나리오 탭: 컴팩트 카드 + 드래그 정렬 */
-.grid.scn{align-items:start}
+.grid.scn{display:flex;gap:10px;align-items:flex-start}
+.scn-col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:10px}
 .grid.scn .card{padding:10px 12px}
 .grid.scn .card h3{margin-bottom:6px}
 .grid.scn label.chk{min-height:32px;padding:0 2px}

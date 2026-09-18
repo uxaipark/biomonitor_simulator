@@ -2247,21 +2247,41 @@ document.querySelectorAll('.fold[data-fold]').forEach(b => {
 });
 function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
 
-// ---------------- 시나리오 탭 카드 드래그 정렬 (순서는 브라우저 localStorage에 저장) ----------------
+// ---------------- 시나리오 탭: 핀터레스트식 세로 쌓기(가장 짧은 열에 다음 카드) + 드래그 정렬, 순서는 localStorage 저장 ----------------
 (() => {
   const grid = document.getElementById('scnGrid'); if (!grid) return;
-  const KEY = 'scnCardOrder';
-  const cards = () => [...grid.querySelectorAll(':scope > .card[data-card]')];
-  const defaultOrder = cards().map(c => c.dataset.card);
-  const saveOrder = () => { try { localStorage.setItem(KEY, JSON.stringify(cards().map(c => c.dataset.card))); } catch (e) { } };
-  const applyOrder = (order) => {
-    const by = Object.fromEntries(cards().map(c => [c.dataset.card, c]));
-    const seq = order.filter(id => by[id]).concat(defaultOrder.filter(id => !order.includes(id)));
-    seq.forEach(id => grid.appendChild(by[id]));
+  const KEY = 'scnCardOrder', MINW = 280, GAP = 10;
+  const all = [...grid.querySelectorAll('.card[data-card]')];
+  const byId = Object.fromEntries(all.map(c => [c.dataset.card, c]));
+  const defaultOrder = all.map(c => c.dataset.card);
+  let order = defaultOrder.slice();
+  try { const o = JSON.parse(localStorage.getItem(KEY) || 'null'); if (Array.isArray(o) && o.length) order = o.filter(id => byId[id]).concat(defaultOrder.filter(id => !o.includes(id))); } catch (e) { }
+  const saveOrder = () => { try { localStorage.setItem(KEY, JSON.stringify(order)); } catch (e) { } };
+
+  let cols = [], busy = false;
+  const layout = () => {
+    if (busy) return; busy = true;
+    const w = grid.clientWidth || window.innerWidth - 24;
+    const n = Math.max(1, Math.floor((w + GAP) / (MINW + GAP)));
+    if (cols.length !== n) {
+      grid.querySelectorAll('.scn-col').forEach(c => c.remove());
+      cols = Array.from({ length: n }, () => { const d = document.createElement('div'); d.className = 'scn-col'; grid.appendChild(d); return d; });
+    }
+    const h = cols.map(() => 0);
+    for (const id of order) {
+      const c = byId[id]; let k = 0;
+      for (let i = 1; i < n; i++) if (h[i] < h[k] - 1) k = i;      // 가장 짧은 열 (동률이면 왼쪽)
+      if (c.parentNode !== cols[k] || cols[k].lastElementChild !== c) cols[k].appendChild(c);
+      h[k] += c.offsetHeight + GAP;
+    }
+    busy = false;
   };
-  try { const o = JSON.parse(localStorage.getItem(KEY) || 'null'); if (Array.isArray(o) && o.length) applyOrder(o); } catch (e) { }
+  layout();
+  const ro = new ResizeObserver(() => layout());
+  all.forEach(c => ro.observe(c)); ro.observe(grid);
+
   const rb = document.getElementById('btnCardOrderReset');
-  if (rb) rb.onclick = () => { applyOrder(defaultOrder); try { localStorage.removeItem(KEY); } catch (e) { } toast('카드 순서를 기본값으로 되돌렸습니다'); };
+  if (rb) rb.onclick = () => { order = defaultOrder.slice(); try { localStorage.removeItem(KEY); } catch (e) { } layout(); toast('카드 순서를 기본값으로 되돌렸습니다'); };
 
   let drag = null; // {card, ghost, dx, dy}
   grid.addEventListener('pointerdown', e => {
@@ -2280,22 +2300,24 @@ function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}
   grid.addEventListener('pointermove', e => {
     if (!drag) return;
     drag.ghost.style.left = (e.clientX - drag.dx) + 'px'; drag.ghost.style.top = (e.clientY - drag.dy) + 'px';
-    // 화면 끝 근처에서 자동 스크롤
-    const m = 48, h = window.innerHeight;
-    if (e.clientY < m) window.scrollBy(0, -12); else if (e.clientY > h - m) window.scrollBy(0, 12);
+    const m = 48, hh = window.innerHeight;
+    if (e.clientY < m) window.scrollBy(0, -12); else if (e.clientY > hh - m) window.scrollBy(0, 12);
     drag.ghost.style.display = 'none';
     const el = document.elementFromPoint(e.clientX, e.clientY);
     drag.ghost.style.display = '';
-    const over = el && el.closest('#scnGrid > .card[data-card]');
+    const over = el && el.closest('#scnGrid .card[data-card]');
     if (!over || over === drag.card) return;
     const or = over.getBoundingClientRect();
-    const after = (e.clientX - or.left) / or.width + (e.clientY - or.top) / or.height > 1; // 대상 카드의 우하단 절반이면 뒤에
-    grid.insertBefore(drag.card, after ? over.nextSibling : over);
+    const after = (e.clientY - or.top) > or.height / 2;             // 대상 카드의 아래 절반이면 뒤에
+    const me = drag.card.dataset.card, tgt = over.dataset.card;
+    const next = order.filter(id => id !== me);
+    next.splice(next.indexOf(tgt) + (after ? 1 : 0), 0, me);
+    if (next.join() !== order.join()) { order = next; layout(); }
   });
-  const end = e => {
+  const end = () => {
     if (!drag) return;
     drag.ghost.remove(); drag.card.classList.remove('dragging');
-    drag = null; saveOrder();
+    drag = null; saveOrder(); layout();
   };
   grid.addEventListener('pointerup', end); grid.addEventListener('pointercancel', end);
 })();
