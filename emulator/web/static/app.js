@@ -2247,41 +2247,46 @@ document.querySelectorAll('.fold[data-fold]').forEach(b => {
 });
 function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
 
-// ---------------- 시나리오 탭: 핀터레스트식 세로 쌓기(가장 짧은 열에 다음 카드) + 드래그 정렬, 순서는 localStorage 저장 ----------------
+// ---------------- 시나리오 탭: 고정 컬럼 세로 쌓기. 카드는 자기 컬럼에 머물고, 드래그 드롭으로만 컬럼 간 이동. 컬럼별 순서를 열 수마다 localStorage 저장 ----------------
 (() => {
   const grid = document.getElementById('scnGrid'); if (!grid) return;
-  const KEY = 'scnCardOrder', MINW = 280, GAP = 10;
+  const KEY = 'scnCols', MINW = 280, GAP = 10;
   const all = [...grid.querySelectorAll('.card[data-card]')];
   const byId = Object.fromEntries(all.map(c => [c.dataset.card, c]));
   const defaultOrder = all.map(c => c.dataset.card);
-  let order = defaultOrder.slice();
-  try { const o = JSON.parse(localStorage.getItem(KEY) || 'null'); if (Array.isArray(o) && o.length) order = o.filter(id => byId[id]).concat(defaultOrder.filter(id => !o.includes(id))); } catch (e) { }
-  const saveOrder = () => { try { localStorage.setItem(KEY, JSON.stringify(order)); } catch (e) { } };
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { } };
 
-  let cols = [], busy = false;
+  let cols = [], colIds = [], n = 0;
+  const colCount = () => { const w = grid.clientWidth || window.innerWidth - 24; return Math.max(1, Math.floor((w + GAP) / (MINW + GAP))); };
+  // 기본 배분: 카드를 순서대로 가장 짧은 열에 (처음 한 번만, 이후에는 저장된 배분 사용)
+  const defaultDist = (k) => {
+    const out = Array.from({ length: k }, () => []), h = new Array(k).fill(0);
+    for (const id of defaultOrder) { let j = 0; for (let i = 1; i < k; i++) if (h[i] < h[j] - 1) j = i; out[j].push(id); h[j] += byId[id].offsetHeight + GAP; }
+    return out;
+  };
+  const normalize = (dist, k) => { // 저장본 검증: 없는 id 제거, 빠진 카드는 가장 짧은 열에 추가
+    const out = Array.from({ length: k }, (_, i) => (dist[i] || []).filter(id => byId[id]));
+    const seen = new Set(out.flat());
+    for (const id of defaultOrder) if (!seen.has(id)) { let j = 0; for (let i = 1; i < k; i++) if (out[i].length < out[j].length) j = i; out[j].push(id); }
+    return out;
+  };
+  const render = () => {
+    for (let i = 0; i < n; i++) for (const id of colIds[i]) { const c = byId[id]; if (c.parentNode !== cols[i] || cols[i].lastElementChild !== c) cols[i].appendChild(c); }
+  };
   const layout = () => {
-    if (busy) return; busy = true;
-    const w = grid.clientWidth || window.innerWidth - 24;
-    const n = Math.max(1, Math.floor((w + GAP) / (MINW + GAP)));
-    if (cols.length !== n) {
-      grid.querySelectorAll('.scn-col').forEach(c => c.remove());
-      cols = Array.from({ length: n }, () => { const d = document.createElement('div'); d.className = 'scn-col'; grid.appendChild(d); return d; });
-    }
-    const h = cols.map(() => 0);
-    for (const id of order) {
-      const c = byId[id]; let k = 0;
-      for (let i = 1; i < n; i++) if (h[i] < h[k] - 1) k = i;      // 가장 짧은 열 (동률이면 왼쪽)
-      if (c.parentNode !== cols[k] || cols[k].lastElementChild !== c) cols[k].appendChild(c);
-      h[k] += c.offsetHeight + GAP;
-    }
-    busy = false;
+    const k = colCount(); if (k === n) return;
+    n = k;
+    grid.querySelectorAll('.scn-col').forEach(c => c.remove());
+    cols = Array.from({ length: n }, () => { const d = document.createElement('div'); d.className = 'scn-col'; grid.appendChild(d); return d; });
+    colIds = saved[n] ? normalize(saved[n], n) : defaultDist(n);
+    render();
   };
   layout();
-  const ro = new ResizeObserver(() => layout());
-  all.forEach(c => ro.observe(c)); ro.observe(grid);
+  new ResizeObserver(() => layout()).observe(grid);
 
   const rb = document.getElementById('btnCardOrderReset');
-  if (rb) rb.onclick = () => { order = defaultOrder.slice(); try { localStorage.removeItem(KEY); } catch (e) { } layout(); toast('카드 순서를 기본값으로 되돌렸습니다'); };
+  if (rb) rb.onclick = () => { saved = {}; save(); colIds = defaultDist(n); render(); toast('카드 배치를 기본값으로 되돌렸습니다'); };
 
   let drag = null; // {card, ghost, dx, dy}
   grid.addEventListener('pointerdown', e => {
@@ -2293,7 +2298,7 @@ function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}
     ghost.classList.add('drag-ghost'); ghost.classList.remove('dragging');
     Object.assign(ghost.style, { width: r.width + 'px', left: r.left + 'px', top: r.top + 'px', maxHeight: '60vh', overflow: 'hidden' });
     document.body.appendChild(ghost);
-    card.classList.add('dragging');
+    card.classList.add('dragging'); grid.classList.add('dragging-any');
     drag = { card, ghost, dx: e.clientX - r.left, dy: e.clientY - r.top };
     grip.setPointerCapture(e.pointerId);
   });
@@ -2305,19 +2310,25 @@ function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}
     drag.ghost.style.display = 'none';
     const el = document.elementFromPoint(e.clientX, e.clientY);
     drag.ghost.style.display = '';
-    const over = el && el.closest('#scnGrid .card[data-card]');
-    if (!over || over === drag.card) return;
-    const or = over.getBoundingClientRect();
-    const after = (e.clientY - or.top) > or.height / 2;             // 대상 카드의 아래 절반이면 뒤에
-    const me = drag.card.dataset.card, tgt = over.dataset.card;
-    const next = order.filter(id => id !== me);
-    next.splice(next.indexOf(tgt) + (after ? 1 : 0), 0, me);
-    if (next.join() !== order.join()) { order = next; layout(); }
+    if (!el) return;
+    const me = drag.card.dataset.card;
+    const over = el.closest('#scnGrid .card[data-card]');
+    const col = el.closest('#scnGrid .scn-col'); if (!col) return;
+    const ci = cols.indexOf(col);
+    const next = colIds.map(a => a.filter(id => id !== me));
+    if (over && over !== drag.card) {
+      const or = over.getBoundingClientRect();
+      const after = (e.clientY - or.top) > or.height / 2;
+      next[ci].splice(next[ci].indexOf(over.dataset.card) + (after ? 1 : 0), 0, me);
+    } else if (!over) {
+      next[ci].push(me);                                        // 컬럼의 빈 영역(카드 아래)이면 맨 뒤에
+    } else return;
+    if (JSON.stringify(next) !== JSON.stringify(colIds)) { colIds = next; render(); }
   });
   const end = () => {
     if (!drag) return;
-    drag.ghost.remove(); drag.card.classList.remove('dragging');
-    drag = null; saveOrder(); layout();
+    drag.ghost.remove(); drag.card.classList.remove('dragging'); grid.classList.remove('dragging-any');
+    drag = null; saved[n] = colIds; save();
   };
   grid.addEventListener('pointerup', end); grid.addEventListener('pointercancel', end);
 })();
