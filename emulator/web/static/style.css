@@ -723,3 +723,21 @@ mark.ghl{background:color-mix(in srgb,var(--warn) 45%,transparent);color:inherit
 .linkbar .lk .v em.warn{color:var(--warn)}
 .linkbar .lk .v em.err{color:var(--err)}
 .linkbar .lk[data-side="rx"]{border-left:1px solid var(--line)}
+
+/* 시나리오 탭: 컴팩트 카드 + 드래그 정렬 */
+.grid.scn{align-items:start}
+.grid.scn .card{padding:10px 12px}
+.grid.scn .card h3{margin-bottom:6px}
+.grid.scn label.chk{min-height:32px;padding:0 2px}
+.grid.scn input[type=checkbox]{width:18px;height:18px}
+.grid.scn .field{margin-bottom:5px;gap:2px}
+.grid.scn select,.grid.scn input[type=text],.grid.scn input[type=number]{min-height:36px;padding:6px 10px}
+.grid.scn input[type=range]{height:32px}
+.grid.scn .help{margin:2px 0 6px;font-size:11.5px;line-height:1.35}
+.grid.scn .row{gap:6px}
+.grid.scn .presets{margin-bottom:4px}
+.grip{cursor:grab;color:var(--muted);font-size:15px;line-height:1;padding:2px 4px;margin:-2px 0 -2px -4px;border-radius:6px;touch-action:none;user-select:none}
+.grip:hover{background:var(--panel2);color:var(--txt)}
+.card.dragging{opacity:.35;outline:2px dashed var(--acc2);outline-offset:-2px}
+.card.dragging .grip{cursor:grabbing}
+.drag-ghost{position:fixed;z-index:1000;pointer-events:none;opacity:.9;box-shadow:var(--shadow);transform:rotate(1deg)}

@@ -2246,3 +2246,56 @@ document.querySelectorAll('.fold[data-fold]').forEach(b => {
   apply();
 });
 function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
+
+// ---------------- 시나리오 탭 카드 드래그 정렬 (순서는 브라우저 localStorage에 저장) ----------------
+(() => {
+  const grid = document.getElementById('scnGrid'); if (!grid) return;
+  const KEY = 'scnCardOrder';
+  const cards = () => [...grid.querySelectorAll(':scope > .card[data-card]')];
+  const defaultOrder = cards().map(c => c.dataset.card);
+  const saveOrder = () => { try { localStorage.setItem(KEY, JSON.stringify(cards().map(c => c.dataset.card))); } catch (e) { } };
+  const applyOrder = (order) => {
+    const by = Object.fromEntries(cards().map(c => [c.dataset.card, c]));
+    const seq = order.filter(id => by[id]).concat(defaultOrder.filter(id => !order.includes(id)));
+    seq.forEach(id => grid.appendChild(by[id]));
+  };
+  try { const o = JSON.parse(localStorage.getItem(KEY) || 'null'); if (Array.isArray(o) && o.length) applyOrder(o); } catch (e) { }
+  const rb = document.getElementById('btnCardOrderReset');
+  if (rb) rb.onclick = () => { applyOrder(defaultOrder); try { localStorage.removeItem(KEY); } catch (e) { } toast('카드 순서를 기본값으로 되돌렸습니다'); };
+
+  let drag = null; // {card, ghost, dx, dy}
+  grid.addEventListener('pointerdown', e => {
+    const grip = e.target.closest('.grip'); if (!grip || e.button) return;
+    const card = grip.closest('.card[data-card]'); if (!card) return;
+    e.preventDefault();
+    const r = card.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost'); ghost.classList.remove('dragging');
+    Object.assign(ghost.style, { width: r.width + 'px', left: r.left + 'px', top: r.top + 'px', maxHeight: '60vh', overflow: 'hidden' });
+    document.body.appendChild(ghost);
+    card.classList.add('dragging');
+    drag = { card, ghost, dx: e.clientX - r.left, dy: e.clientY - r.top };
+    grip.setPointerCapture(e.pointerId);
+  });
+  grid.addEventListener('pointermove', e => {
+    if (!drag) return;
+    drag.ghost.style.left = (e.clientX - drag.dx) + 'px'; drag.ghost.style.top = (e.clientY - drag.dy) + 'px';
+    // 화면 끝 근처에서 자동 스크롤
+    const m = 48, h = window.innerHeight;
+    if (e.clientY < m) window.scrollBy(0, -12); else if (e.clientY > h - m) window.scrollBy(0, 12);
+    drag.ghost.style.display = 'none';
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    drag.ghost.style.display = '';
+    const over = el && el.closest('#scnGrid > .card[data-card]');
+    if (!over || over === drag.card) return;
+    const or = over.getBoundingClientRect();
+    const after = (e.clientX - or.left) / or.width + (e.clientY - or.top) / or.height > 1; // 대상 카드의 우하단 절반이면 뒤에
+    grid.insertBefore(drag.card, after ? over.nextSibling : over);
+  });
+  const end = e => {
+    if (!drag) return;
+    drag.ghost.remove(); drag.card.classList.remove('dragging');
+    drag = null; saveOrder();
+  };
+  grid.addEventListener('pointerup', end); grid.addEventListener('pointercancel', end);
+})();
