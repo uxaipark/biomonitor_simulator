@@ -279,7 +279,7 @@ async function flush() {
   const body = pending; pending = {}; if (!Object.keys(body).length) return;
   try {
     const r = await patch(body); CFG = r.config;
-    if (r.needs_rebuild) toast('구조 설정 변경: 시나리오 탭 [템플릿 재생성]으로 반영');
+    if (r.needs_rebuild) toast('구조 설정 변경: 시나리오 탭 병원 도면 [재생성]으로 반영');
     else if (r.needs_generate) toast('샘플링/변형 설정 변경: [루프 은행 재생성] 필요');
     else toast('설정 반영');
   } catch (e) { toast('설정 실패: ' + e.message); }
@@ -722,7 +722,7 @@ async function loadFloors() {
     const h = await api('/emr/hospital'); const sz = h.sizing || {};
     $('#hospTitle').innerHTML = `${esc(h.name)} · ${esc(h.template_name || h.template)} · ${h.n_beds}병상 · ${h.buildings.length}동 ${h.n_floors}층 · GW ${h.n_gateways}` +
       (sz.size_by_patients ? ` <span class="sub">(환자 ${sz.active_patients}명 · 여유 ${sz.headroom_pct}%)</span>` : '') +
-      (sz.stale ? ` <span class="tag warn" title="시나리오 환자 수가 바뀌었습니다. 템플릿 재생성 또는 병원·환자 재구성으로 규모를 맞추세요">규모 불일치: 재생성 필요 (계획 ${sz.planned_beds}병상)</span>` : '');
+      (sz.stale ? ` <span class="tag warn" title="시나리오 환자 수가 바뀌었습니다. 병원 도면 재생성 또는 병원·환자 재구성으로 규모를 맞추세요">규모 불일치: 재생성 필요 (계획 ${sz.planned_beds}병상)</span>` : '');
     const hi = $('#hSizeInfo'); if (hi) hi.textContent = sz.size_by_patients ? `현재 병원 ${sz.beds}병상 · 환자 ${sz.active_patients}명 기준 계획 ${sz.planned_beds}병상${sz.stale ? ' → 병원·환자 재구성 또는 병원 탭 템플릿 재생성 필요' : ' (일치)'}` : `병상 상한 ${sz.beds} 그대로 생성`;
   } catch (e) { }
   syncDropdowns();
@@ -1876,7 +1876,7 @@ $('#vmTrends').onclick = () => { $('#vmBottom').scrollIntoView({ behavior: 'smoo
     try {
       const body = JSON.parse(b.dataset.apply || '{}');
       const r = await patch(body); CFG = r.config; fillForm();
-      let msg = '설정 적용' + (r.needs_rebuild ? ' (구조 변경: 시나리오 탭 [템플릿 재생성] 필요)' : '');
+      let msg = '설정 적용' + (r.needs_rebuild ? ' (구조 변경: 시나리오 탭 병원 도면 [재생성] 필요)' : '');
       if (b.dataset.trig) { const t = await post('/control/trigger', JSON.parse(b.dataset.trig)); msg += ' · ' + t.result; }
       if (b.dataset.script) { await post('/control/script', { file: b.dataset.script }); msg += ' · 스크립트 ' + b.dataset.script + ' 시작'; }
       toast(msg);

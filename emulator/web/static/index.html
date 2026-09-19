@@ -178,8 +178,8 @@
     </div>
     <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
       <div class="row"><div class="field"><span>병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
-      <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small" id="btnLayoutReset">템플릿 재생성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
-      <div class="help">병상 수는 구조 값이라 바꾼 뒤 <b>템플릿 재생성</b>을 눌러야 병원이 새 크기로 지어집니다(재원 환자·패치 상태 초기화). 환자 수는 병상 수 이하에서 재생성 없이 즉시 반영됩니다.</div>
+      <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small" id="btnLayoutReset" title="템플릿에서 병원 도면을 다시 생성">재생성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
+      <div class="help">병상 수는 구조 값이라 바꾼 뒤 병원 도면의 <b>재생성</b>을 눌러야 병원이 새 크기로 지어집니다(재원 환자·패치 상태 초기화). 환자 수는 병상 수 이하에서 재생성 없이 즉시 반영됩니다.</div>
     </div>
     <div class="card" data-card="site"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>장소 시나리오</h3>
       <div class="field"><select id="s_site"><option value="hospital">병원 내 연속 모니터링 (BLE 패치 + 게이트웨이)</option><option value="mcot">원외 MCOT (모바일 게이트웨이)</option><option value="mixed">혼합</option></select></div>
