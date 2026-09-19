@@ -38,6 +38,11 @@ POSTURE_ID = {"supine": 0, "left_lateral": 1, "right_lateral": 2, "sitting": 3, 
 RUNTIME_DIR = BASE_DIR / "runtime"
 META_PATH = RUNTIME_DIR / "meta.json"
 META_DELTA_PATH = RUNTIME_DIR / "meta.delta.json"
+# MCOT uplink: the mobile gateway forwards the patch stream over cellular + internet, so every frame carries a
+# baseline network delay that an in-hospital gateway on the LAN does not have.  Values are (latency_ms range,
+# jitter_ms range); "outside" (on the move: cell handovers, weaker signal) adds MCOT_OUTSIDE_EXTRA on top.
+MCOT_UPLINK = {"LTE": ((40.0, 90.0), (15.0, 40.0)), "5G": ((20.0, 45.0), (5.0, 20.0))}
+MCOT_OUTSIDE_EXTRA = ((20.0, 80.0), (20.0, 60.0))
 META_DELTA_KEEP = 3          # delta file = union of the last N delta writes (tolerates a worker stall of ~2N s)
 META_FULL_S = 600.0          # full meta.json rewrite (reconciliation) at most this often unless forced
 PATCH_FW = "bp-fw 3.2.0"
@@ -217,7 +222,8 @@ class World:
                 G["temp_c"][r] = int(self.rng.uniform(38, 52))
                 G["battery"][r] = 100 if gw["type"] == "mobile" else 0
                 self.gw_state.append({"fault_until": 0.0, "degraded_until": 0.0, "cpu_base": float(G["cpu"][r]), "mem_base": float(G["mem"][r]),
-                                      "n_conn": 0, "boot_at": 0.0, "mobile_batt": 100.0, "charging": False, "reason": ""})
+                                      "n_conn": 0, "boot_at": 0.0, "mobile_batt": 100.0, "charging": False, "reason": "",
+                                      "base_lat": 0.0, "base_jit": 0.0})                   # MCOT uplink baseline (0 for LAN gateways)
             self.rhythm_variants = dict(self.bank.rhythm_variants) if self.bank.loaded else {}
             self.apply_config()
             self.sim_time = time.time()
@@ -456,6 +462,7 @@ class World:
             self.st.gw["active"][free[0]] = 1
             self.gw_state[free[0]]["mobile_batt"] = float(self.rng.uniform(40, 100))
             self.st.gw["status"][free[0]] = 0
+            self._mcot_uplink(free[0])
             rec["location"] = -1
             prof["status"] = "outpatient"
             rec["doctor"] = h.wards[0]["doctor_ids"][0] if h.wards else None
@@ -1028,6 +1035,19 @@ class World:
         self.counters["patch_replaced"] += 1
         self.log.add("patch", f"{prof['name']} 패치 교체 {old.serial if old else '-'} → {new.serial} ({reason})", patient_id=prof["id"])
 
+    def _mcot_uplink(self, gw: int, outside: bool = False) -> None:
+        """Apply the mobile gateway's cellular/internet delay: a per-unit baseline drawn once from its radio type,
+        plus the on-the-move extra while the patient is outside.  Scenario faults override this while they last;
+        recovery restores the baseline instead of zero (see _step_gateways)."""
+        G = self.st.gw.arr
+        gs = self.gw_state[gw]
+        if not gs["base_lat"]:
+            lat, jit = MCOT_UPLINK.get(self.hospital.gateways[gw].get("radio", "LTE"), MCOT_UPLINK["LTE"])
+            gs["base_lat"], gs["base_jit"] = float(self.rng.uniform(*lat)), float(self.rng.uniform(*jit))
+        extra_l, extra_j = (self.rng.uniform(*MCOT_OUTSIDE_EXTRA[0]), self.rng.uniform(*MCOT_OUTSIDE_EXTRA[1])) if outside else (0.0, 0.0)
+        G["latency_ms"][gw] = gs["base_lat"] + extra_l
+        G["jitter_ms"][gw] = gs["base_jit"] + extra_j
+
     def _step_outpatient(self, rec: dict, art_cfg: dict, intensity: float) -> None:
         """MCOT: home / outside / shadow zones, mobile gateway battery, patch fall-off."""
         now = self.sim_time
@@ -1082,6 +1102,8 @@ class World:
         else:
             rec["home_state"] = "home"
             self._set_activity(rec, "still", self.rng.uniform(120, 900), 0.02, "sitting" if self.rng.random() < 0.6 else "supine")
+        if G["status"][gw] == 0:                                    # healthy uplink: baseline (+ on-the-move extra)
+            self._mcot_uplink(gw, outside=rec["home_state"] == "outside")
         self._relink(rec)
 
     # ------------------------------------------------------------------ patches
@@ -1275,8 +1297,8 @@ class World:
                 if G["status"][gw] == 1 and (fi == 0 and ni == 0):
                     G["status"][gw] = 0
                     G["loss"][gw] = 0.0
-                    G["latency_ms"][gw] = 0.0
-                    G["jitter_ms"][gw] = 0.0
+                    G["latency_ms"][gw] = gs["base_lat"]           # MCOT keeps its cellular baseline; LAN gateways go to 0
+                    G["jitter_ms"][gw] = gs["base_jit"]
                     gs["degraded_until"] = 0.0
             if ni == 0 and self.net_events:
                 self.net_events = []
@@ -1316,8 +1338,8 @@ class World:
             elif st == 1 and gs["degraded_until"] and now > gs["degraded_until"]:
                 G["status"][gw] = 0
                 G["loss"][gw] = 0.0
-                G["latency_ms"][gw] = 0.0
-                G["jitter_ms"][gw] = 0.0
+                G["latency_ms"][gw] = gs["base_lat"]
+                G["jitter_ms"][gw] = gs["base_jit"]
                 gs["degraded_until"] = 0.0
             if st != 2:
                 G["uptime_s"][gw] = min(0xFFFFFFFF, int(G["uptime_s"][gw]) + int(dt_s))
@@ -1521,6 +1543,8 @@ class World:
                 d = {"v": sig & 0x7FFFFFFF, "gw": g["id"], "gw_no": g["gw_no"], "gw_idx": gw, "type": g["type"], "mac": g["mac"], "ip": g["ip"], "fw": g["fw"],
                      "location": {"building": g["building"], "floor": g["floor"], "x": g["x"], "y": g["y"], "room": room},
                      "bundle_ms": bundle, "channels_enabled": en, "patches": patches}
+                if g.get("radio"):                                  # MCOT mobile gateway: cellular uplink type
+                    d["uplink"] = g["radio"]
                 ent = (sig, f'"{gw}":' + json.dumps(d, ensure_ascii=False, separators=(",", ":")))
                 cache[gw] = ent
                 self.meta_versions[gw] = sig

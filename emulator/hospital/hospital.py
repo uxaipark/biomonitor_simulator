@@ -184,7 +184,7 @@ class Hospital:
         self.gateways.append({"idx": gidx, "id": f"MGW-{k:04d}", "base_id": f"MGW-{k:04d}", "gw_no": gidx + 1, "type": "mobile", "type_id": GW_TYPE_ID["mobile"], "building_idx": 99,
                               "building": "원외(MCOT)", "floor": 0, "x": 5000.0 + k * 50, "y": 5000.0, "room_idx": -1, "capacity": 1,
                               "mac": f"D8:3A:DD:{(k >> 8) & 0xFF:02X}:{k & 0xFF:02X}:01", "ip": f"100.64.{k // 250}.{k % 250 + 1}",
-                              "fw": "mcot-app 1.9.0", "ble_channels": 1})
+                              "fw": "mcot-app 1.9.0", "ble_channels": 1, "radio": "5G" if k % 10 < 3 else "LTE"})   # uplink: 30 % 5G, 70 % LTE
         if hasattr(self, "gw_xyz"):
             self._geom()
         return gidx
