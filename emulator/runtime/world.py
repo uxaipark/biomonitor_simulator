@@ -41,6 +41,25 @@ META_DELTA_PATH = RUNTIME_DIR / "meta.delta.json"
 # MCOT uplink: the mobile gateway forwards the patch stream over cellular + internet, so every frame carries a
 # baseline network delay that an in-hospital gateway on the LAN does not have.  Values are (latency_ms range,
 # jitter_ms range); "outside" (on the move: cell handovers, weaker signal) adds MCOT_OUTSIDE_EXTRA on top.
+# 활동에 따른 심박 배수: 걷거나 운동하면 심박이 오른다 (loop 재생 속도를 곱으로 조절).  전이는 급격하지 않게
+# _step_modulation(10 s)과 활동 전환에서 목표치로 단계적으로 접근시킨다.
+ACT_HR = {"still": 1.0, "restless": 1.05, "tremor": 1.05, "walking": 1.25, "transfer": 1.12, "shower": 1.15, "exercise": 1.55}
+
+# 원외(MCOT) 환자의 하루.  병상에 누워 있는 입원 환자와 달리 대부분의 시간을 움직이며 생활한다:
+# 집안일·외출·산책·장보기·운동·샤워가 기본이고, 정지는 수면과 식사/TV 시간에 몰린다.
+# (활동, 자세, 아티팩트 게인, 지속 s, 외출 확률, 시간대 가중치[밤 23-06, 아침 06-11, 낮 11-18, 저녁 18-23])
+MCOT_DAY = (
+    ("still",    "supine",   (0.01, 0.05), (900, 2700), 0.00, (70, 5, 3, 7)),      # 수면 / 누워 쉬기
+    ("restless", "supine",   (0.20, 0.45), (120, 600),  0.00, (18, 4, 2, 4)),      # 뒤척임
+    ("still",    "sitting",  (0.03, 0.10), (300, 1500), 0.05, (8, 21, 23, 33)),    # 식사 · TV · 휴대폰
+    ("walking",  "standing", (0.30, 0.60), (180, 1200), 0.35, (3, 40, 44, 33)),    # 집안일 · 산책 · 외출
+    ("exercise", "standing", (0.55, 0.85), (400, 1500), 0.45, (0, 7, 9, 4)),       # 운동 · 계단 · 장보기
+    ("shower",   "standing", (0.80, 0.95), (300, 700),  0.00, (1, 17, 9, 13)),     # 샤워 · 세면
+    ("tremor",   "sitting",  (0.15, 0.30), (60, 240),   0.00, (0, 6, 8, 3)),       # 양치 · 설거지 등 국소 움직임
+)
+_MCOT_W = [np.array([e[5][b] for e in MCOT_DAY], dtype=float) for b in range(4)]
+_MCOT_W = [w / w.sum() for w in _MCOT_W]
+
 MCOT_UPLINK = {"LTE": ((40.0, 90.0), (15.0, 40.0)), "5G": ((20.0, 45.0), (5.0, 20.0))}
 MCOT_OUTSIDE_EXTRA = ((20.0, 80.0), (20.0, 60.0))
 META_DELTA_KEEP = 3          # delta file = union of the last N delta writes (tolerates a worker stall of ~2N s)
@@ -635,6 +654,11 @@ class World:
         f = int(P["flags"][row])
         f = (f | FLAG_MOTION) if art > 0.15 else (f & ~FLAG_MOTION)
         P["flags"][row] = f
+        base = rec.get("hr_base")                                  # 활동 전환: 목표 심박 배수 쪽으로 일부만 이동(나머지는 10 s 주기로)
+        if base:
+            hr_act = rec.get("hr_act", 1.0)
+            rec["hr_act"] = hr_act + (ACT_HR.get(act, 1.0) - hr_act) * 0.35
+            P["hr_scale"][row] = base * rec["hr_act"]
 
     def _start_trip(self, rec: dict, steps: list, note: str) -> None:
         """steps: (room_idx or 'shadow'/'mri', duration_s, activity, art_gain[, label])"""
@@ -1077,34 +1101,27 @@ class World:
             gs["reason"] = ""
         if now < rec["activity_until"]:
             return
+        # 하루 생활 모델: 움직임은 아티팩트 시나리오와 무관한 이 환자군의 기본 성질이라 강도 설정과 관계없이 적용한다.
+        # (아티팩트 강도는 움직임의 유무가 아니라 ECG에 실리는 잡음의 세기와 전파 간섭 빈도만 조절한다.)
         hour = dt.datetime.fromtimestamp(now).hour
-        night = hour >= 23 or hour < 6
-        r = self.rng.random()
-        if night:
-            rec["home_state"] = "home"
-            self._set_activity(rec, "still" if r > 0.1 else "restless", self.rng.uniform(300, 1800), 0.0 if r > 0.1 else 0.4, "supine")
-        elif r < 0.25 * intensity and art_cfg["home_interference"]:
+        band = 0 if (hour >= 23 or hour < 6) else 1 if hour < 11 else 2 if hour < 18 else 3
+        act, posture, art_rng, dur_rng, out_p, _ = MCOT_DAY[int(self.rng.choice(len(MCOT_DAY), p=_MCOT_W[band]))]
+        art = float(self.rng.uniform(*art_rng)) * (0.45 + 0.55 * intensity)      # 움직이는 사람의 ECG는 시나리오와 무관하게 흔들린다
+        dur = float(self.rng.uniform(*dur_rng))
+        outside = self.rng.random() < out_p
+        if outside and self.rng.random() < 0.08 + 0.25 * intensity:
+            rec["home_state"] = "shadow"                                          # 지하 · 엘리베이터 · 지하철
+            dur = min(dur, float(self.rng.uniform(60, 400)))
+        elif outside:
             rec["home_state"] = "outside"
-            self._set_activity(rec, "walking", self.rng.uniform(300, 1500), 0.5, "standing")
-        elif r < 0.30 * intensity and art_cfg["home_interference"]:
-            rec["home_state"] = "shadow"            # basement / elevator / subway
-            self._set_activity(rec, "walking", self.rng.uniform(60, 400), 0.5, "standing")
-        elif r < 0.34 * intensity and art_cfg["home_interference"]:
-            rec["home_state"] = "home"              # microwave / wifi interference
-            G["loss"][gw] = float(self.rng.uniform(0.05, 0.3))
-            G["latency_ms"][gw] = float(self.rng.uniform(100, 600))
-            gs["degraded_until"] = now + self.rng.uniform(30, 180)
-            G["status"][gw] = 1
-            self._set_activity(rec, "still", self.rng.uniform(60, 300), 0.05, "sitting")
-        elif r < 0.40 * intensity:
-            rec["home_state"] = "home"
-            self._set_activity(rec, "exercise", self.rng.uniform(300, 900), 0.8, "standing")
-        elif r < 0.45 * intensity:
-            rec["home_state"] = "home"
-            self._set_activity(rec, "shower", self.rng.uniform(300, 700), 0.9, "standing")
         else:
             rec["home_state"] = "home"
-            self._set_activity(rec, "still", self.rng.uniform(120, 900), 0.02, "sitting" if self.rng.random() < 0.6 else "supine")
+            if art_cfg["home_interference"] and self.rng.random() < 0.10 * intensity:
+                G["loss"][gw] = float(self.rng.uniform(0.05, 0.3))                # 전자레인지 · 공유기 간섭
+                G["latency_ms"][gw] = float(self.rng.uniform(100, 600))
+                gs["degraded_until"] = now + self.rng.uniform(30, 180)
+                G["status"][gw] = 1
+        self._set_activity(rec, act, dur, art, posture)
         if G["status"][gw] == 0:                                    # healthy uplink: baseline (+ on-the-move extra)
             self._mcot_uplink(gw, outside=rec["home_state"] == "outside")
         self._relink(rec)
@@ -1174,7 +1191,11 @@ class World:
             prof = self.by_id[pid]
             st = trend_model.state(pid, prof, now)
             row = rec["row"]
-            P["hr_scale"][row] = st["hr_scale"]
+            rec["hr_base"] = st["hr_scale"]                        # 일주기·추세 기준값
+            hr_act = rec.get("hr_act", 1.0)
+            hr_act += (ACT_HR.get(rec["activity"], 1.0) - hr_act) * 0.4     # 활동 변화 뒤 약 30 s에 걸쳐 수렴
+            rec["hr_act"] = hr_act
+            P["hr_scale"][row] = st["hr_scale"] * hr_act
             P["rr_add"][row] = st["rr_add"]
             P["spo2_add"][row] = st["spo2_add"]
             P["temp_add"][row] = st["temp_add"]
