@@ -1792,7 +1792,10 @@ class World:
         h = self.hospital
         P = self.st.patch.arr
         out = []
-        for pid, rec in self.admitted.items():
+        # API threads call this while the world thread admits/discharges: iterate a snapshot (list() of a dict
+        # is a single C call under the GIL) instead of the live dict, which raised "dictionary changed size
+        # during iteration" on /emr/patients during a site switch.
+        for pid, rec in list(self.admitted.items()):
             if only is not None and not only(rec):
                 continue
             prof = self.by_id[pid]
