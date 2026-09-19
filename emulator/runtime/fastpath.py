@@ -1051,8 +1051,10 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
                 applied_dgen = 0
             except Exception:
                 pass
-        # The delta holds every entry changed since the full snapshot it names, so a missed poll costs
-        # nothing; one that names another snapshot is ignored until the next full file lands.
+        # The delta holds the entries changed in the last few writes (world: META_DELTA_KEEP) against the full
+        # snapshot it names; a poll may miss a write and still lose nothing unless the worker stalled for several
+        # seconds, and the periodic full rewrite reconciles even that.  One naming another snapshot is ignored
+        # until the next full file lands.
         try:
             dm = os.path.getmtime(delta_path)
         except OSError:
@@ -1065,6 +1067,8 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
             delta_mtime = dm
             if int(raw.get("_base", -1)) != base_gen or int(raw.get("_gen", 0)) <= applied_dgen:
                 return
+            if applied_dgen and int(raw.get("_from", 1)) > applied_dgen + 1:
+                print(f"[worker {worker_id}] meta delta gap: applied {applied_dgen}, file covers {raw.get('_from')}..{raw.get('_gen')}; full rewrite reconciles", flush=True)
             for k, v in raw.items():
                 if k.startswith("_"):
                     continue

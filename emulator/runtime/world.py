@@ -38,6 +38,8 @@ POSTURE_ID = {"supine": 0, "left_lateral": 1, "right_lateral": 2, "sitting": 3, 
 RUNTIME_DIR = BASE_DIR / "runtime"
 META_PATH = RUNTIME_DIR / "meta.json"
 META_DELTA_PATH = RUNTIME_DIR / "meta.delta.json"
+META_DELTA_KEEP = 3          # delta file = union of the last N delta writes (tolerates a worker stall of ~2N s)
+META_FULL_S = 600.0          # full meta.json rewrite (reconciliation) at most this often unless forced
 PATCH_FW = "bp-fw 3.2.0"
 
 
@@ -102,7 +104,8 @@ class World:
         self._meta_gen = 0                                    # generation of the last full meta.json
         self._meta_dgen = 0                                   # generation of the last delta written against it
         self._meta_full_at = 0.0                              # wall time of the last full meta.json write
-        self._meta_delta: dict[int, str] = {}                 # gw -> entry text changed since the last full write
+        self._meta_delta_log: list[dict[int, str]] = []       # entries changed per delta write, newest last (META_DELTA_KEEP)
+        self._meta_delta: dict[int, str] = {}                 # gw -> entry text changed since the last delta write
         self.meta_changed_last = 0
         self.meta_versions: dict[int, int] = {}
         self.counters = collections.Counter()
@@ -1534,22 +1537,35 @@ class World:
         # whole 2.25 MB file each time -- 74 MB of JSON per 30 s across three workers, their second-largest
         # cost.  Write the changed entries as a cumulative delta against the last full snapshot; the full
         # file is rewritten only when the delta stops being the cheaper option or on force/rebuild.
-        # The cumulative delta must stay small: at 1/4 of the gateways it had grown to 1.7 MB (72 % of the full file)
-        # and every worker re-parsed it on each write (10 % of worker CPU).  Cap it at 1/64 of the gateways or 60 s of
-        # age; a full rewrite is then ~2.4 MB once a minute, parsed once per worker -- an order of magnitude less JSON.
+        # JSON parsing in the workers runs at roughly 1 MB/s on the Pi, so what matters is bytes written.  A
+        # cumulative delta grew to 1.7 MB (72 % of the full file) and cost 10 % of worker CPU; a full rewrite is
+        # 2.3 MB.  So: each delta carries only the entries changed in the last META_DELTA_KEEP writes (a worker
+        # polls every second and writes are >= 2 s apart, so a stall of several seconds still loses nothing;
+        # entries are versioned, applying one twice is a no-op), and the full file is rewritten only every
+        # META_FULL_S as a reconciliation point, on force/rebuild, or when a storm changes 1/8 of the gateways.
+        keep = self._meta_delta_log
+        if changed:
+            keep.append(dict(self._meta_delta))
+            self._meta_delta.clear()
+            while len(keep) > META_DELTA_KEEP:
+                keep.pop(0)
+        window: dict[int, str] = {}
+        for d in keep:
+            window.update(d)
         full = (force or self._meta_gen == 0 or not META_PATH.exists()
-                or len(self._meta_delta) * 64 >= max(1, len(h.gateways))
-                or time.time() - self._meta_full_at >= 60.0)
+                or len(window) * 8 >= max(1, len(h.gateways))
+                or time.time() - self._meta_full_at >= META_FULL_S)
         if full:
             self._meta_gen += 1
             self._meta_dgen = 0
             self._meta_full_at = time.time()
-            self._meta_delta.clear()
+            keep.clear()
             text = "{" + f'"_gen":{self._meta_gen},' + ",".join(parts) + "}"
             self._meta_write_async([(META_PATH, text), (META_DELTA_PATH, None)])
         elif changed:
             self._meta_dgen += 1
-            text = "{" + f'"_base":{self._meta_gen},"_gen":{self._meta_dgen},' + ",".join(self._meta_delta.values()) + "}"
+            text = ("{" + f'"_base":{self._meta_gen},"_gen":{self._meta_dgen},"_from":{max(1, self._meta_dgen - len(keep) + 1)},'
+                    + ",".join(window.values()) + "}")
             self._meta_write_async([(META_DELTA_PATH, text)])
 
     def _meta_write_async(self, items: list[tuple[Path, str | None]]) -> None:
