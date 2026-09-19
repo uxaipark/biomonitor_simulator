@@ -651,8 +651,12 @@ const PAGE = 10;
 async function loadPatients(force = false) {
   const st = $('#patStatus').value, q = $('#patQ').value.trim(), ck = st + '|' + q;
   if (force || patCache.key !== ck) {
-    const r = await api(`/emr/patients?status=${st}&q=${encodeURIComponent(q)}&offset=0&limit=20000`);
-    patCache = { key: ck, items: r.patients.map(p => ({ ...p, devn: (p.devices || []).length, rhythm_label: p.rhythm_label || (META && META.rhythms[p.rhythm] ? META.rhythms[p.rhythm].label : p.rhythm),
+    // 입원만/MCOT만은 모니터링 중 목록을 받아 outpatient 플래그로 거른다 (서버 버전과 무관하게 동작)
+    const qs = st === 'inpatient' || st === 'mcot' ? 'admitted' : st;
+    const r = await api(`/emr/patients?status=${qs}&q=${encodeURIComponent(q)}&offset=0&limit=20000`);
+    const src = st === 'inpatient' ? r.patients.filter(p => !p.outpatient)
+              : st === 'mcot' ? r.patients.filter(p => p.outpatient) : r.patients;
+    patCache = { key: ck, items: src.map(p => ({ ...p, devn: (p.devices || []).length, rhythm_label: p.rhythm_label || (META && META.rhythms[p.rhythm] ? META.rhythms[p.rhythm].label : p.rhythm),
       bed: p.bed || (p.admission ? p.admission.bed : '') || '', gateway: p.gateway || '', activity: p.activity || p.status || '', battery: p.battery ?? -1, rssi: p.rssi ?? -999, patch_id: (p.patch_id ?? (p.admission ? p.admission.patch_id : 0)) || 0, patient_no: p.patient_no ?? (p.admission ? p.admission.patient_no : null) ?? -1, ward: p.ward || (p.admission ? p.admission.ward_name : '') || '', specialty: p.specialty || p.ward_specialty || '' })) };
   }
   const items = patCache.items.slice();

@@ -103,7 +103,7 @@ def discovery():
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
                     "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
-                    "patients": "/api/v1/emr/patients?status=admitted|pool|discharged|outpatient|all&q=&offset=&limit=", "patient": "/api/v1/emr/patients/{id}",
+                    "patients": "/api/v1/emr/patients?status=admitted|inpatient|mcot|pool|discharged|outpatient|all&q=&offset=&limit=", "patient": "/api/v1/emr/patients/{id}",
                     "avatar": "/api/v1/emr/patients/{id}/avatar.svg", "admissions": "/api/v1/emr/admissions (현재 입원+MCOT 환자와 패치/게이트웨이 매핑)",
                     "layout": "/api/v1/emr/layout (건축 도면 JSON v1: 건물·층·실 폴리곤·침대·복도·설비(전광판/간호사 카운터)·게이트웨이·병동·점유; 라우터는 이 JSON으로 동일 화면 구성)",
                     "layout_templates": "/api/v1/emr/layout/templates", "layout_import": "POST /api/v1/emr/layout/import {layout}", "layout_reset": "POST /api/v1/emr/layout/reset",
@@ -769,8 +769,11 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: 
             hay += [p["admission"].get("ward_name") or "", p["admission"].get("ward") or ""]
         return any(ql in str(h).lower() for h in hay)
 
-    if status == "admitted":
+    if status in ("admitted", "inpatient", "mcot"):
         rows = [r for r in live.values() if match(w.by_id[r["id"]], r)]
+        if status != "admitted":                              # inpatient = 병원 내 재원, mcot = 원외 모바일 게이트웨이
+            want_out = status == "mcot"
+            rows = [r for r in rows if bool(r.get("outpatient")) == want_out]
         return {"total": len(rows), "patients": rows[offset: offset + limit]}
     items = [p for p in w.profiles if (status == "all" or p["status"] == status)]
     items = [p for p in items if match(p, live.get(p["id"]))]
