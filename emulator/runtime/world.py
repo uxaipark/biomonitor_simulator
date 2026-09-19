@@ -178,6 +178,9 @@ class World:
                         self.log.add("system", f"DB 정리: {days:.0f}일 지난 이력 삭제 " + ", ".join(f"{k} {v}" for k, v in pruned.items() if v))
             if not kept:
                 self.db.upsert_patients(self.profiles)
+            elif self.db.patients_lack("address"):                    # roster schema grew (home address): refresh stored profiles once
+                self.db.upsert_patients(self.profiles)
+                self.log.add("system", "환자 DB 갱신: 거주지(동네) 필드 추가")
             # patch numbering continues from the DB so serials/ids never repeat across restarts or rebuilds
             self.next_patch_serial = max(1, self.db.max_patch_serial() + 1)
             self.patch_registry = {}
@@ -1522,6 +1525,7 @@ class World:
             p_chans = [c for c in chans if pmask & (1 << c["id"])]
             src = spo2_source(devs)
             by_gw.setdefault(rec["gw"], []).append({"patch_id": patch.patch_id, "serial": patch.serial, "patient_id": rec.get("patient_no", pid), "profile_id": pid, "mrn": prof["mrn"],
+                                                    "home": prof.get("address"),                       # 거주지: 시/도·구/군·동 (동네 수준까지만)
                                                     "fw": PATCH_FW, "resp_source": s["resp_source"], "spo2_source": (SPO2_SOURCES[src] if src is not None else None),
                                                     "devices": [{"key": d, "label": DEVICES[d]["label"]} for d in devs], "channels": p_chans,
                                                     "pacemaker": ({"type": pmi["type"], "mode": pmi["mode"], "lead": pmi["lead"], "detect_pct": pmi["detect_pct"]} if pmi else None)})

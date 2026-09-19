@@ -155,6 +155,7 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                        "json_schema": {"gw": "gateway id", "gw_idx": "row", "type": "gateway type", "location": {"building": "", "floor": 0, "x": 0, "y": 0, "room": ""},
                                        "bundle_ms": bundle_ms, "tick": "frame tick counter", "channels_enabled": ["keys"],
                                        "patches": [{"patch_id": "u32", "serial": "BP-xxxxxx", "patient_id": "u32", "mrn": "", "fw": "",
+                                                    "home": {"sido": "서울", "sigungu": "강남구", "dong": "역삼동", "label": "서울 강남구 역삼동"},
                                                     "resp_source": "capacitive|edr|spo2", "spo2_source": "fingertip|ring|wrist_ptt",
                                                     "channels": [{"id": 1, "key": "ecg", "fs": 250, "dtype": "int16", "scale": 0.001, "unit": "mV"}]}]}},
         "record": {"header": ["patch_id u32", "patient_id u32 (0 = unassigned)", "seq u32 (per-patch packet counter, +1 per record the patch produced; a gap at the router = packets lost anywhere between patch and router, a gateway frame seq gap = lost between gateway and router)", "flags u8", "battery_pct u8", "rssi_dbm i8", "n_ch u8"],

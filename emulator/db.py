@@ -133,6 +133,17 @@ class DB:
             self.conn.executemany("INSERT OR REPLACE INTO patients VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
             self.conn.execute("COMMIT")
 
+    def patients_lack(self, key: str) -> bool:
+        """True when stored profiles predate `key` (e.g. address added later): the caller re-upserts the roster once."""
+        with self.lock:
+            r = self.conn.execute("SELECT profile_json FROM patients LIMIT 1").fetchone()
+        if not r or not r["profile_json"]:
+            return False
+        try:
+            return key not in json.loads(r["profile_json"])
+        except Exception:
+            return False
+
     def update_patient(self, p: dict) -> None:
         with self.lock:
             self.conn.execute("UPDATE patients SET status=?, devices_json=?, updated_at=? WHERE id=?",
