@@ -81,15 +81,26 @@ class LoopBank:
                 "activities": ACTIVITIES, "temp": TEMP_PROFILES, "glucose": GLUCOSE_PROFILES, "format": 4}
 
     def is_ready(self) -> bool:
+        """True when bank_index.json on disk carries this configuration's signature.  Cached on the file's
+        (mtime, size): engine.stats() asks this on every /stats call and re-reading the JSON each time was
+        4 % of the main process."""
         idx = self.dir / "bank_index.json"
-        if not idx.exists():
+        try:
+            stt = idx.stat()
+        except OSError:
             return False
+        key = (stt.st_mtime_ns, stt.st_size, self.signature())
+        cached = self.__dict__.get("_ready_cache")
+        if cached is not None and cached[0] == key:
+            return cached[1]
         try:
             with open(idx) as f:
                 saved = json.load(f)
-            return saved.get("signature") == self.signature()
+            ok = saved.get("signature") == self.signature()
         except Exception:
-            return False
+            ok = False
+        self._ready_cache = (key, ok)
+        return ok
 
     def generate(self, workers: int | None = None) -> None:
         """Blocking generation (run in a thread from the API)."""

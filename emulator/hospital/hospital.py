@@ -204,7 +204,20 @@ class Hospital:
         return -1
 
     def floor_rooms(self, bidx: int, floor: int, kind: str | None = None) -> list[dict]:
-        return [r for r in self.rooms if r["building_idx"] == bidx and r["floor"] == floor and (kind is None or r["kind"] == kind)]
+        """Rooms of a building floor (optionally of one kind).  Cached: the world asks this for every inpatient
+        step (corridors of the ward floor) and it was the single largest cost of the main process -- a scan of
+        all rooms per call.  The room list only grows while the hospital is being built, so the cache is keyed
+        on its length and simply starts over if that changes.  Callers must not mutate the returned list."""
+        cache = self.__dict__.get("_floor_cache")
+        if cache is None or cache[0] != len(self.rooms):
+            cache = (len(self.rooms), {})
+            self._floor_cache = cache
+        key = (bidx, floor, kind)
+        out = cache[1].get(key)
+        if out is None:
+            out = [r for r in self.rooms if r["building_idx"] == bidx and r["floor"] == floor and (kind is None or r["kind"] == kind)]
+            cache[1][key] = out
+        return out
 
     def ward_room_of_kind(self, widx: int, kind: str) -> int:
         """Toilet/shower of the ward, else nearest one on the same floor."""

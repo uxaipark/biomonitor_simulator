@@ -309,6 +309,7 @@ class FrameBuilder:
         self.seq = np.zeros(st.n_gateways, dtype=np.int64)
         self._fuzz_rate = 0.0; self._fuzz_mask = 0
         self.meta_provider = meta_provider          # callable(gw_row) -> dict, or None (worker loads json)
+        self._meta_cache: dict[int, tuple] = {}         # gw -> (entry version, encoded META body without tick)
         self.meta_cache: dict[int, bytes] = {}
         self.meta_version = -1
         self.force_meta = np.ones(st.n_gateways, dtype=bool)
@@ -487,8 +488,17 @@ class FrameBuilder:
             return None
         if m is None:
             return None
-        m["tick"] = tick
-        return meta_block(m)
+        # META for a gateway is re-sent every meta_every frames; encoding the same dict with json.dumps each
+        # time was 5 % of worker CPU.  Cache the encoded body per gateway on the entry version and splice
+        # the tick in front (key order is free in JSON; the router parses it as an object).
+        v = m.get("v")
+        c = self._meta_cache.get(gw)
+        if c is None or c[0] != v:
+            body = json.dumps({k: x for k, x in m.items() if k != "tick"}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            c = (v, body)
+            self._meta_cache[gw] = c
+        b = b'{"tick":%d,' % int(tick) + c[1][1:]
+        return struct.pack("<I", len(b)) + b
 
 
 class Sender:
@@ -503,6 +513,7 @@ class Sender:
         self.bufs: dict[int, bytearray] = {}
         self.last_try: dict[int, float] = {}
         self.sent_ok: set[int] = set()       # keys whose peer has accepted data on the current socket
+        self._conn_dirty = True              # socks / sent_ok changed since connected[] was last written
         # readiness poll for the return path: with one socket per gateway a blind recv() on every
         # socket every tick was ~11k syscalls/s (almost all EAGAIN) and the worker's single largest
         # cost.  epoll hands back only the sockets that actually have bytes waiting.
@@ -555,6 +566,7 @@ class Sender:
         self.socks.clear()
         self.bufs.clear()
         self.sent_ok.clear()
+        self._conn_dirty = True
         self.st.stat["connected"][self.gw_rows] = 0
 
     def _key(self, gw: int) -> int:
@@ -579,6 +591,7 @@ class Sender:
             except (BlockingIOError, InterruptedError):
                 pass
             self.socks[key] = s
+            self._conn_dirty = True
             self.bufs[key] = bytearray()
             self._sel_register(key, s)
             self.sent_ok.discard(key)                 # a fresh socket is unconfirmed until a send succeeds
@@ -588,11 +601,13 @@ class Sender:
             return s
         except OSError:
             self.socks[key] = None
+            self._conn_dirty = True
             return None
 
     def _drop_conn(self, key: int, gws: list[int]):
         self.rx.pop(key, None)
         s = self.socks.pop(key, None)
+        self._conn_dirty = True
         self._sel_unregister(s)
         if s:
             try:
@@ -947,7 +962,9 @@ class Sender:
                 n = s.send(buf)
                 if n > 0:
                     del buf[:n]
-                    self.sent_ok.add(key)
+                    if key not in self.sent_ok:
+                        self.sent_ok.add(key)
+                        self._conn_dirty = True
             except (BlockingIOError, InterruptedError):
                 continue
             except OSError:
@@ -956,6 +973,9 @@ class Sender:
         self._refresh_connected()
 
     def _refresh_connected(self) -> None:
+        if not self._conn_dirty:                                        # sets unchanged since the last write: rows already right
+            return
+        self._conn_dirty = False
         """Mirror the live socket set into stat['connected'].
 
         The flag used to be a one-way latch: set on the first successful send and cleared only

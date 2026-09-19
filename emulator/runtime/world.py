@@ -101,6 +101,7 @@ class World:
         self._meta_thread: threading.Thread | None = None
         self._meta_gen = 0                                    # generation of the last full meta.json
         self._meta_dgen = 0                                   # generation of the last delta written against it
+        self._meta_full_at = 0.0                              # wall time of the last full meta.json write
         self._meta_delta: dict[int, str] = {}                 # gw -> entry text changed since the last full write
         self.meta_changed_last = 0
         self.meta_versions: dict[int, int] = {}
@@ -1533,10 +1534,16 @@ class World:
         # whole 2.25 MB file each time -- 74 MB of JSON per 30 s across three workers, their second-largest
         # cost.  Write the changed entries as a cumulative delta against the last full snapshot; the full
         # file is rewritten only when the delta stops being the cheaper option or on force/rebuild.
-        full = force or self._meta_gen == 0 or not META_PATH.exists() or len(self._meta_delta) * 4 >= max(1, len(h.gateways))
+        # The cumulative delta must stay small: at 1/4 of the gateways it had grown to 1.7 MB (72 % of the full file)
+        # and every worker re-parsed it on each write (10 % of worker CPU).  Cap it at 1/64 of the gateways or 60 s of
+        # age; a full rewrite is then ~2.4 MB once a minute, parsed once per worker -- an order of magnitude less JSON.
+        full = (force or self._meta_gen == 0 or not META_PATH.exists()
+                or len(self._meta_delta) * 64 >= max(1, len(h.gateways))
+                or time.time() - self._meta_full_at >= 60.0)
         if full:
             self._meta_gen += 1
             self._meta_dgen = 0
+            self._meta_full_at = time.time()
             self._meta_delta.clear()
             text = "{" + f'"_gen":{self._meta_gen},' + ",".join(parts) + "}"
             self._meta_write_async([(META_PATH, text), (META_DELTA_PATH, None)])

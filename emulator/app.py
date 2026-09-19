@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Bio-Signal Emulator", version=__version__, lifespan=lifespan)
 from fastapi.middleware.gzip import GZipMiddleware
-app.add_middleware(GZipMiddleware, minimum_size=2048)       # gateway/patient lists shrink ~10x on the wire (Pi over Wi-Fi)
+app.add_middleware(GZipMiddleware, minimum_size=16384)      # gateway/patient lists shrink ~10x on the wire (Pi over Wi-Fi); 1-2 Hz status polls (~3 KB) stay uncompressed
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
@@ -365,15 +365,21 @@ def control_autotune(body: dict):
     return {"result": "autotune stopped"}
 
 
+def _json(obj) -> Response:
+    """Serialise directly: FastAPI's jsonable_encoder walks every element of a response first, which for the
+    1-2 Hz status/stats polls cost more main-process CPU than the world loop's own bookkeeping."""
+    return Response(json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=str), media_type="application/json")
+
+
 @app.get("/api/v1/status")
 def status():
     """Live status without the 300-entry rate history (the GUI polls this at 1 Hz); /stats carries the history."""
-    return E().stats(history=False)
+    return _json(E().stats(history=False))
 
 
 @app.get("/api/v1/stats")
 def stats():
-    return E().stats()
+    return _json(E().stats())
 
 
 @app.get("/api/v1/events")
