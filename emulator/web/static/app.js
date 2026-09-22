@@ -2653,7 +2653,9 @@ async function fsPick(i) {
   dlg.innerHTML = `<div class="fsbox"><div class="fshead"><b>슬롯 ${i + 1} 파일 선택</b> <span class="sub">에뮬레이터 로컬 · ATF / CSV / TSV / TXT</span><button class="small fsx">닫기</button></div>` +
     `<div class="fspath mono"></div><div class="fslist"></div></div>`;
   document.body.appendChild(dlg);
-  const close = () => dlg.remove();
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => { dlg.remove(); document.removeEventListener('keydown', onKey); };
+  document.addEventListener('keydown', onKey);
   dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
   $('.fsx', dlg).onclick = close;
   const go = async (path) => {
@@ -2662,9 +2664,9 @@ async function fsPick(i) {
     fsLast = d.path; try { localStorage.setItem('rs:dir', d.path); } catch (e) { }
     $('.fspath', dlg).textContent = d.path || '위치 선택';
     const kb = (b) => cbytes ? cbytes(b) : b;
-    $('.fslist', dlg).innerHTML = (d.parent !== null ? `<div class="fsrow dir" data-p="${esc(d.parent)}">⬆ 상위 폴더</div>` : '') +
-      d.dirs.map(x => `<div class="fsrow dir" data-p="${esc(x.path)}">📁 ${esc(x.name)}</div>`).join('') +
-      d.files.map(x => `<div class="fsrow file" data-f="${esc(x.path)}">📄 ${esc(x.name)} <span class="sub">${kb(x.bytes)}</span></div>`).join('') +
+    $('.fslist', dlg).innerHTML = (d.parent !== null ? `<div class="fsrow dir" data-p="${esc(d.parent)}"><span class="fs-ic">↑</span>상위 폴더</div>` : '') +
+      d.dirs.map(x => `<div class="fsrow dir" data-p="${esc(x.path)}"><span class="fs-ic">▸</span>${esc(x.name)}</div>`).join('') +
+      d.files.map(x => `<div class="fsrow file" data-f="${esc(x.path)}"><span class="fs-ic">≡</span>${esc(x.name)} <span class="sub">${kb(x.bytes)}</span></div>`).join('') +
       (!d.dirs.length && !d.files.length ? '<div class="sub" style="padding:10px">ATF/CSV 파일이 없습니다</div>' : '');
     $$('.fsrow.dir', dlg).forEach(r => r.onclick = () => go(r.dataset.p));
     $$('.fsrow.file', dlg).forEach(r => r.onclick = () => { rsSet(c => { c.slots[i] = r.dataset.f; }); close(); toast(`슬롯 ${i + 1}: ${r.dataset.f.split('/').pop()} — [적용]을 눌러야 반영`); });

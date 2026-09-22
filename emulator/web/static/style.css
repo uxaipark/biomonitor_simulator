@@ -353,7 +353,7 @@ th[data-key]:hover{color:var(--txt)}
 th[data-key].asc::after{content:' ▲';font-size:9px}th[data-key].desc::after{content:' ▼';font-size:9px}
 .gwlink{color:var(--acc2);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}.gwlink:hover{color:var(--acc)}
 /* collapsible card bodies (병원 탭 게이트웨이/병동 목록) */
-.fold{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;width:24px;height:24px;min-height:0;padding:0;font-size:13px;line-height:1;cursor:pointer}
+.fold{border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:6px;width:24px;height:24px;min-height:0;padding:0;font-size:13px;line-height:1;cursor:pointer}
 .fold[aria-expanded="false"]{transform:rotate(-90deg)}
 h3.foldrow{cursor:pointer;user-select:none;flex-wrap:wrap}
 h3.foldrow:hover .fold{color:var(--txt);border-color:var(--acc2)}
@@ -933,20 +933,20 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 .rs-auto{min-height:28px!important;font-size:12.5px}
 .rs-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
 .rs-slot{position:relative;display:flex;min-width:0}
-.rs-pick{flex:1;min-width:0;display:flex;align-items:center;gap:6px;min-height:30px;padding:0 8px;font-size:12px;text-align:left;border:1.5px solid var(--line);border-radius:7px;background:var(--card)}
+.rs-pick{flex:1;min-width:0;display:flex;align-items:center;gap:6px;min-height:30px;padding:0 8px;font-size:12px;text-align:left;border:1.5px solid var(--line);border-radius:7px;background:var(--panel)}
 .rs-no{flex:none;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;min-width:16px}
 .rs-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rs-mark{flex:none;font-weight:700}
 .rs-slot.empty .rs-name{color:var(--muted)}
-.rs-slot.ok .rs-pick{border-color:var(--ok, #16a34a)}
+.rs-slot.ok .rs-pick{border-color:var(--acc)}
 .rs-slot.pend .rs-pick{border-style:dashed;border-color:var(--warn)}
 .rs-slot.load .rs-pick{border-color:var(--acc2)}
-.rs-slot.err .rs-pick{border-color:var(--bad, #dc2626)}
-.rs-slot.err .rs-mark{color:var(--bad, #dc2626)}
+.rs-slot.err .rs-pick{border-color:var(--err)}
+.rs-slot.err .rs-mark{color:var(--err)}
 .rs-clear{position:absolute;right:2px;top:2px;width:18px;height:18px;min-height:0;padding:0;font-size:12px;line-height:1;border:none;background:transparent;color:var(--muted);cursor:pointer}
 .rs-slot:has(.rs-clear) .rs-pick{padding-right:20px}
 .fsdlg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px}
-.fsbox{background:var(--card);color:var(--txt);border-radius:12px;width:min(640px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.fsbox{background:var(--panel);color:var(--txt);border-radius:12px;width:min(640px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3)}
 .fshead{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
 .fshead .fsx{margin-left:auto}
 .fspath{padding:8px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -968,7 +968,7 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 .ft-intro h3{margin:0}
 .ft-sub{margin:12px 0 6px;font-size:12.5px;color:var(--muted);font-weight:600}
 .ft-pats{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
-.ft-pat{display:flex;gap:6px;align-items:center;min-height:32px;padding:0 10px;text-align:left;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1.5px solid var(--line);border-radius:7px;background:var(--card)}
+.ft-pat{display:flex;gap:6px;align-items:center;min-height:32px;padding:0 10px;text-align:left;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1.5px solid var(--line);border-radius:7px;background:var(--panel)}
 .ft-pat.on{border-color:var(--acc);background:color-mix(in srgb, var(--acc) 12%, transparent)}
 .ft-pat .sub{overflow:hidden;text-overflow:ellipsis}
 .ft-dur{display:flex;gap:6px}
@@ -977,8 +977,8 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 .ft-group{border-left:4px solid var(--ftc);padding:4px 0 4px 10px;margin-bottom:12px}
 .ft-glabel{font-size:12px;font-weight:700;color:var(--ftc);margin-bottom:6px}
 .ft-evs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
-.ft-ev{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:58px;padding:8px 10px;text-align:left;border:1.5px solid color-mix(in srgb, var(--ftc) 55%, var(--line));border-radius:9px;background:color-mix(in srgb, var(--ftc) 7%, var(--card))}
-.ft-ev:hover{background:color-mix(in srgb, var(--ftc) 16%, var(--card))}
+.ft-ev{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:58px;padding:8px 10px;text-align:left;border:1.5px solid color-mix(in srgb, var(--ftc) 55%, var(--line));border-radius:9px;background:color-mix(in srgb, var(--ftc) 7%, var(--panel))}
+.ft-ev:hover{background:color-mix(in srgb, var(--ftc) 16%, var(--panel))}
 .ft-ev b{font-size:14px;white-space:nowrap}
 .ft-ev span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .ft-high{--ftc:#dc2626}
@@ -993,3 +993,5 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 #scnGrid .gated input, #scnGrid .gated select{cursor:not-allowed}
 label.chk.sub-opt{padding-left:26px}
 .site-view{min-height:40px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.fs-ic{display:inline-block;width:18px;color:var(--muted);font-weight:700}
+.fsrow.file .fs-ic{color:var(--acc2)}
