@@ -120,7 +120,7 @@ const TAB_GROUPS = [
   { id: 'dash', title: '운영 현황', show: ['dash'] },
   { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
   { id: 'hosp', title: '병원', show: ['hosp'] },
-  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 구조 설정 (show[1] 이 바뀜)
+  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 월드 생성 (show[1] 이 바뀜)
   { id: 'tx', title: '송출', show: ['tx'] },
   { id: 'test', title: '테스트', show: ['test'] },
   { id: 'log', title: '로그', show: ['log'] },
@@ -151,7 +151,7 @@ function showLogView(v) {
   if (v === 'chat') chatOpen();
   updateLinkPolling();
 }
-// 에뮬레이터 설정 하위 메뉴: 시나리오 / 구조 설정
+// 에뮬레이터 설정 하위 메뉴: 시나리오 / 월드 생성
 let emuView = 'scn'; try { emuView = localStorage.getItem('emuView') === 'struct' ? 'struct' : 'scn'; } catch (e) { }
 function setEmuView(v) {
   emuView = v === 'struct' ? 'struct' : 'scn';
@@ -424,7 +424,7 @@ async function flush() {
   const body = pending; pending = {}; if (!Object.keys(body).length) return;
   try {
     const r = await patch(body); CFG = r.config;
-    if (r.needs_rebuild) toast('구조 설정 변경: [재구성]을 눌러 반영');
+    if (r.needs_rebuild) toast('월드 생성 값 변경: [재구성]을 눌러 반영');
     else if (r.needs_generate) toast('샘플링/변형 설정 변경: [루프 은행 재생성] 필요');
     else toast('설정 반영');
   } catch (e) { toast('설정 실패: ' + e.message); }
@@ -478,7 +478,7 @@ function renderChips() {
 $('#btnStart').onclick = async () => { const r = await post('/control/start'); toast(r.result); refresh(); };
 $('#btnStop').onclick = async () => { const r = await post('/control/stop'); toast(r.result); refresh(); };
 async function doRebuild() {
-  const ok = await askConfirm('재구성', '병상 수와 구조 설정을 반영해 병원·환자를 새로 구성합니다.\n재원 환자와 패치 상태가 초기화되고 전송이 잠시 멈춥니다.\n계속할까요?', '재구성');
+  const ok = await askConfirm('재구성', '병상 수와 월드 생성 값을 반영해 병원·환자를 새로 구성합니다.\n재원 환자와 패치 상태가 초기화되고 전송이 잠시 멈춥니다.\n계속할까요?', '재구성');
   if (!ok) return;
   toast('재구성 중...'); await post('/control/rebuild'); toast('재구성 완료 · 새로고침'); setTimeout(() => location.reload(), 400);
 }
@@ -2316,7 +2316,7 @@ document.addEventListener('click', async e => {
   if (!await askConfirm('설정 복원', what + '. 계속할까요?', '복원')) return;
   try {
     const r = await post('/config/restore', rr ? { run_id: Number(rr.dataset.restoreRun) } : { history_id: Number(rh.dataset.restoreH) });
-    toast('복원 완료' + (r.needs_rebuild ? ' · 구조 설정 변경: [병원·환자 재구성] 필요' : '') + (r.needs_generate ? ' · 루프 은행 재생성 필요' : ''));
+    toast('복원 완료' + (r.needs_rebuild ? ' · 월드 생성 값 변경: [재구성] 필요' : '') + (r.needs_generate ? ' · 루프 은행 재생성 필요' : ''));
     await loadConfig(); loadConfigHistory();
   } catch (er) { toast('복원 실패: ' + er.message); }
 });

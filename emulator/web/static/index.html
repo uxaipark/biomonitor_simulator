@@ -171,9 +171,9 @@
   <div class="card"><h3><button class="fold" data-fold="wardBody" aria-expanded="true">▾</button>병동 <span class="sub" id="wardCount"></span></h3><div class="tbl" id="wardBody" style="max-height:40vh"><table id="wardTable"><thead><tr><th>병동</th><th>진료과</th><th>위치</th><th>병상</th><th>재원</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 
-<!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 구조 설정) -->
+<!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 월드 생성) -->
 <section class="tab" data-tab="emunav" data-title="에뮬레이터 설정">
-  <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="struct">구조 설정</button></div>
+  <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="struct">월드 생성</button></div>
 </section>
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
@@ -189,11 +189,11 @@
     <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="5000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
-      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 시드 등 그 외 구조 설정은 [에뮬레이터 설정 › 구조 설정]에서 재구성합니다.</div>
+      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 시드 등 그 외 값은 [에뮬레이터 설정 › 월드 생성]에서 바꾸고 재구성합니다.</div>
     </div>
     <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
       <div class="row"><div class="field"><span title="병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)">병상 수 (환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
-      <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small primary" id="btnRebuild2" title="병상 수·구조 설정을 반영해 병원과 환자를 새로 구성합니다">재구성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
+      <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small primary" id="btnRebuild2" title="병상 수·월드 생성 값을 반영해 병원과 환자를 새로 구성합니다">재구성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
       <div class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></div>
       <div class="help">병상 수를 바꾸고 위의 <b>[적용]</b>을 누르면 자동으로 재구성해 병원을 그 크기로 짓습니다(최대 약 4,850병상). 재원 환자와 패치 상태는 초기화되고 전송은 잠시 멈춥니다. [재구성]은 지금 적용된 값으로 다시 짓습니다.</div>
     </div>
@@ -309,11 +309,11 @@
   </div>
 </section>
 
-<!-- ================= 구조 설정 -->
-<section class="tab" data-tab="struct" data-title="구조 설정">
+<!-- ================= 월드 생성 -->
+<section class="tab" data-tab="struct" data-title="월드 생성">
   <div class="structgrid">
     <div class="dcol">
-      <div class="card" data-apply="rebuild"><h3>구조 설정</h3>
+      <div class="card" data-apply="rebuild"><h3>월드 생성</h3>
       <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
       <div class="row"><div class="field" style="flex:2"><span>재현 실행: 시뮬 시작 시각 고정 (비우면 현재 시각)</span><input type="text" id="g_fstart" placeholder="2026-09-22T09:00"></div><div class="field"><span>&nbsp;</span><label class="chk" style="margin:0"><input type="checkbox" id="g_fstep"> 1초 고정 간격 진행</label></div></div>
       <div class="help">시드·시작 시각·고정 간격이 같으면 같은 입퇴원·이동·에피소드·장애가 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 남겨 재생하세요.</div>
@@ -391,7 +391,7 @@
       <div class="row tight" style="margin-top:8px"><a class="btnlink" href="/api/v1/labels?format=csv" download>전체 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=rhythm_episode" download>리듬 에피소드 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=lead_off,patch_off,no_link,trip" download>신호 품질 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=deterioration,code_blue" download>임상 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=gateway,net_device,power,mcot_device,surge" download>장애·운영 CSV</a></div>
     </div></div>
       <div class="card"><h3><button class="fold" data-fold="dbBody" data-fold-default="closed" aria-expanded="false">▾</button>SQLite DB <span class="right mono" id="dbPath"></span></h3><div id="dbBody">
-    <div class="help">환자 프로필·입퇴원·패치 레지스트리·패치 이벤트·검사 일정·이벤트 로그·전송 실행 기록을 저장합니다. 같은 구조 설정(시드·병상·프로필 수)이면 재시작 후에도 이력이 유지되고 패치 번호가 이어집니다. 구조 설정을 바꿔 재구성하면 새로 시작합니다.</div>
+    <div class="help">환자 프로필·입퇴원·패치 레지스트리·패치 이벤트·검사 일정·이벤트 로그·전송 실행 기록을 저장합니다. 같은 월드 생성 값(시드·병상·프로필 수)이면 재시작 후에도 이력이 유지되고 패치 번호가 이어집니다. 월드 생성 값을 바꿔 재구성하면 새로 시작합니다.</div>
     <div class="kpis" id="dbKpis"></div>
     <div class="field" style="margin-top:8px"><span>읽기 전용 SQL (SELECT)</span><div class="row"><input type="text" id="dbSql" class="mono" value="SELECT serial, patient_name, status, issued_reason, retired_reason FROM patches ORDER BY patch_id DESC" style="flex:4"><button id="dbRun" class="small primary" style="flex:0 0 auto">실행</button></div></div>
     <div class="sub" id="dbMsg"></div>
@@ -443,7 +443,7 @@
   <div class="card" id="logEvCard"><h3>이벤트 로그 <span class="right"><select id="logFilter" style="min-height:32px;padding:4px 8px;width:auto"><option value="">전체</option><option value="tx">송출 장애</option><option value="test">현장 테스트</option><option value="clinical">임상</option><option value="adt">입퇴원</option><option value="patch">패치</option><option value="gateway">게이트웨이</option><option value="network">네트워크</option><option value="link">연결</option><option value="rhythm">리듬</option><option value="exam">검사</option><option value="autotune">최적화</option><option value="system">시스템</option><option value="error">오류</option></select></span></h3>
     <div class="events" id="logEvents" style="max-height:75vh"></div></div>
   <div class="card" id="cfgHistCard" hidden><h3>설정 이력 <span class="sub" id="cfgHistSummary"></span></h3><div id="cfgHistBody">
-    <div class="help">모든 설정 변경(GUI·API·자동 최적화·초기화·복원)이 시각·출처·경로·이전값→새값으로 남고, 전송 실행마다 시작 시점의 설정 전체가 스냅샷으로 저장됩니다. 실행 행의 [이 설정으로 복원]은 그때의 시나리오 전체를, 변경 행의 [되돌리기]는 그 항목 하나만 이전값으로 되돌립니다. 구조 설정이 바뀌면 [재구성]이 필요합니다.</div>
+    <div class="help">모든 설정 변경(GUI·API·자동 최적화·초기화·복원)이 시각·출처·경로·이전값→새값으로 남고, 전송 실행마다 시작 시점의 설정 전체가 스냅샷으로 저장됩니다. 실행 행의 [이 설정으로 복원]은 그때의 시나리오 전체를, 변경 행의 [되돌리기]는 그 항목 하나만 이전값으로 되돌립니다. 월드 생성 값이 바뀌면 [재구성]이 필요합니다.</div>
     <div class="row" style="align-items:flex-end"><div class="field" style="flex:1"><span>경로 검색 (예: active_patients, network)</span><input type="text" id="cfgHistQ" placeholder="설정 경로 일부"></div><button class="small" id="cfgHistReload">새로고침</button></div>
     <h4 style="margin:10px 0 4px;font-size:12px;color:var(--muted)">전송 실행 이력 (시작 시점 설정 스냅샷)</h4>
     <div class="tbl" style="max-height:30vh"><table id="runsTable"><thead><tr><th>#</th><th>시작</th><th>종료</th><th>대상</th><th>워커</th><th>환자</th><th>GW</th><th>pkts</th><th>드롭</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -511,8 +511,8 @@
         <div class="gitem" id="g201-3"><h4>중앙 모니터 알람 읽기</h4>
           <ol class="gsteps"><li><b class="red">적색</b>: VFib · VT · 무수축 · 3도 차단 · SpO₂&lt;88 · HR&gt;150/&lt;40 · NIBP≥190/&lt;80 · 신호 없음.</li><li><b class="yel">황색</b>: AFib 등 리듬 · 리드오프 · 한계 이탈(HR 50–120, RR 8–30, SpO₂≥90, NIBP 90–160, 체온 &lt;38.3) · 배터리 ≤15 %.</li><li>12-up 이상은 수치가 2열 매트릭스로, 48 초과는 숫자 전용 보드로 바뀝니다.</li></ol></div>
         <div class="gitem" id="g201-4"><h4>데이터 탭 <button class="small" data-goto="data">탭 열기</button></h4>
-          <figure><img src="/static/guide/data.jpg" alt="패치 레지스트리, SQLite(기본 접힘), 루프 은행, 구조 설정"><figcaption>패치 레지스트리, SQLite(기본 접힘), 루프 은행, 구조 설정</figcaption></figure>
-          <ol class="gsteps"><li><i>구조 설정</i>(시드·프로필·템플릿)은 [에뮬레이터 설정 › 구조 설정]에서 바꾼 뒤 [재구성].</li><li><i>패치 레지스트리</i>: 발급된 모든 패치 이력, 열 정렬.</li><li><i>SQLite DB</i>: 읽기 전용 SQL. 예 <code>SELECT ward, COUNT(*) FROM admissions WHERE discharged_at IS NULL GROUP BY ward</code></li></ol></div>
+          <figure><img src="/static/guide/data.jpg" alt="패치 레지스트리, SQLite(기본 접힘), 루프 은행, 월드 생성"><figcaption>패치 레지스트리, SQLite(기본 접힘), 루프 은행, 월드 생성</figcaption></figure>
+          <ol class="gsteps"><li><i>월드 생성</i>(시드·프로필·템플릿)은 [에뮬레이터 설정 › 월드 생성]에서 바꾼 뒤 [재구성].</li><li><i>패치 레지스트리</i>: 발급된 모든 패치 이력, 열 정렬.</li><li><i>SQLite DB</i>: 읽기 전용 SQL. 예 <code>SELECT ward, COUNT(*) FROM admissions WHERE discharged_at IS NULL GROUP BY ward</code></li></ol></div>
         <div class="gitem" id="g201-5"><h4>프로토콜 탭 <button class="small" data-goto="proto">탭 열기</button></h4>
           <figure><img src="/static/guide/proto.jpg" alt="프레임 헤더·레코드·채널 블록 구조와 채널 ID"><figcaption>프레임 헤더·레코드·채널 블록 구조와 채널 ID</figcaption></figure>
           <ol class="gsteps"><li>라우터는 이 문서와 <code>GET /api/v1</code>(디스커버리 JSON)을 기준으로 구현합니다.</li></ol></div>
@@ -520,7 +520,7 @@
           <ol class="gsteps"><li><b>네트워크 장애</b> 카드: 층 스위치·무선 AP·건물 코어가 죽으면 그 아래 게이트웨이가 한꺼번에 <i>업링크 단절</i>됩니다. 패치는 붙은 채 프레임이 쌓였다가 복구 때 올라갑니다. [건물 정전]은 UPS·발전기·일반 전원 계통별로 다르게 복구됩니다.</li>
           <li><b>병원 일과</b>: 활력징후 측정·회진·식사·면회·샤워 시간대가 움직임을 만듭니다. <b>임상 악화</b>: 몇 시간에 걸친 악화와 코드블루, 환자 정보의 NEWS2.</li>
           <li><b>원외 MCOT</b>: 앱 강제 종료·절전 일괄 업로드·OS 업데이트·비행기 모드. <b>입퇴원</b>: 요일·시간대 재원 곡선과 대량 유입.</li>
-          <li><b>재현</b>: [에뮬레이터 설정 › 구조 설정]에서 시작 시각을 고정하고 1초 고정 간격을 켜면 같은 사건이 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 저장해 재생합니다.</li>
+          <li><b>재현</b>: [에뮬레이터 설정 › 월드 생성]에서 시작 시각을 고정하고 1초 고정 간격을 켜면 같은 사건이 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 저장해 재생합니다.</li>
           <li><b>정답 라벨</b>: 데이터 탭에서 리듬 에피소드·신호 품질·임상·장애 구간을 CSV로 내려받아 분석 알고리즘을 채점합니다.</li></ol></div>
       </div>
 
