@@ -2474,16 +2474,19 @@ function pwBuild() {
   PW.built = key;
   $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item" data-i="${i}" role="option"><span class="pw-no">${i === 0 ? '·' : i}</span>${esc(p.name)}</div>`).join('');
 }
+// 실린더 휠: 항목을 원통 둘레에 3D 로 배치한다 (rotateX 후 반지름만큼 앞으로). 크기 변화는 원근에서 자연스럽게 생기고,
+// 가운데만 살짝(최대 ×1.08) 키운다. 한 칸 20° · 반지름은 칸 높이가 원통 둘레에 딱 맞는 값.
+const PW_STEP = 20, PW_R = Math.round((PW_H / 2) / Math.tan(PW_STEP / 2 * Math.PI / 180));
 function pwRender() {
-  const items = $$('#pwTrack .pw-item'), n = items.length, R = 96, STEP = 21 * Math.PI / 180;   // 원통 반지름(px) · 한 칸 각도
+  const items = $$('#pwTrack .pw-item'), n = items.length;
+  $('#pwTrack').style.transform = `translateZ(${-PW_R}px)`;
   items.forEach((el, i) => {
     let d = (i - PW.pos) % n; if (d < -n / 2) d += n; if (d >= n / 2) d -= n;   // 가장 가까운 쪽으로 감아 둔 거리 (순환)
-    const a = Math.abs(d), ang = Math.max(-1.45, Math.min(1.45, d * STEP));
-    const scale = Math.max(0.55, 1.32 - 0.24 * a);                    // 가운데가 가장 크고 멀수록 작게
-    el.style.transform = `translateY(${R * Math.sin(ang)}px) rotateX(${-ang * 180 / Math.PI}deg) scale(${scale})`;
-    el.style.opacity = a > 3.3 ? 0 : String(Math.max(0.1, 1 - a * 0.3));
-    el.style.zIndex = String(100 - Math.round(a * 10));
-    el.classList.toggle('front', a < 0.5);
+    const deg = d * PW_STEP, a = Math.abs(deg);
+    const lift = 1 + 0.08 * Math.max(0, 1 - Math.abs(d));                        // 가운데만 살짝
+    el.style.transform = `rotateX(${-deg}deg) translateZ(${PW_R}px) scale(${lift})`;
+    el.style.opacity = a >= 90 ? 0 : String(0.18 + 0.82 * Math.cos(deg * Math.PI / 180));
+    el.classList.toggle('front', Math.abs(d) < 0.5);
     el.classList.toggle('applied', !!scnPresets && scnPresets.presets[i].id === scnPresets.current);
   });
 }
@@ -2550,8 +2553,8 @@ async function loadScnPresets(keepPos = true) {
     const d = PW.drag; if (!d) return;
     PW.drag = null; wh.classList.remove('dragging');
     if (!d.moved) {                                                // 탭/클릭: 누른 높이의 항목으로 돌림 (3D 변형 항목의 판정 대신 위치로 계산)
-      const r = wh.getBoundingClientRect(), dy = (d.y0 - (r.top + r.height / 2)) / 96;   // 누른 높이 → 원통 각도 → 칸 수
-      const steps = Math.round(Math.asin(Math.max(-1, Math.min(1, dy))) / (21 * Math.PI / 180));
+      const r = wh.getBoundingClientRect(), dy = (d.y0 - (r.top + r.height / 2)) / PW_R;   // 누른 높이 → 원통 각도 → 칸 수
+      const steps = Math.round(Math.asin(Math.max(-1, Math.min(1, dy))) * 180 / Math.PI / PW_STEP);
       pwGo(Math.round(PW.pos) + steps); return;
     }
     const v = performance.now() - d.t > 80 ? 0 : d.v;             // 멈췄다가 놓으면 관성 없음

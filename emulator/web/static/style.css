@@ -889,6 +889,16 @@ button.preset:hover{border-color:var(--acc2)}
 .papply button{min-height:52px;font-size:15px;padding:0 22px}
 .papply .sub{text-align:center}
 @media (max-width:900px){ .pwrap{grid-template-columns:1fr} .pwheel{height:180px} }
-/* 왼쪽 기준으로 키운다: 가운데(×1.32)도 번호·이름·'적용 중'이 휠 안에 들어오게 폭을 76 %로 */
-.pw-item{right:auto;left:6px;width:calc(76% - 6px);transform-origin:0 50%}
 .pw-item.front .pw-no{color:var(--acc);opacity:1}
+
+/* 실린더 휠: 가운데 정렬, 원통 3D 배치 */
+.pwheel{perspective:640px;perspective-origin:50% 50%}
+.pw-track{position:absolute;inset:0;transform-style:preserve-3d}
+.pw-item{left:0;right:0;width:auto;justify-content:center;text-align:center;padding:0 64px;transform-origin:50% 50%;backface-visibility:hidden;font-size:14.5px}
+.pw-item .pw-no{flex:0 0 auto;text-align:center;margin-right:2px}
+.pw-item.applied::after{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0}
+.pw-lens{left:10px;right:10px}
+/* 휠 항목 경계선: 옅게 (원통에 붙어 함께 기울어진다) */
+.pw-item{border-top:1px solid color-mix(in srgb,var(--line) 75%,transparent);border-bottom:1px solid color-mix(in srgb,var(--line) 75%,transparent);box-sizing:border-box}
+.pw-item.front{border-color:transparent}
+.pw-item.applied::after{right:26px}
