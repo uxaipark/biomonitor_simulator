@@ -995,3 +995,4 @@ label.chk.sub-opt{padding-left:26px}
 .site-view{min-height:40px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
 .fs-ic{display:inline-block;width:18px;color:var(--muted);font-weight:700}
 .fsrow.file .fs-ic{color:var(--acc2)}
+.fswarn{padding:8px 14px;font-size:12.5px;color:var(--err);border-bottom:1px solid var(--line);background:color-mix(in srgb, var(--err) 8%, transparent)}

@@ -2660,7 +2660,15 @@ async function fsPick(i) {
   $('.fsx', dlg).onclick = close;
   const go = async (path) => {
     let d;
-    try { d = await api('/fs/browse?path=' + encodeURIComponent(path)); } catch (e) { if (path) return go(''); $('.fslist', dlg).innerHTML = `<div class="sub">${esc(e.message)}</div>`; return; }
+    try { d = await api('/fs/browse?path=' + encodeURIComponent(path)); }
+    catch (e) {
+      const denied = /denied|허용|403/i.test(e.message);
+      const msg = denied ? `${path} — 에뮬레이터 서비스(biosim 계정)에 읽기 권한이 없는 폴더입니다` : `${path} — 열 수 없습니다 (${e.message})`;
+      if (!$('.fslist .fsrow', dlg)) { if (path) return go(''); }                  // 처음 열 때 실패하면 최상위로
+      const w = $('.fswarn', dlg) || $('.fspath', dlg).insertAdjacentElement('afterend', Object.assign(document.createElement('div'), { className: 'fswarn' }));
+      w.textContent = msg; return;
+    }
+    const w0 = $('.fswarn', dlg); if (w0) w0.remove();
     fsLast = d.path; try { localStorage.setItem('rs:dir', d.path); } catch (e) { }
     $('.fspath', dlg).textContent = d.path || '위치 선택';
     const kb = (b) => cbytes ? cbytes(b) : b;

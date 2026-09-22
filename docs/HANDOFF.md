@@ -114,3 +114,4 @@
 - [2026-09-22 16:12 RP5-1] 입원 환자 수 빠른 버튼: 1500 삭제, 20 추가 — app.js 만 운영 static 에 복사, 재시작 없음.
 - [2026-09-22 16:53 RP5-1] **배포**: 릴리스 20260922-1652 (93ee15f) — 서비스 재시작, 연결 2,024 복귀. 포함: 실제 시그널 송출(12번 프리셋, 로컬 ATF/CSV 20슬롯, `scenario.realsig`, `GET /api/v1/realsig`, `/api/v1/fs/browse`), 테스트 메뉴(현장 테스트, `/api/v1/fieldtest`), 옵션 충돌 방지(장소는 환자 수에서 자동 결정, 하위 옵션 막힘, `scenario.patch.replace_enabled`), 전체 파라미터 초기화 버튼 제거. 프로토콜 변경 없음. 운영 프리셋은 baseline 그대로.
 - [2026-09-22 16:56 RP5-1] 파일 선택 대화상자 배경 투명 수정(정의 안 된 CSS 변수 --card/--bad/--ok → --panel/--err/--acc), 아이콘을 기호로, Esc 닫기 — app.js/style.css 만 운영 static 에 복사, 재시작 없음. 12번 프리셋 자동 생성 기본 켬(presets.py)은 다음 배포 때 반영.
+- [2026-09-22 16:57 RP5-1] 파일 선택 대화상자: 권한 없는 폴더(예: /home/master, 서비스 계정 biosim 접근 불가)에서 최상위로 튕기던 것을 제자리 유지 + 사유 표시로 — app.js/style.css 만 운영 static 에 복사, 재시작 없음.
