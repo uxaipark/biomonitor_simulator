@@ -171,6 +171,10 @@
   <div class="card"><h3><button class="fold" data-fold="wardBody" aria-expanded="true">▾</button>병동 <span class="sub" id="wardCount"></span></h3><div class="tbl" id="wardBody" style="max-height:40vh"><table id="wardTable"><thead><tr><th>병동</th><th>진료과</th><th>위치</th><th>병상</th><th>재원</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 
+<!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 구조 설정) -->
+<section class="tab" data-tab="emunav" data-title="에뮬레이터 설정">
+  <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="struct">구조 설정</button></div>
+</section>
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
   <div class="card presetbar" id="presetBar"><h3><button class="fold" data-fold="presetBody" aria-expanded="true">▾</button>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">휠로 고르면 아래 옵션에 미리 채워짐 · [적용]을 눌러야 에뮬레이터에 반영</span></h3>
@@ -185,7 +189,7 @@
     <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="5000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
-      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 시드 등 그 외 구조 설정은 [설정·데이터] 탭의 구조 설정에서 재구성합니다.</div>
+      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 시드 등 그 외 구조 설정은 [에뮬레이터 설정 › 구조 설정]에서 재구성합니다.</div>
     </div>
     <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
       <div class="row"><div class="field"><span title="병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)">병상 수 (환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
@@ -305,6 +309,37 @@
   </div>
 </section>
 
+<!-- ================= 구조 설정 -->
+<section class="tab" data-tab="struct" data-title="구조 설정">
+  <div class="structgrid">
+    <div class="dcol">
+      <div class="card" data-apply="rebuild"><h3>구조 설정</h3>
+      <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
+      <div class="row"><div class="field" style="flex:2"><span>재현 실행: 시뮬 시작 시각 고정 (비우면 현재 시각)</span><input type="text" id="g_fstart" placeholder="2026-09-22T09:00"></div><div class="field"><span>&nbsp;</span><label class="chk" style="margin:0"><input type="checkbox" id="g_fstep"> 1초 고정 간격 진행</label></div></div>
+      <div class="help">시드·시작 시각·고정 간격이 같으면 같은 입퇴원·이동·에피소드·장애가 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 남겨 재생하세요.</div>
+      <div class="row"><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
+      <div class="row"><div class="field"><span>시드</span><input type="number" id="g_seed"></div><div class="field"><span>GW 최대 BLE 연결</span><input type="number" id="gw_cap" min="1" max="64"></div></div>
+      <div class="row"><div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div><div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div></div>
+      <div class="row"><div class="field"><span>리듬별 루프 변형 수</span><input type="number" id="s_vpr" min="1" max="200"></div><div class="field"><span>페이스메이커 비율(심장환자)</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div></div>
+      <div class="field"><span>병원 건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
+      
+      <div class="row"><div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div></div>
+      <div class="sub" id="hSizeInfo"></div>
+      <label class="chk"><input type="checkbox" id="gw_cor"> 복도/엘리베이터/계단 게이트웨이 설치</label>
+      <div class="row tight"><button id="btnRebuild" class="small primary">재구성</button><button id="btnGen2" class="small">루프 은행 재생성</button><button id="btnReset" class="small">기본값 복원</button></div>
+    </div>
+    </div>
+    <div class="dcol">
+      <div class="card"><h3><button class="fold" data-fold="bankBody" aria-expanded="true">▾</button>루프 파일 은행 (1시간 파형 데이터)</h3><div id="bankBody">
+      <div id="bankInfo2" class="sub"></div>
+      <div class="progress" style="margin:8px 0"><div id="bankBar2"></div></div>
+      <div class="help">모든 파형은 1시간 단위로 시작·끝이 이어지는 루프 파일에서 재생됩니다. 샘플링·변형 수·시드를 바꾸면 재생성이 필요하며, 생성 중에는 전송이 정지됩니다.</div>
+      <div id="bankFiles" class="sub mono" style="font-size:11px"></div>
+    </div></div>
+    </div>
+  </div>
+</section>
+
 <!-- ================= 전송 -->
 <section class="tab" data-tab="tx" data-title="전송">
   <div class="grid txgrid">
@@ -348,6 +383,8 @@
     <div class="tbl" style="max-height:45vh"><table id="regTable"><thead><tr><th data-key="serial">시리얼</th><th data-key="patch_id">patch_id</th><th data-key="status">상태</th><th data-key="patient_name">환자</th><th data-key="issued_at">발급</th><th data-key="issued_reason">발급 사유</th><th data-key="retired_at">종료</th><th data-key="retired_reason">종료 사유</th><th data-key="battery">배터리</th></tr></thead><tbody></tbody></table></div>
     <div class="row" style="margin-top:8px"><button id="regPrev" class="small">◀ 이전</button><button id="regNext" class="small">다음 ▶</button></div></div>
   </div>
+    </div>
+    <div class="dcol">
       <div class="card"><h3><button class="fold" data-fold="lblBody" aria-expanded="true">▾</button>정답 라벨 <span class="right sub" id="lblSummaryHead"></span></h3><div id="lblBody">
       <div class="help">분석 알고리즘 채점용 정답입니다. 구간 [시작, 끝]은 프레임 ts_ms 와 같은 시계(epoch ms)이고, 리듬 에피소드는 프레임 단위, 나머지는 1초 해상도입니다.</div>
       <div class="tbl" style="max-height:30vh"><table id="lblTable"><thead><tr><th>종류</th><th>닫힌 구간</th><th>진행 중</th><th>처음</th><th>마지막</th><th></th></tr></thead><tbody></tbody></table></div>
@@ -360,29 +397,6 @@
     <div class="sub" id="dbMsg"></div>
     <div class="tbl" style="max-height:40vh"><table id="dbTable"><thead></thead><tbody></tbody></table></div></div>
   </div>
-    </div>
-    <div class="dcol">
-      <div class="card" data-apply="rebuild"><h3>구조 설정</h3>
-      <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
-      <div class="row"><div class="field" style="flex:2"><span>재현 실행: 시뮬 시작 시각 고정 (비우면 현재 시각)</span><input type="text" id="g_fstart" placeholder="2026-09-22T09:00"></div><div class="field"><span>&nbsp;</span><label class="chk" style="margin:0"><input type="checkbox" id="g_fstep"> 1초 고정 간격 진행</label></div></div>
-      <div class="help">시드·시작 시각·고정 간격이 같으면 같은 입퇴원·이동·에피소드·장애가 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 남겨 재생하세요.</div>
-      <div class="row"><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
-      <div class="row"><div class="field"><span>시드</span><input type="number" id="g_seed"></div><div class="field"><span>GW 최대 BLE 연결</span><input type="number" id="gw_cap" min="1" max="64"></div></div>
-      <div class="row"><div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div><div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div></div>
-      <div class="row"><div class="field"><span>리듬별 루프 변형 수</span><input type="number" id="s_vpr" min="1" max="200"></div><div class="field"><span>페이스메이커 비율(심장환자)</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div></div>
-      <div class="field"><span>병원 건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
-      
-      <div class="row"><div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div></div>
-      <div class="sub" id="hSizeInfo"></div>
-      <label class="chk"><input type="checkbox" id="gw_cor"> 복도/엘리베이터/계단 게이트웨이 설치</label>
-      <div class="row tight"><button id="btnRebuild" class="small primary">재구성</button><button id="btnGen2" class="small">루프 은행 재생성</button><button id="btnReset" class="small">기본값 복원</button></div>
-    </div>
-      <div class="card"><h3><button class="fold" data-fold="bankBody" aria-expanded="true">▾</button>루프 파일 은행 (1시간 파형 데이터)</h3><div id="bankBody">
-      <div id="bankInfo2" class="sub"></div>
-      <div class="progress" style="margin:8px 0"><div id="bankBar2"></div></div>
-      <div class="help">모든 파형은 1시간 단위로 시작·끝이 이어지는 루프 파일에서 재생됩니다. 샘플링·변형 수·시드를 바꾸면 재생성이 필요하며, 생성 중에는 전송이 정지됩니다.</div>
-      <div id="bankFiles" class="sub mono" style="font-size:11px"></div>
-    </div></div>
     </div>
   </div>
 </section>
@@ -496,9 +510,9 @@
           <ol class="gsteps"><li>스위치 켜기 = 리드오프 60초 · 부정맥 180초 · 심실세동 120초 · MRI 이동(단계·남은 시간 표시).</li><li>시간이 끝나면 자동으로 풀리고, 끄면 즉시 취소됩니다.</li><li>패치 교체·퇴원 버튼도 같은 카드에 있습니다. MRI 후에는 패치 번호가 바뀝니다.</li></ol></div>
         <div class="gitem" id="g201-3"><h4>중앙 모니터 알람 읽기</h4>
           <ol class="gsteps"><li><b class="red">적색</b>: VFib · VT · 무수축 · 3도 차단 · SpO₂&lt;88 · HR&gt;150/&lt;40 · NIBP≥190/&lt;80 · 신호 없음.</li><li><b class="yel">황색</b>: AFib 등 리듬 · 리드오프 · 한계 이탈(HR 50–120, RR 8–30, SpO₂≥90, NIBP 90–160, 체온 &lt;38.3) · 배터리 ≤15 %.</li><li>12-up 이상은 수치가 2열 매트릭스로, 48 초과는 숫자 전용 보드로 바뀝니다.</li></ol></div>
-        <div class="gitem" id="g201-4"><h4>설정·데이터 탭 <button class="small" data-goto="data">탭 열기</button></h4>
+        <div class="gitem" id="g201-4"><h4>데이터 탭 <button class="small" data-goto="data">탭 열기</button></h4>
           <figure><img src="/static/guide/data.jpg" alt="패치 레지스트리, SQLite(기본 접힘), 루프 은행, 구조 설정"><figcaption>패치 레지스트리, SQLite(기본 접힘), 루프 은행, 구조 설정</figcaption></figure>
-          <ol class="gsteps"><li><i>구조 설정</i>(병상 수·프로필·시드)은 바꾼 뒤 [재구성].</li><li><i>패치 레지스트리</i>: 발급된 모든 패치 이력, 열 정렬.</li><li><i>SQLite DB</i>: 읽기 전용 SQL. 예 <code>SELECT ward, COUNT(*) FROM admissions WHERE discharged_at IS NULL GROUP BY ward</code></li></ol></div>
+          <ol class="gsteps"><li><i>구조 설정</i>(시드·프로필·템플릿)은 [에뮬레이터 설정 › 구조 설정]에서 바꾼 뒤 [재구성].</li><li><i>패치 레지스트리</i>: 발급된 모든 패치 이력, 열 정렬.</li><li><i>SQLite DB</i>: 읽기 전용 SQL. 예 <code>SELECT ward, COUNT(*) FROM admissions WHERE discharged_at IS NULL GROUP BY ward</code></li></ol></div>
         <div class="gitem" id="g201-5"><h4>프로토콜 탭 <button class="small" data-goto="proto">탭 열기</button></h4>
           <figure><img src="/static/guide/proto.jpg" alt="프레임 헤더·레코드·채널 블록 구조와 채널 ID"><figcaption>프레임 헤더·레코드·채널 블록 구조와 채널 ID</figcaption></figure>
           <ol class="gsteps"><li>라우터는 이 문서와 <code>GET /api/v1</code>(디스커버리 JSON)을 기준으로 구현합니다.</li></ol></div>
@@ -506,8 +520,8 @@
           <ol class="gsteps"><li><b>네트워크 장애</b> 카드: 층 스위치·무선 AP·건물 코어가 죽으면 그 아래 게이트웨이가 한꺼번에 <i>업링크 단절</i>됩니다. 패치는 붙은 채 프레임이 쌓였다가 복구 때 올라갑니다. [건물 정전]은 UPS·발전기·일반 전원 계통별로 다르게 복구됩니다.</li>
           <li><b>병원 일과</b>: 활력징후 측정·회진·식사·면회·샤워 시간대가 움직임을 만듭니다. <b>임상 악화</b>: 몇 시간에 걸친 악화와 코드블루, 환자 정보의 NEWS2.</li>
           <li><b>원외 MCOT</b>: 앱 강제 종료·절전 일괄 업로드·OS 업데이트·비행기 모드. <b>입퇴원</b>: 요일·시간대 재원 곡선과 대량 유입.</li>
-          <li><b>재현</b>: 설정·데이터 탭에서 시작 시각을 고정하고 1초 고정 간격을 켜면 같은 사건이 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 저장해 재생합니다.</li>
-          <li><b>정답 라벨</b>: 설정·데이터 탭에서 리듬 에피소드·신호 품질·임상·장애 구간을 CSV로 내려받아 분석 알고리즘을 채점합니다.</li></ol></div>
+          <li><b>재현</b>: [에뮬레이터 설정 › 구조 설정]에서 시작 시각을 고정하고 1초 고정 간격을 켜면 같은 사건이 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 저장해 재생합니다.</li>
+          <li><b>정답 라벨</b>: 데이터 탭에서 리듬 에피소드·신호 품질·임상·장애 구간을 CSV로 내려받아 분석 알고리즘을 채점합니다.</li></ol></div>
       </div>
 
       <div class="card gsec" data-id="gtest" data-title="시나리오 테스트 항목">
@@ -524,7 +538,7 @@
         <div class="gitem" id="t05"><h4>T-05 아티팩트 최대 <button class="small apply" data-apply='{"scenario":{"artifacts":{"enabled":true,"intensity":100,"motion":true,"shower":true,"exam_trips":true,"patch_reattach":true,"transfer":true,"patch_replace":true,"home_interference":true}}}'>이 설정 적용</button></h4>
       <div class="gsub">움직임·샤워·검사 이동·재부착·전동·패치 교체·가정 간섭을 최대 빈도로.</div><ol class="gsteps"><li>모니터링 탭에서 파형 왜곡·리드오프·재부착 안정화 구간을 봅니다.</li><li>모니터링 탭 패치 이력에서 교체 기록을 봅니다.</li></ol><div class="gexp"><b>확인 포인트</b> 레코드 flags(LEAD_OFF, MOTION, NEW_PATCH)와 패치 번호 변경 처리.</div></div>
         <div class="gitem" id="t06"><h4>T-06 패치 수명 가속 <button class="small apply" data-apply='{"scenario":{"patch":{"battery_days":0.02,"battery_drain_enabled":true,"lead_off_enabled":true,"replace_below_pct":5}}}'>이 설정 적용</button></h4>
-      <div class="gsub">배터리를 30분 만에 소모시켜 교체·반납 사이클을 빠르게.</div><ol class="gsteps"><li>설정·데이터 탭 패치 레지스트리에서 새 시리얼 발급을 봅니다.</li><li>중앙 모니터의 배터리 아이콘·BATTERY LOW 알람.</li></ol><div class="gexp"><b>확인 포인트</b> LOW_BATTERY 플래그 → 교체 → 새 patch_id로 스트림 이어짐, 번호 재사용 없음.</div></div>
+      <div class="gsub">배터리를 30분 만에 소모시켜 교체·반납 사이클을 빠르게.</div><ol class="gsteps"><li>데이터 탭 패치 레지스트리에서 새 시리얼 발급을 봅니다.</li><li>중앙 모니터의 배터리 아이콘·BATTERY LOW 알람.</li></ol><div class="gexp"><b>확인 포인트</b> LOW_BATTERY 플래그 → 교체 → 새 patch_id로 스트림 이어짐, 번호 재사용 없음.</div></div>
         <div class="gitem" id="t07"><h4>T-07 게이트웨이 장애·교체 <button class="small apply" data-apply='{"scenario":{"gateway":{"fault_enabled":true,"fault_intensity":90,"outage":true,"degrade":true,"replace":true}}}' data-trig='{"what":"gateway_fault"}'>이 설정 적용</button></h4>
       <div class="gsub">무응답·성능 저하·하드웨어 고장을 높은 빈도로.</div><ol class="gsteps"><li>병원 탭 도면에서 붉은 게이트웨이와 이웃으로 옮겨 붙는 환자.</li><li>교체 후 새 gw_no/MAC으로 META 재전송.</li></ol><div class="gexp"><b>확인 포인트</b> 패치 핸드오버 시 patch_id 연속성, 새 gw_id 인식.</div></div>
         <div class="gitem" id="t08"><h4>T-08 부정맥 폭풍 <button class="small apply" data-apply='{"scenario":{"rhythm_episodes":true,"variant_hopping":true}}' data-script="arrhythmia_sweep.json">이 설정 적용</button></h4>

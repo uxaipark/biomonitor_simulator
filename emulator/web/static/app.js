@@ -120,14 +120,14 @@ const TAB_GROUPS = [
   { id: 'dash', title: '운영 현황', show: ['dash'] },
   { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
   { id: 'hosp', title: '병원', show: ['hosp'] },
-  { id: 'scn', title: '시나리오', show: ['scn'] },
+  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 구조 설정 (show[1] 이 바뀜)
   { id: 'tx', title: '송출', show: ['tx'] },
   { id: 'test', title: '테스트', show: ['test'] },
   { id: 'log', title: '로그', show: ['log'] },
-  { id: 'data', title: '설정·데이터', show: ['data'] },
+  { id: 'data', title: '데이터', show: ['data'] },
 ];
 const HELP_GROUP = { id: 'help', title: '도움말', show: ['guide', 'proto'] };
-const GROUP_OF = { chat: 'log' };
+const GROUP_OF = { chat: 'log', struct: 'emu' };
 [...TAB_GROUPS, HELP_GROUP].forEach(g => { GROUP_OF[g.id] = g.id; g.show.forEach(sid => { GROUP_OF[sid] = g.id; }); });
 let curGroup = 'dash', prevGroup = 'dash';
 TAB_GROUPS.forEach(g => {
@@ -151,7 +151,17 @@ function showLogView(v) {
   if (v === 'chat') chatOpen();
   updateLinkPolling();
 }
+// 에뮬레이터 설정 하위 메뉴: 시나리오 / 구조 설정
+let emuView = 'scn'; try { emuView = localStorage.getItem('emuView') === 'struct' ? 'struct' : 'scn'; } catch (e) { }
+function setEmuView(v) {
+  emuView = v === 'struct' ? 'struct' : 'scn';
+  TAB_GROUPS.find(x => x.id === 'emu').show[1] = emuView;
+  try { localStorage.setItem('emuView', emuView); } catch (e) { }
+  $$('#emuSeg button').forEach(b => b.classList.toggle('on', b.dataset.ev === emuView));
+}
+setEmuView(emuView);
 function showTab(id) {
+  if (id === 'scn' || id === 'struct') setEmuView(id);                 // 딥링크 ?tab=scn / ?tab=struct
   const gid = GROUP_OF[id] || 'dash';
   const g = gid === 'help' ? HELP_GROUP : (TAB_GROUPS.find(x => x.id === gid) || TAB_GROUPS[0]);
   if (g.id !== curGroup) prevGroup = curGroup;
@@ -166,7 +176,8 @@ function showTab(id) {
   if (shown.has('hosp')) { loadFloor(); drawElevation(); }
   if (shown.has('proto')) loadProto();
   if (shown.has('pat')) loadPatients();
-  if (shown.has('data')) { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
+  if (shown.has('data')) { loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
+  if (shown.has('struct')) loadBankFiles();
   if (shown.has('scn') || shown.has('dash')) loadRealism();
   if (shown.has('scn')) loadScnPresets();
   if (shown.has('scn') || shown.has('tx')) loadScripts();
@@ -175,6 +186,7 @@ function showTab(id) {
 }
 nav.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
 $('#logSeg').addEventListener('click', e => { const b = e.target.closest('button[data-lv]'); if (b) showLogView(b.dataset.lv); });
+$('#emuSeg').addEventListener('click', e => { const b = e.target.closest('button[data-ev]'); if (b) { setEmuView(b.dataset.ev); showTab('emu'); } });
 $('#btnHelp').onclick = () => showTab(curGroup === 'help' ? (prevGroup || 'dash') : 'help');
 sel.addEventListener('change', () => showTab(sel.value));
 let initTab = 'dash'; try { initTab = localStorage.getItem('tab') || 'dash'; } catch (e) { }
@@ -2521,7 +2533,7 @@ async function loadRealism() {
   const ss = $('#surgeStatus'); if (ss) ss.textContent = d.surge ? `유입 진행: ${d.surge.count}명` : '';
   const rs = $('#recStatus'); if (rs) rs.innerHTML = d.recording ? `<span class="tag err">● 녹화 중</span> ${esc(d.recording.name)} · ${d.recording.items}단계` : '';
 }
-setInterval(() => { if (curGroup === 'scn' || curGroup === 'dash') loadRealism(); if (curGroup === 'scn' && !PW.drag) loadScnPresets(); }, 5000);
+setInterval(() => { const scnOn = $('[data-tab="scn"]').classList.contains('on'); if (scnOn || curGroup === 'dash') loadRealism(); if (scnOn && !PW.drag) loadScnPresets(); }, 5000);
 $('#recStart').onclick = async () => { const r = await post('/control/record', { action: 'start', name: $('#recName').value.trim() }); toast(`녹화 시작: ${r.name}`); loadRealism(); };
 $('#recStop').onclick = async () => { const r = await post('/control/record', { action: 'stop', save: true }); toast(r.saved ? `저장: scenarios/${r.saved} (${r.items}단계)` : '녹화된 조작이 없습니다'); loadRealism(); loadScripts(); };
 async function loadLabelSummary() {
@@ -2883,7 +2895,8 @@ $$('.help').forEach(hp => {
   const LABEL = { now: '적용 시 반영', rebuild: '적용 시 재구성', bank: '파형 재생성 필요' };
   $$('.card[data-apply]').forEach(cd => {
     const h3 = cd.querySelector('h3'); if (!h3 || h3.querySelector('.apply')) return;
-    const b = document.createElement('span'); b.className = 'apply ' + cd.dataset.apply; b.textContent = LABEL[cd.dataset.apply] || '';
+    const inScn = !!cd.closest('section[data-tab="scn"]');                // 시나리오 탭만 [적용] 방식, 나머지는 즉시 / [재구성]
+    const b = document.createElement('span'); b.className = 'apply ' + cd.dataset.apply; b.textContent = inScn ? (LABEL[cd.dataset.apply] || '') : ({ now: '즉시 반영', rebuild: '재구성 필요' }[cd.dataset.apply] || LABEL[cd.dataset.apply] || '');
     const right = h3.querySelector('.right'); if (right) h3.insertBefore(b, right); else h3.appendChild(b);
   });
 })();

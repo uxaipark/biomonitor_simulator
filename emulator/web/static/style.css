@@ -1008,3 +1008,8 @@ label.chk.sub-opt{padding-left:26px}
 .fsdel{flex:none;width:24px;height:24px;min-height:0;padding:0;border:none;background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
 .fsdel:hover{color:var(--err)}
 .fsbox.drop{outline:2px dashed var(--acc);outline-offset:-6px}
+
+/* 에뮬레이터 설정: 하위 메뉴 · 구조 설정 페이지 */
+.emuseg{margin-bottom:2px}
+.structgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
+@media (max-width:900px){ .structgrid{grid-template-columns:1fr} }
