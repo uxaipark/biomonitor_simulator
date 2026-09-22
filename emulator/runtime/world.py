@@ -652,7 +652,7 @@ class World:
         row = rec["row"]
         if rec["outpatient"]:
             gw = rec["mobile_gw"]
-            ok = gw >= 0 and G["status"][gw] != 2 and rec["home_state"] != "shadow" and not rec.get("batt_dead")   # 교체 안 함 설정의 방전 패치는 원외도 전송 중지
+            ok = gw >= 0 and G["status"][gw] != 2 and rec["home_state"] != "shadow" and not rec.get("batt_dead") and not rec.get("ft_nolink")   # 교체 안 함 설정의 방전 패치 · 현장 테스트 신호 끊김이면 원외도 전송 중지
             new = gw if ok else -1
             rssi = -55 - (25 if rec["home_state"] == "outside" else 0) + self.rng.normal(0, 3)
         else:
@@ -660,7 +660,7 @@ class World:
             rssi = -100
             rf = self.cfg.get("scenario", "rf_noise", default={}) or {}
             rfl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") and (self.cfg.get("scenario", "network", default={}) or {}).get("enabled") else 0.0
-            if rec["location"] >= 0 and not rec["shadow"] and not rec.get("batt_dead") and not (rec.get("rf_drop_until", 0) > self.sim_time):   # 전파 방해로 BLE 가 잠깐 끊긴 동안은 미연결
+            if rec["location"] >= 0 and not rec["shadow"] and not rec.get("batt_dead") and not (rec.get("rf_drop_until", 0) > self.sim_time) and not rec.get("ft_nolink"):   # 전파 방해로 BLE 가 잠깐 끊긴 동안 · 현장 테스트 신호 끊김 동안은 미연결
                 cands = h.candidate_gateways(rec["location"])
                 for gw in cands[:6]:
                     gw = int(gw)
@@ -1212,7 +1212,7 @@ class World:
             prof = self.by_id[pid]
             if drain:
                 patch.battery = max(0.0, patch.battery - drain)
-            ft_lb = rec.get("ft_lowbatt_until", 0.0) > now                  # 현장 테스트: 배터리 부족 표시
+            ft_lb = bool(rec.get("ft_lowbatt"))                              # 현장 테스트: 배터리 부족 표시 (테스트가 풀 때 지움)
             P["battery"][row] = 8 if ft_lb else int(patch.battery)
             f = int(P["flags"][row])
             f = (f | FLAG_LOW_BATT) if patch.battery < 15 or ft_lb else (f & ~FLAG_LOW_BATT)
@@ -2248,9 +2248,12 @@ class World:
                 self.real.record(what, target, params)                        # 녹화 중이면 시뮬 시각과 함께 기록
             if what == "fieldtest":                                        # 현장 테스트: 게이트웨이의 환자에게 이벤트
                 pid = params.get("patient_id")
-                return self.ft.inject(int(target), str(params.get("event")), int(pid) if pid not in (None, "") else None, float(params.get("duration", 60)))["message"]
-            if what == "fieldtest_clear":
-                return f"cleared {self.ft.clear(params.get('id'), target)}"
+                r = self.ft.inject(int(target) if target is not None else -1, str(params.get("event")), int(pid) if pid not in (None, "") else None,
+                                   float(params.get("duration", 60)))
+                return r.get("message") or r.get("error") or "failed"      # 실패(환자 없음 등)는 message 없이 error 만 온다
+            if what == "fieldtest_clear":                                  # 녹화 재생: 실행마다 바뀌는 id 대신 (게이트웨이·환자·이벤트)로 맞춘다
+                pid = params.get("patient_id")
+                return f"cleared {self.ft.clear(params.get('id'), target, int(pid) if pid not in (None, '') else None, params.get('event'))}"
             if what == "config":                                           # 녹화 재생: 설정 변경 (구조 설정은 재구성이 필요해 제외)
                 self.cfg.update(params, source="script"); self.apply_config()
                 return "config applied"

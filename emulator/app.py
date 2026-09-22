@@ -445,12 +445,12 @@ def fieldtest_status():
 def fieldtest_inject(body: dict):
     """{gw: 게이트웨이 row, event, patient_id: null=그 게이트웨이의 환자 전체, duration: 초}.  시간이 지나면 정상 복귀."""
     w = E().world
-    if w.real and w.real.recording is not None:                          # 녹화 중이면 재생할 수 있게 트리거로 남김
-        w.trigger("fieldtest", int(body.get("gw", -1)), {"event": body.get("event"), "patient_id": body.get("patient_id"), "duration": body.get("duration", 60)})
-        return {"ok": True, "message": "녹화 중: 트리거로 실행"}
+    gw, pid = int(body.get("gw", -1)), body.get("patient_id")
     with w.lock:
-        pid = body.get("patient_id")
-        return w.ft.inject(int(body.get("gw", -1)), str(body.get("event", "")), int(pid) if pid not in (None, "") else None, float(body.get("duration", 60)))
+        r = w.ft.inject(gw, str(body.get("event", "")), int(pid) if pid not in (None, "") else None, float(body.get("duration", 60)))
+        if r.get("ok") and w.real and w.real.recording is not None:     # 녹화 중이면 재생할 수 있게 트리거로 남김 (보내지 못한 요청은 남기지 않음)
+            w.real.record("fieldtest", gw, {"event": body.get("event"), "patient_id": pid, "duration": body.get("duration", 60)})
+        return r
 
 
 @app.post("/api/v1/fieldtest/clear")
@@ -459,6 +459,9 @@ def fieldtest_clear(body: dict | None = None):
     w = E().world
     b = body or {}
     with w.lock:
+        if w.real and w.real.recording is not None:                      # 녹화 중이면 재생 때도 같은 시각에 풀리게: 실행마다 바뀌는 id 대신 (게이트웨이·환자·이벤트)로 남김
+            for a in w.ft.matching(b.get("id"), b.get("gw")):
+                w.real.record("fieldtest_clear", a["gw"], {"patient_id": a["pid"], "event": a["ev"]})
         return {"cleared": w.ft.clear(b.get("id"), b.get("gw"))}
 
 

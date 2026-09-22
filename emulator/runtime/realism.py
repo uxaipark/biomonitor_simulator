@@ -395,16 +395,23 @@ class Realism:
             d = rec["deter"]
             self._label_add("deterioration", DETER[d["kind"]]["label"], patient_id=pid, patch_id=self._patch_id(rec), t0=d["label_t0"], t1=time.time(), meta={"kind": d["kind"]})
             rec["deter"] = None
-        if self._busy(pid, rec):                                          # 코드블루 중 현장 테스트가 걸렸으면 리듬은 테스트가 정한다
-            pass
-        elif cb["rosc"]:
-            rec["episode_until"] = w.sim_time + 1800                      # 자발순환 회복: 30분 동빈맥 뒤 기저 리듬
-            w._switch_variant(rec["row"], w._variant_for("sinus_tachy", prof["age"]), w._tick_now())
-            w._set_activity(rec, "still", 1800, 0.02, "supine")
-            w.log.add("clinical", f"{prof['name']} 자발순환 회복(ROSC) — 동빈맥, 집중 관찰", patient_id=pid)
-        else:
+        if not cb["rosc"]:                                                # 사망은 어떤 테스트·슬롯 중이어도 라벨대로 퇴원
             w.log.add("clinical", f"{prof['name']} 소생술 중단 — 사망", patient_id=pid)
             w.discharge(pid, "사망 (코드블루)")
+            return
+        ft = getattr(w, "ft", None)
+        if ft is not None and ft.holds_rhythm(pid):                       # 현장 테스트 리듬이 이어진다: 테스트가 끝나면 기저 리듬
+            what = "현장 테스트 리듬 유지"
+        elif "rs_paced" in rec:                                           # 실제 시그널 슬롯이 리듬을 정한다: 슬롯에서 빠질 때 심실세동이 남지 않게
+            rec["episode_until"] = 0.0
+            w._switch_variant(rec["row"], rec["base_variant"], w._tick_now())
+            what = "실제 시그널 슬롯 유지"
+        else:
+            rec["episode_until"] = w.sim_time + 1800                      # 자발순환 회복: 30분 동빈맥 뒤 기저 리듬
+            w._switch_variant(rec["row"], w._variant_for("sinus_tachy", prof["age"]), w._tick_now())
+            what = "동빈맥"
+        w._set_activity(rec, "still", 1800, 0.02, "supine")
+        w.log.add("clinical", f"{prof['name']} 자발순환 회복(ROSC) — {what}, 집중 관찰", patient_id=pid)
 
     # ======================================================================= 6. MCOT 단말
     def region_factor(self, prof: dict) -> float:
