@@ -88,7 +88,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "resend_keep_mb": 64,          # ... bounded per worker
         "max_send_backlog_bytes": 262144,
         "reconnect_interval_s": 3.0,
-        "router_status_url": "",       # optional: GET url of router status (part 2)
+        "router_status_url": "",       # retired: the router pushes its status to POST /api/v1/router/status
         # ---- router test drills
         "store_forward": {"enabled": True, "max_bytes_per_gw": 2097152, "burst_frames_per_cycle": 40},   # buffer frames while down/offline, replay in bursts after reconnect
         "fuzz": {"enabled": False, "rate_per_1000": 5,                                                  # corrupt frames on purpose (parser robustness)
@@ -99,7 +99,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hospital": {
         "template": "auto",            # auto (by bed capacity) or one of layout.TEMPLATES
         "layout_file": "",             # optional imported layout JSON (data/layout_import.json)
-        "size_by_patients": True,      # size the generated hospital to the scenario: beds = active_patients / (1 - headroom), 1..3 buildings
+        "size_by_patients": False,     # retired: hospital size comes from bed_capacity only (forced False in normalisation)
         "headroom_pct": 20,            # free beds kept on top of the monitored patients (20 % -> patients fill 80 % of the beds)
         "max_buildings": 3,
     },
@@ -272,8 +272,8 @@ class Config:
         t["gw_status_every_n_frames"] = int(max(1, min(1000, t["gw_status_every_n_frames"])))
         t["workers"] = int(max(0, min(16, t["workers"])))
         t["target_port"] = int(max(1, min(65535, t["target_port"])))
-        if t["socket_mode"] not in ("per_gateway", "shared"):
-            t["socket_mode"] = "per_gateway"
+        # 워커당 1 소켓(다중화)은 현장에 없는 구성이라 UI에서 뺐다: 디지털 트윈은 게이트웨이당 1 소켓으로 고정
+        t["socket_mode"] = "per_gateway"
         sf = t.setdefault("store_forward", {})
         sf["enabled"] = bool(sf.get("enabled", True))
         sf["max_bytes_per_gw"] = int(max(65536, min(64 * 1024 * 1024, sf.get("max_bytes_per_gw", 2097152))))
@@ -287,7 +287,7 @@ class Config:
         hp = d.setdefault("hospital", {"template": "auto", "layout_file": ""})
         hp.setdefault("template", "auto")
         hp.setdefault("layout_file", "")
-        hp["size_by_patients"] = bool(hp.get("size_by_patients", True))
+        hp["size_by_patients"] = False       # 병원 규모는 bed_capacity 로만 정한다 (자동 규모 옵션은 GUI 개편 때 제거)
         hp["headroom_pct"] = float(max(0.0, min(60.0, hp.get("headroom_pct", 20) or 0)))
         hp["max_buildings"] = int(max(1, min(8, hp.get("max_buildings", 3) or 3)))
         sc = d["scenario"]

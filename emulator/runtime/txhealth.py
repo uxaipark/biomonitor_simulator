@@ -37,8 +37,9 @@ class TxHealth:
     def update(self, s: dict, now: float) -> list[tuple[str, str]]:
         """s = engine.stats(history=False).  Returns [(level, message)] with level in info|warn|error."""
         out: list[tuple[str, str]] = []
-        if not s.get("running"):
-            self.reset()
+        tgt0 = s.get("target") or {}
+        if not s.get("running") or s.get("generate_only") or not tgt0.get("ip"):
+            self.reset()                                              # 정지 · 생성만 모드: 송출 자체가 없으니 장애도 없다
             return out
         last = s.get("last") or {}
         t = last.get("total") or {}
@@ -46,6 +47,7 @@ class TxHealth:
         where = f'{tgt.get("ip")}:{tgt.get("port")}'
         conn = int(t.get("connected", 0) or 0)
         gws = int(s.get("gateways", 0) or 0)
+        act = int(s.get("gw_active", 0) or 0) or gws                 # 대기 중인 MCOT 모바일 GW 는 원래 연결되지 않는다
 
         if self.prev is None or gws != self.gws:                     # 첫 표본이거나 병원이 재구축됨: 기준만 잡는다
             self.prev, self.gws, self.peak, self.acc_t = t, gws, conn, now
@@ -58,21 +60,21 @@ class TxHealth:
             self.zero_since = self.zero_since or now
             if not self.down and now - self.zero_since >= DOWN_AFTER:
                 self.down = True
-                out.append(("error", f"송출 대상 {where} 접속 불가 — 연결된 게이트웨이 0/{gws}"))
+                out.append(("error", f"송출 대상 {where} 접속 불가 — 연결된 게이트웨이 0/{act}"))
         else:
             self.zero_since = None
             if self.down:
                 self.down = False
                 self.degraded = True                                  # 다 붙을 때까지 정상화 보고를 기다린다
-                out.append(("info", f"송출 재개 — 연결 {conn}/{gws}"))
+                out.append(("info", f"송출 재개 — 연결 {conn}/{act}"))
 
         # ---- 대량 끊김 / 정상화
         if not self.down and pconn - conn >= max(20, 0.10 * self.peak):
             self.degraded = True
-            out.append(("warn", f"회선 대량 끊김 {pconn} → {conn} (게이트웨이 {gws})"))
+            out.append(("warn", f"회선 대량 끊김 {pconn} → {conn} (활성 게이트웨이 {act})"))
         if self.degraded and self.peak and conn >= 0.95 * self.peak:
             self.degraded = False
-            out.append(("info", f"회선 정상화 — 연결 {conn}/{gws}"))
+            out.append(("info", f"회선 정상화 — 연결 {conn}/{act}"))
         self.peak = max(self.peak, conn)
 
         # ---- 누적 카운터 (카운터가 줄면 재시작으로 보고 새 값부터)
@@ -109,7 +111,7 @@ class TxHealth:
             if loss:
                 out.append(("error", f"데이터 유실 (최근 {span}초): " + ", ".join(f"{n} {v:,}" for n, v in loss) + " 프레임"))
             if a["send_err"] and not self.down:                       # 접속 불가 중의 송신 오류는 위 한 줄이 이미 설명한다
-                out.append(("warn", f"송신 오류 {a['send_err']:,}회 (최근 {span}초, 연결 {conn}/{gws})"))
+                out.append(("warn", f"송신 오류 {a['send_err']:,}회 (최근 {span}초, 연결 {conn}/{act})"))
             if a["overruns"]:
                 out.append(("warn", f"워커 오버런 {a['overruns']:,}회 (최근 {span}초) — 프레임 주기를 못 맞춤"))
             self.acc = {k: 0 for k in self.acc}

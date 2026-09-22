@@ -281,7 +281,7 @@ class Engine:
                 "world_step_ms": round(getattr(self, "world_step_ms", 0.0), 2), "world_step_max_ms": round(getattr(self, "world_step_max_ms", 0.0), 2),
                 "counters": dict(w.counters), "admitted": len(w.admitted), "inpatients": sum(1 for r in w.admitted.values() if not r["outpatient"]),
                 "outpatients": sum(1 for r in w.admitted.values() if r["outpatient"]), "bed_capacity": w.hospital.bed_capacity,
-                "gateways": len(w.hospital.gateways), "sim_time": w.sim_time, "autotune": w.autotune,
+                "gateways": len(w.hospital.gateways), "gw_active": int((st.gw["active"] > 0).sum()), "sim_time": w.sim_time, "autotune": w.autotune,
                 "bank": {"loaded": self.bank.loaded, "variants": int(self.bank.ecg.shape[0]) if self.bank.loaded else 0, "size_mb": round(self.bank.size_bytes() / 1e6, 1),
                          "progress": self.bank.progress, "ready": self.bank.is_ready()},
                 "tick": w._tick_now() if self.running else 0, "chan_mask": int(st.ctl[CTL["chan_mask"]]), "n_workers": int(st.ctl[CTL["n_workers"]])}

@@ -114,24 +114,65 @@ let curPaced = '', CFG = null, META = null, STATS = null, curRow = -1, curPid = 
 // ---------------------------------------------------------------- tabs
 const tabs = $$('section.tab');
 const nav = $('#tabs'), sel = $('#tabSelect');
-tabs.forEach(t => {
-  const b = document.createElement('button'); b.textContent = t.dataset.title; b.dataset.tab = t.dataset.tab; nav.appendChild(b);
-  const o = document.createElement('option'); o.value = t.dataset.tab; o.textContent = '메뉴: ' + t.dataset.title; sel.appendChild(o);
+// 메뉴는 7개 묶음이다. 섹션(data-tab)은 그대로 두고 묶음이 여러 섹션을 함께 보여준다 —
+// 기존 코드의 `[data-tab="sig"].on` 같은 가시성 검사가 그대로 동작하게 하려는 것.
+const TAB_GROUPS = [
+  { id: 'dash', title: '운영 현황', show: ['dash'] },
+  { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
+  { id: 'hosp', title: '병원', show: ['hosp'] },
+  { id: 'scn', title: '시나리오', show: ['scn'] },
+  { id: 'tx', title: '송출', show: ['tx'] },
+  { id: 'log', title: '로그', show: ['log'] },
+  { id: 'data', title: '설정·데이터', show: ['data'] },
+];
+const HELP_GROUP = { id: 'help', title: '도움말', show: ['guide', 'proto'] };
+const GROUP_OF = { chat: 'log' };
+[...TAB_GROUPS, HELP_GROUP].forEach(g => { GROUP_OF[g.id] = g.id; g.show.forEach(sid => { GROUP_OF[sid] = g.id; }); });
+let curGroup = 'dash', prevGroup = 'dash';
+TAB_GROUPS.forEach(g => {
+  const b = document.createElement('button'); b.textContent = g.title; b.dataset.tab = g.id; nav.appendChild(b);
+  const o = document.createElement('option'); o.value = g.id; o.textContent = '메뉴: ' + g.title; sel.appendChild(o);
 });
+{ const o = document.createElement('option'); o.value = 'help'; o.textContent = '메뉴: 도움말'; sel.appendChild(o); }
+let logView = 'tx'; try { logView = localStorage.getItem('logView') || 'tx'; } catch (e) { }
+function updateLinkPolling() {
+  const on = curGroup === 'dash' || (curGroup === 'log' && logView === 'chat');
+  if (on) linkStart(); else linkStop();
+}
+function showLogView(v) {
+  logView = v; try { localStorage.setItem('logView', v); } catch (e) { }
+  $$('#logSeg button').forEach(b => b.classList.toggle('on', b.dataset.lv === v));
+  $('#logEvCard').hidden = !(v === 'tx' || v === 'ev');
+  $('#cfgHistCard').hidden = v !== 'cfg';
+  $('[data-tab="chat"]').classList.toggle('on', curGroup === 'log' && v === 'chat');
+  if (v === 'tx' || v === 'ev') { $('#logFilter').value = v === 'tx' ? 'tx' : ''; syncDropdowns(); renderLog(); }
+  if (v === 'cfg') loadConfigHistory();
+  if (v === 'chat') chatOpen();
+  updateLinkPolling();
+}
 function showTab(id) {
-  tabs.forEach(t => t.classList.toggle('on', t.dataset.tab === id));
-  $$('button', nav).forEach(b => b.classList.toggle('on', b.dataset.tab === id));
-  sel.value = id; syncDropdowns(); try { localStorage.setItem('tab', id); } catch (e) { }
-  if (id === 'hosp') { loadFloor(); drawElevation(); }
-  if (id === 'proto') loadProto();
-  if (id === 'pat') loadPatients();
-  if (id === 'log') renderLog();
-  if (id === 'data') { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); loadConfigHistory(); }
-  if (id === 'scn' || id === 'tx') loadScripts();
-  if (id === 'scn') loadDevices();
-  if (id === 'chat') { chatOpen(); linkStart(); } else linkStop();
+  const gid = GROUP_OF[id] || 'dash';
+  const g = gid === 'help' ? HELP_GROUP : (TAB_GROUPS.find(x => x.id === gid) || TAB_GROUPS[0]);
+  if (g.id !== curGroup) prevGroup = curGroup;
+  curGroup = g.id;
+  if (id === 'chat') logView = 'chat';
+  const shown = new Set(g.show);
+  tabs.forEach(t => t.classList.toggle('on', shown.has(t.dataset.tab)));
+  document.querySelector('main').dataset.grp = g.id;
+  $$('button', nav).forEach(b => b.classList.toggle('on', b.dataset.tab === g.id));
+  $('#btnHelp').classList.toggle('on', g.id === 'help');
+  sel.value = g.id; syncDropdowns(); try { localStorage.setItem('tab', g.id); } catch (e) { }
+  if (shown.has('hosp')) { loadFloor(); drawElevation(); }
+  if (shown.has('proto')) loadProto();
+  if (shown.has('pat')) loadPatients();
+  if (shown.has('data')) { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); }
+  if (shown.has('scn') || shown.has('tx')) loadScripts();
+  if (shown.has('scn')) loadDevices();
+  if (shown.has('log')) showLogView(logView); else { $('[data-tab="chat"]').classList.remove('on'); updateLinkPolling(); }
 }
 nav.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
+$('#logSeg').addEventListener('click', e => { const b = e.target.closest('button[data-lv]'); if (b) showLogView(b.dataset.lv); });
+$('#btnHelp').onclick = () => showTab(curGroup === 'help' ? (prevGroup || 'dash') : 'help');
 sel.addEventListener('change', () => showTab(sel.value));
 let initTab = 'dash'; try { initTab = localStorage.getItem('tab') || 'dash'; } catch (e) { }
 
@@ -203,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (t) t.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatSend(); } });
 });
 
-// 채팅 탭의 송수신 로그 스트립: 양쪽 누적 카운터를 받아 차분으로 초당 값을 만든다.
+// 로그 탭 라우터 채팅의 송수신 로그 스트립: 양쪽 누적 카운터를 받아 차분으로 초당 값을 만든다.
 // 라우터는 /api/v1/router/status 로 5초마다 같은 요약을 보내므로 .209 를 직접 부르지 않는다.
 let linkPrev = null, linkTimer = null;
 const nfmt = cnum;
@@ -267,9 +308,9 @@ const B = {  // element id -> config path
   s_site: ['scenario', 'site'], s_ep: ['scenario', 'rhythm_episodes'], s_hop: ['scenario', 'variant_hopping'], s_devpol: ['scenario', 'devices', 'policy'], d_mf: ['scenario', 'devices', 'spo2_mix', 'fingertip'], d_mr: ['scenario', 'devices', 'spo2_mix', 'ring'], d_mw: ['scenario', 'devices', 'spo2_mix', 'wrist_ptt'], n_en: ['scenario', 'network', 'enabled'], n_int: ['scenario', 'network', 'intensity'], n_wl: ['scenario', 'network', 'wireless_noise'], n_wd: ['scenario', 'network', 'wired_failure'], n_lat: ['scenario', 'network', 'latency'], n_pw: ['scenario', 'network', 'power_outage'],
   x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_re: ['scenario', 'artifacts', 'patch_reattach'], a_tr: ['scenario', 'artifacts', 'transfer'], a_rp: ['scenario', 'artifacts', 'patch_replace'], a_hm: ['scenario', 'artifacts', 'home_interference'],
   p_days: ['scenario', 'patch', 'battery_days'], p_rep: ['scenario', 'patch', 'replace_below_pct'], p_dr: ['scenario', 'patch', 'battery_drain_enabled'], p_lo: ['scenario', 'patch', 'lead_off_enabled'],
-  h_tpl: ['hospital', 'template'], h_size: ['hospital', 'size_by_patients'], h_head: ['hospital', 'headroom_pct'], h_maxb: ['hospital', 'max_buildings'], gw_f: ['scenario', 'gateway', 'fault_enabled'], gw_out: ['scenario', 'gateway', 'outage'], gw_deg: ['scenario', 'gateway', 'degrade'], gw_rep: ['scenario', 'gateway', 'replace'], gw_int: ['scenario', 'gateway', 'fault_intensity'], gw_cap: ['scenario', 'gateway', 'capacity'], gw_cor: ['scenario', 'gateway', 'corridor_gateways'],
-  t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_mode: ['transport', 'socket_mode'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
-  t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], t_router: ['transport', 'router_status_url'],
+  h_tpl: ['hospital', 'template'], h_maxb: ['hospital', 'max_buildings'], gw_f: ['scenario', 'gateway', 'fault_enabled'], gw_out: ['scenario', 'gateway', 'outage'], gw_deg: ['scenario', 'gateway', 'degrade'], gw_rep: ['scenario', 'gateway', 'replace'], gw_int: ['scenario', 'gateway', 'fault_intensity'], gw_cap: ['scenario', 'gateway', 'capacity'], gw_cor: ['scenario', 'gateway', 'corridor_gateways'],
+  t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
+  t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
   sf_en: ['transport', 'store_forward', 'enabled'], sf_max: ['transport', 'store_forward', 'max_bytes_per_gw'], sf_burst: ['transport', 'store_forward', 'burst_frames_per_cycle'],
   fz_en: ['transport', 'fuzz', 'enabled'], fz_rate: ['transport', 'fuzz', 'rate_per_1000'], t_storm: ['transport', 'storm_smoothing'], cap_en: ['transport', 'capture', 'enabled'],
   selRespSrc: ['signals', 'resp_source'], selEcgFs: ['signals', 'ecg_fs'], s_vpr: ['signals', 'variants_per_rhythm'], s_pm: ['signals', 'pacemaker_ratio'],
@@ -277,6 +318,7 @@ const B = {  // element id -> config path
 const getPath = (o, p) => p.reduce((a, k) => (a == null ? undefined : a[k]), o);
 const setPath = (o, p, v) => { let c = o; for (let i = 0; i < p.length - 1; i++) { c[p[i]] = c[p[i]] || {}; c = c[p[i]]; } c[p[p.length - 1]] = v; return o; };
 function fillForm() {
+  const li = $('#layoutImported'); if (li) li.hidden = !(CFG.hospital && CFG.hospital.layout_file);
   for (const [id, p] of Object.entries(B)) {
     const el = document.getElementById(id); if (!el) continue;
     const v = getPath(CFG, p);
@@ -296,7 +338,7 @@ async function flush() {
   const body = pending; pending = {}; if (!Object.keys(body).length) return;
   try {
     const r = await patch(body); CFG = r.config;
-    if (r.needs_rebuild) toast('구조 설정 변경: 시나리오 탭 병원 도면 [재생성]으로 반영');
+    if (r.needs_rebuild) toast('구조 설정 변경: [재구성]을 눌러 반영');
     else if (r.needs_generate) toast('샘플링/변형 설정 변경: [루프 은행 재생성] 필요');
     else toast('설정 반영');
   } catch (e) { toast('설정 실패: ' + e.message); }
@@ -340,7 +382,12 @@ function renderChips() {
 }
 $('#btnStart').onclick = async () => { const r = await post('/control/start'); toast(r.result); refresh(); };
 $('#btnStop').onclick = async () => { const r = await post('/control/stop'); toast(r.result); refresh(); };
-$('#btnRebuild').onclick = async () => { toast('재구성 중...'); await post('/control/rebuild'); toast('재구성 완료'); await loadConfig(); loadPatientList(); };
+async function doRebuild() {
+  const ok = await askConfirm('재구성', '병상 수와 구조 설정을 반영해 병원·환자를 새로 구성합니다.\n재원 환자와 패치 상태가 초기화되고 전송이 잠시 멈춥니다.\n계속할까요?', '재구성');
+  if (!ok) return;
+  toast('재구성 중...'); await post('/control/rebuild'); toast('재구성 완료 · 새로고침'); setTimeout(() => location.reload(), 400);
+}
+$('#btnRebuild').onclick = doRebuild; $('#btnRebuild2').onclick = doRebuild;
 $('#btnGen2').onclick = async () => { const r = await post('/control/generate'); toast('루프 생성: ' + r.result); };
 $('#btnReset').onclick = async () => { await post('/config/reset'); await loadConfig(); toast('기본값 복원 (재구성 필요)'); };
 $('#btnAtStart').onclick = async () => { const r = await post('/control/autotune', { action: 'start', step: Number($('#at_step').value), window_s: Number($('#at_win').value) }); toast(r.result); };
@@ -419,15 +466,43 @@ function drawSpark(cv, data, color) {
   data.forEach((v, i) => { const x = i / (data.length - 1) * w, y = h - 3 - v / mx * (h - 8); i ? g.lineTo(x, y) : g.moveTo(x, y); });
   g.stroke(); g.fillStyle = TH().muted; g.font = '11px sans-serif'; g.fillText(fmt(mx, 0), 4, 12);
 }
-function kpi(l, v, cls = '', full = '') { return `<div class="kpi ${cls}"${full ? ` title="${full}"` : ''}><div class="v">${v}</div><div class="l">${l}</div></div>`; }
+// 송출 상태: 연결 기준은 전체 게이트웨이가 아니라 활성 게이트웨이(대기 중인 MCOT 모바일 GW 제외)
+function renderTxHealth(s, L, T) {
+  const act = s.gw_active || s.gateways || 0, con = T.connected || 0;
+  const loss = (T.drop_noconn || 0) + (T.drop_backlog || 0) + (T.drop_saf || 0);
+  const tgt = s.target && s.target.ip ? `${s.target.ip}:${s.target.port}` : '';
+  const st = !s.running ? '' : s.generate_only || !tgt ? 'idle' : con === 0 ? 'err' : (con < act * 0.95 || T.saf_bytes) ? 'warn' : 'ok';
+  const word = { '': '정지', idle: '생성만', err: '단절', warn: '저하', ok: '정상' }[st];
+  $('#pillLink').className = 'pill ' + ({ ok: 'run', warn: 'warn', err: 'err' }[st] || '');
+  $('#linkTxt').textContent = !s.running ? '송출 정지' : !tgt ? '송출 대상 없음' : `송출 ${word} · ${cnum(con)}/${cnum(act)}`;
+  $('#pillLink').title = tgt ? `송신 대상 ${tgt}` : '송신 대상 없음 (생성만)';
+  const ht = $('#txHealthTarget'); if (!ht) return;
+  ht.textContent = tgt ? `→ ${tgt} · ${word}` : '송신 대상 없음 (생성만)';
+  $('#txHealthKpis').innerHTML =
+    kpi('연결 게이트웨이', `${cnum(con)} / ${cnum(act)}`, { ok: 'ok', warn: 'warn', err: 'err' }[st] || '', `${exact(con)} / ${exact(act)} (전체 ${exact(s.gateways)})`) +
+    kpi('유실 프레임', cnum(loss), loss ? 'err' : 'ok', `미연결 ${exact(T.drop_noconn)} · 적체 ${exact(T.drop_backlog)} · SAF 초과 ${exact(T.drop_saf)}`) +
+    kpi('송신 오류', cnum(T.send_err), T.send_err ? 'warn' : '', exact(T.send_err)) +
+    kpi('저장 후 전송', T.saf_bytes ? `${cbytes(T.saf_bytes)} · ${cnum(T.saf_gateways)} GW` : '없음', T.saf_bytes ? 'warn' : '') +
+    kpi('틱 오버런', cnum(T.overruns), T.overruns ? 'warn' : '', exact(T.overruns));
+}
+function renderTxHealthEvents() {
+  const box = $('#txHealthEvents'); if (!box) return;
+  const ev = evAll.filter(e => e.kind === 'tx').slice(-6).reverse();
+  box.innerHTML = ev.length ? ev.map(e => `<div class="ev tx lvl-${e.level || ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${{ error: '오류', warn: '경고', info: '복구' }[e.level] || e.kind}</span><span>${e.msg}</span></div>`).join('')
+    : '<div class="sub">기록 없음 — 송출이 끊기거나 유실이 생기면 여기에 남습니다</div>';
+}
+// 값 뒤의 단위(KB/s, GB, %)는 작게 — 숫자는 크게 보이고 칸은 넘지 않게
+const kpiVal = (v) => { const m = typeof v === 'string' && v.match(/^(-?[\d.,]+[KMGT]?)(?:(%)|\s+([A-Za-z]+(?:\/s)?))$/); return m ? `${m[1]}<small>${m[2] ? '%' : ' ' + m[3]}</small>` : v; };
+function kpi(l, v, cls = '', full = '') { return `<div class="kpi ${cls}"${full ? ` title="${full}"` : ''}><div class="v">${kpiVal(v)}</div><div class="l">${l}</div></div>`; }
 async function refresh() {
   try { STATS = await api('/status'); } catch (e) { $('#runPill').className = 'pill err'; $('#runTxt').textContent = '서버 연결 실패'; return; }
   const s = STATS, L = s.last || {}, T = L.total || {};
   $('#runPill').className = 'pill ' + (s.running ? (s.generate_only || (T.connected || 0) > 0 ? 'run' : 'err') : '');
   $('#btnStart').disabled = s.running; $('#btnStop').disabled = !s.running;
   $('#btnStart').classList.toggle('live', s.running); $('#btnStop').classList.toggle('live', !s.running);
-  $('#btnStart').textContent = s.running ? '● 실행 중' : '▶ 시작'; $('#runTxt').textContent = s.running ? (s.generate_only ? '실행 중 (생성만, 전송 없음)' : `전송 중 → ${s.target.ip}:${s.target.port} · TCP ${fmt(T.connected)}/${fmt(s.gateways)}`) : '정지';
+  $('#btnStart').textContent = s.running ? '● 실행 중' : '▶ 시작'; $('#runTxt').textContent = s.running ? (s.generate_only ? '실행 중 (생성만, 전송 없음)' : `전송 중 → ${s.target.ip}:${s.target.port}`) : '정지';
   $('#pillPat').textContent = `환자 ${s.admitted} / 패치 연결 ${L.active_patches ?? 0}`;
+  renderTxHealth(s, L, T);
   $('#pillRate').textContent = `${cnum(L.pkts_ps)} pkt/s · ${cbytes(L.bytes_ps)}/s`;
   if (CFG) {
     const net = CFG.scenario.network.enabled, art = CFG.scenario.artifacts.enabled;
@@ -449,8 +524,8 @@ async function refresh() {
   const bundleUs = (CFG ? CFG.transport.bundle_ms : 200) * 1000; const load = (build + send) / bundleUs * 100;
   $('#kpis').innerHTML = kpi('입원 환자', fmt(s.inpatients)) + kpi('MCOT 환자', fmt(s.outpatients)) + kpi('패치 스트리밍', fmt(L.active_patches), 'ok') + kpi('연결 끊김 패치', fmt(L.unlinked_patches), L.unlinked_patches ? 'warn' : '') +
     kpi('게이트웨이', `${fmt(s.gateways)}`) + kpi('GW 장애 / 저하', `${fmt(L.gw_down)} / ${fmt(L.gw_degraded)}`, L.gw_down ? 'err' : '') + kpi('pkt/s', cnum(L.pkts_ps), 'ok', exact(L.pkts_ps)) + kpi('전송률', cbytes(L.bytes_ps) + '/s') +
-    kpi('총 패킷', cnum(T.pkts), '', exact(T.pkts)) + kpi('총 전송량', cbytes(T.bytes), '', exact(T.bytes) + ' B') + kpi('에뮬 손실 pkt', cnum(T.drop_emul), '', exact(T.drop_emul)) + kpi('백로그 드롭', cnum(T.drop_backlog), T.drop_backlog ? 'err' : '', exact(T.drop_backlog)) +
-    kpi('TCP 연결 GW', cnum(T.connected)) + kpi('틱 오버런', cnum(T.overruns), T.overruns ? 'warn' : '', exact(T.overruns)) + kpi('워커 부하', fmt(load, 0) + '%', load > 70 ? 'err' : load > 40 ? 'warn' : 'ok') + kpi('bank 변형', fmt(s.bank.variants));
+    kpi('총 패킷', cnum(T.pkts), '', exact(T.pkts)) + kpi('총 전송량', cbytes(T.bytes), '', exact(T.bytes) + ' B') + kpi('에뮬 손실 pkt', cnum(T.drop_emul), '', exact(T.drop_emul)) + 
+    kpi('워커 부하', fmt(load, 0) + '%', load > 70 ? 'err' : load > 40 ? 'warn' : 'ok') + kpi('bank 변형', fmt(s.bank.variants));
   sparkP.push(L.pkts_ps || 0); sparkB.push((L.bytes_ps || 0) / 1024); if (sparkP.length > 120) { sparkP.shift(); sparkB.shift(); }
   drawSpark($('#sparkPkts'), sparkP, TH().acc); drawSpark($('#sparkBytes'), sparkB, TH().acc2);
   const b = s.bank, p = b.progress;
@@ -466,14 +541,19 @@ async function refresh() {
 async function pollEvents() {
   try {
     const r = await api('/events?since=' + lastEvSeq); if (!r.events.length) return;
-    evAll = evAll.concat(r.events).slice(-600); lastEvSeq = evAll[evAll.length - 1].seq;
+    evAll = evAll.concat(r.events).slice(-600); lastEvSeq = evAll[evAll.length - 1].seq; renderTxHealthEvents();
     const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join('');
     $('#dashEvents').innerHTML = html(evAll.slice(-40));
     if ($('[data-tab="log"]').classList.contains('on')) renderLog();
     if (r.events.some(e => e.kind === 'adt' || e.kind === 'system')) loadPatientList();
   } catch (e) { }
 }
-function renderLog() { const f = $('#logFilter').value; $('#logEvents').innerHTML = evAll.slice().reverse().filter(e => !f || e.kind === f).map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join(''); }
+const EVKIND_KO = { tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트' };
+function renderLog() {
+  const f = $('#logFilter').value, list = evAll.slice().reverse().filter(e => !f || e.kind === f);
+  $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind === 'tx' ? ({ error: '송출 오류', warn: '송출 경고', info: '송출 복구' }[e.level] || '송출') : (EVKIND_KO[e.kind] || e.kind)}</span><span>${e.msg}</span></div>`).join('')
+    : `<div class="sub" style="padding:10px 0">${f === 'tx' ? '송출 장애 기록이 없습니다. 송출이 끊기거나 프레임이 유실되면 여기와 시스템 저널([tx])에 남습니다.' : '표시할 이벤트가 없습니다.'}</div>`;
+}
 $('#logFilter').onchange = renderLog;
 
 // ---------------------------------------------------------------- signals / live
@@ -627,12 +707,14 @@ async function loadPatientList() {
 }
 $('#patSearch').addEventListener('input', loadPatientList);
 $('#selPatient').addEventListener('change', () => selectRow(Number($('#selPatient').value)));
-async function selectRow(row) {
+async function selectRow(row, fromDetail = false) {
   curRow = row; const p = patList.find(x => x.row === row); curPid = p ? p.id : null; curPaced = (p && p.pacemaker) ? ` · ⚡ ${p.pacemaker_type === 'icd' ? 'ICD (백업 페이싱만)' : p.pacemaker_mode + ' ' + (LEAD_KO[p.pacemaker_lead] || '')}` : '';
   $('#selPatient').value = row; syncDropdowns();
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ row })); else connectWs();
   Object.values(waves).forEach(resetWave);
   loadPatCard(); if (trendOpen) loadTrend();
+  const w = $('#sigWho'); if (w) w.textContent = p ? `${p.name} · ${p.bed || (p.outpatient ? '원외' : '')}` : '';
+  if (!fromDetail && curPid) showPatientDetail(curPid);
 }
 async function loadPatCard() {
   if (!curPid) return;
@@ -713,7 +795,8 @@ $('#patBody').addEventListener('click', e => { const tr = e.target.closest('.pro
 async function showPatientDetail(id) {                          // detail card for one patient (table row click, plan marker, moving list)
   $$('.prow', $('#patBody')).forEach(x => x.classList.toggle('sel', Number(x.dataset.id) === id));
   const p = await api('/emr/patients/' + id); const r = p.runtime; const a = p.admission;
-  $('#patDetail').innerHTML = `<h3>환자 상세</h3><div class="patient"><img src="/api/v1/emr/patients/${p.id}/avatar.svg"><div class="info"><b>${p.name}</b> <span class="sub">${p.sex === 'M' ? '남' : '여'} ${p.age}세 (${p.birth_date}) · ${p.nationality_label}</span><div>${a && a.patient_no ? `환자번호 #${a.patient_no} · ` : ''}${p.mrn} · 혈액형 ${p.blood_type} · ${p.height_cm}cm ${p.weight_kg}kg BMI ${p.bmi}</div><div>알레르기: ${p.allergies} · 동반질환: ${p.comorbidities.join(', ') || '없음'}</div><div>거주지: ${p.address ? p.address.label : '-'} · ${p.phone || ''}</div></div></div>
+  const X = $('#patExtra'); if (!X) return;
+  X.innerHTML = `<div class="xhead">입원 기록 · 위치 · 이력</div><div class="patient"><img src="/api/v1/emr/patients/${p.id}/avatar.svg"><div class="info"><b>${p.name}</b> <span class="sub">${p.sex === 'M' ? '남' : '여'} ${p.age}세 (${p.birth_date}) · ${p.nationality_label}</span><div>${a && a.patient_no ? `환자번호 #${a.patient_no} · ` : ''}${p.mrn} · 혈액형 ${p.blood_type} · ${p.height_cm}cm ${p.weight_kg}kg BMI ${p.bmi}</div><div>알레르기: ${p.allergies} · 동반질환: ${p.comorbidities.join(', ') || '없음'}</div><div>거주지: ${p.address ? p.address.label : '-'} · ${p.phone || ''}</div></div></div>
     <table style="margin-top:8px"><tr><td>주진단</td><td>${p.disease} (${p.icd10}) · ${p.ward_specialty}</td></tr><tr><td>페이스메이커</td><td>${pmSummary(p.pacemaker_info)}</td></tr>${r ? `<tr><td>기기 세트</td><td>${devChips(p, r)}</td></tr>` : ''}<tr><td>기저 리듬</td><td>${META.rhythms[p.rhythm].label}</td></tr>
     <tr><td>상태</td><td>${p.status}</td></tr>${a ? `<tr><td>입원</td><td>${a.time} · ${a.ward_name} ${a.bed || ''} · 담당의 ${a.doctor} · 간호사 ${a.nurse} · 패치 ${a.patch}</td></tr><tr><td>검사</td><td>${(a.exams || []).map(e => `${e.time} ${e.type} (${e.room}, ${e.duration_min}분${e.patch_policy === 'remove' ? ', 패치 분리' : ''})${e.done ? ' ✓' : ''}`).join('<br>') || '-'}</td></tr>` : ''}
     ${r ? `<tr><td>입원 병실</td><td><b>${r.home_where || ''}</b> · ${a ? a.ward_name : ''} · ${r.home_room ? `병실 ${r.home_room}` : '-'} · 침상 ${r.bed || (a && a.bed) || '-'}</td></tr>
@@ -725,9 +808,13 @@ async function showPatientDetail(id) {                          // detail card f
     ${p.history ? `<tr><td>이력</td><td>${p.history.map(h => `${h.discharged} ${h.reason} (패치 ${h.patch_returned} 반납)`).join('<br>')}</td></tr>` : ''}</table>
     ${r ? `<div class="wavebox" style="margin-top:10px"><canvas class="wave" id="wDetail"></canvas><span class="lbl">ECG (mV) · 실시간</span><span class="val" id="vDetailHr" style="color:var(--ecg)"></span></div>
     <div class="nums" style="grid-template-columns:repeat(4,1fr)"><div class="num hr"><div class="v" id="dHr">--</div><div class="l">HR</div></div><div class="num spo2"><div class="v" id="dSpo2">--</div><div class="l">SpO2</div></div><div class="num resp"><div class="v" id="dResp">--</div><div class="l">RR</div></div><div class="num temp"><div class="v" id="dTemp">--</div><div class="l">체온</div></div></div>
-    <div class="row tight" style="margin-top:8px"><button class="small" id="goLive">전체 신호 보기 (신호 탭)</button></div>` : ''}`;
+    <div class="row tight" style="margin-top:8px"><button class="small" id="goLive">전체 신호 보기 (모니터링 탭)</button></div>` : ''}`;
   const gl = $('#goLive'); if (gl) gl.onclick = () => { showTab('sig'); loadPatientList().then(() => selectRow(r.row)); };
-  if (r) { if (curRow !== r.row) selectRow(r.row); mkWave('wDetail', 'ecg', [-1.5, 2.0], CFG.signals.ecg_fs); }
+  if (r) X.querySelector('.patient')?.remove();              // 실시간 정보 카드가 이미 머리말을 보여준다
+  X.querySelectorAll('.wavebox, .nums').forEach(el => el.remove()); $('#goLive')?.closest('.row')?.remove();   // 파형은 옆 실시간 신호가 담당
+  if (r) X.querySelectorAll('tr').forEach(tr => { const k = (tr.cells[0] || {}).textContent; if (['페이스메이커', '기기 세트', '기저 리듬', '실시간', '입원 병실', '현재 위치'].includes(k)) tr.remove(); });
+  if (r && curRow !== r.row) selectRow(r.row, true);
+  if (!r) { $('#patInfo').innerHTML = '<div class="sub">모니터링 중인 환자가 아닙니다 (대기·퇴원 프로필)</div>'; }
 }
 
 // ---------------------------------------------------------------- hospital / map
@@ -743,8 +830,8 @@ async function loadFloors() {
     const h = await api('/emr/hospital'); const sz = h.sizing || {};
     $('#hospTitle').innerHTML = `${esc(h.name)} · ${esc(h.template_name || h.template)} · ${h.n_beds}병상 · ${h.buildings.length}동 ${h.n_floors}층 · GW ${h.n_gateways}` +
       (sz.size_by_patients ? ` <span class="sub">(환자 ${sz.active_patients}명 · 여유 ${sz.headroom_pct}%)</span>` : '') +
-      (sz.stale ? ` <span class="tag warn" title="시나리오 환자 수가 바뀌었습니다. 병원 도면 재생성 또는 병원·환자 재구성으로 규모를 맞추세요">규모 불일치: 재생성 필요 (계획 ${sz.planned_beds}병상)</span>` : '');
-    const hi = $('#hSizeInfo'); if (hi) hi.textContent = sz.size_by_patients ? `현재 병원 ${sz.beds}병상 · 환자 ${sz.active_patients}명 기준 계획 ${sz.planned_beds}병상${sz.stale ? ' → 병원·환자 재구성 또는 병원 탭 템플릿 재생성 필요' : ' (일치)'}` : `병상 상한 ${sz.beds} 그대로 생성`;
+      (sz.stale ? ` <span class="tag warn" title="병상 수가 바뀌었습니다. 시나리오 탭의 [재구성]으로 반영하세요">규모 불일치: 재구성 필요 (계획 ${sz.planned_beds}병상)</span>` : '');
+    const hi = $('#hSizeInfo'); if (hi) hi.textContent = sz.size_by_patients ? `현재 병원 ${sz.beds}병상 · 환자 ${sz.active_patients}명 기준 계획 ${sz.planned_beds}병상${sz.stale ? ' → [재구성] 필요' : ' (일치)'}` : `병상 상한 ${sz.beds} 그대로 생성`;
   } catch (e) { }
   syncDropdowns();
 }
@@ -1377,7 +1464,7 @@ function askConfirm(title, msg, yesLabel = '실행') {
   });
 }
 $('#btnLayoutReset').onclick = async () => {
-  const ok = await askConfirm('템플릿 재생성', '현재 병원 도면을 버리고 템플릿에서 다시 생성합니다.\n병실·게이트웨이 배치와 환자 위치가 모두 재배정되며 가져온 도면 JSON은 사라집니다.\n계속할까요?', '재생성');
+  const ok = await askConfirm('템플릿으로 되돌리기', '가져온 도면을 버리고 템플릿에서 병원을 다시 짓습니다.\n병실·게이트웨이 배치와 환자 위치가 모두 재배정됩니다.\n계속할까요?', '되돌리기');
   if (!ok) return;
   toast('템플릿으로 재생성 중...'); await post('/emr/layout/reset'); toast('재생성 완료 · 새로고침'); setTimeout(() => location.reload(), 400);   // the whole page state (floors, lists, monitor) is rebuilt: reload
 };
@@ -1897,7 +1984,7 @@ $('#vmTrends').onclick = () => { $('#vmBottom').scrollIntoView({ behavior: 'smoo
     try {
       const body = JSON.parse(b.dataset.apply || '{}');
       const r = await patch(body); CFG = r.config; fillForm();
-      let msg = '설정 적용' + (r.needs_rebuild ? ' (구조 변경: 시나리오 탭 병원 도면 [재생성] 필요)' : '');
+      let msg = '설정 적용' + (r.needs_rebuild ? ' (구조 변경: [재구성] 필요)' : '');
       if (b.dataset.trig) { const t = await post('/control/trigger', JSON.parse(b.dataset.trig)); msg += ' · ' + t.result; }
       if (b.dataset.script) { await post('/control/script', { file: b.dataset.script }); msg += ' · 스크립트 ' + b.dataset.script + ' 시작'; }
       toast(msg);
@@ -1922,7 +2009,7 @@ function openPatientFromMap(row) {
     const i = items.findIndex(x => x.id === p.id); if (i >= 0) { patPage = Math.floor(i / PAGE); await loadPatients(); }
     const tr = document.querySelector(`#patBody .prow[data-id="${p.id}"]`); if (tr) tr.scrollIntoView({ block: 'center' });
     showPatientDetail(p.id);                                  // always render the card, even when the row is not on the visible page
-    const d = $('#patDetail'); if (d) d.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    const d = $('#patCard'); if (d) d.scrollIntoView({ block: 'start', behavior: 'smooth' });
   });
 }
 let lastGws = [], lastWards = [], lastTrips = null;
@@ -2252,21 +2339,6 @@ async function loadConfig() { META = await api('/config'); CFG = META.config; lo
   requestAnimationFrame(animate);
   window.__animate = animate;   // debug hook (rAF is paused in hidden tabs)
 })();
-})();
-
-// ---- collapsible cards: ▾ buttons fold the table under the heading (state kept per browser)
-document.querySelectorAll('[data-goto]').forEach(b => { b.onclick = () => { try { document.querySelector(`#tabs button[data-tab="${b.dataset.goto}"]`).click(); window.scrollTo({ top: 0 }); } catch (e) { } }; });   // manual: jump to a tab
-document.querySelectorAll('.fold[data-fold]').forEach(b => {
-  const key = 'fold:' + b.dataset.fold; let open = true;
-  try { open = localStorage.getItem(key) !== '0'; } catch (e) { }
-  const apply = () => { const body = document.getElementById(b.dataset.fold); if (body) body.hidden = !open; b.setAttribute('aria-expanded', String(open)); document.dispatchEvent(new CustomEvent('fold', { detail: { id: b.dataset.fold, open } })); };
-  const toggle = () => { open = !open; try { localStorage.setItem(key, open ? '1' : '0'); } catch (e) { } apply(); };
-  b.onclick = (e) => { e.stopPropagation(); toggle(); };
-  const h = b.closest('h3');                                        // the whole heading row is the click target, not just the ▾ icon
-  if (h) { h.classList.add('foldrow'); h.addEventListener('click', e => { if (e.target.closest('select, .dd, input, a, button:not(.fold), [data-nofold]')) return; toggle(); }); }
-  apply();
-});
-function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
 
 // ---------------- 시나리오 탭: 고정 컬럼 세로 쌓기. 카드는 자기 컬럼에 머물고, 드래그 드롭으로만 컬럼 간 이동. 컬럼별 순서를 열 수마다 localStorage 저장 ----------------
 (() => {
@@ -2353,3 +2425,41 @@ function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}
   };
   grid.addEventListener('pointerup', end); grid.addEventListener('pointercancel', end);
 })();
+
+// ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다
+$$('.help').forEach(hp => {
+  if ((hp.textContent || '').trim().length < 90) return;
+  hp.classList.add('clamp'); hp.title = '눌러서 펼치기 / 접기';
+  hp.addEventListener('click', e => { if (e.target.closest('a, button, input, select, code')) return; hp.classList.toggle('open'); });
+});
+// ---------------- 반영 방식 배지: 카드 단위로 "즉시 / 재구성 필요 / 파형 재생성 필요"
+(() => {
+  const BY_CARD = { scale: 'now', beds: 'rebuild', site: 'now', mcot: 'now', turnover: 'now', episode: 'now', devices: 'now', network: 'now',
+                    artifact: 'now', transit: 'now', patch: 'now', gateway: 'now', drill: 'now' };
+  Object.entries(BY_CARD).forEach(([k, v]) => { const el = document.querySelector(`.card[data-card="${k}"]`); if (el) el.dataset.apply = v; });
+  const bank = document.querySelector('[data-fold="bankBody"]'); if (bank) bank.closest('.card').dataset.apply = 'bank';
+  const LABEL = { now: '즉시 반영', rebuild: '재구성 필요', bank: '파형 재생성 필요' };
+  $$('.card[data-apply]').forEach(cd => {
+    const h3 = cd.querySelector('h3'); if (!h3 || h3.querySelector('.apply')) return;
+    const b = document.createElement('span'); b.className = 'apply ' + cd.dataset.apply; b.textContent = LABEL[cd.dataset.apply] || '';
+    const right = h3.querySelector('.right'); if (right) h3.insertBefore(b, right); else h3.appendChild(b);
+  });
+})();
+
+})();
+
+// ---- collapsible cards: ▾ buttons fold the table under the heading (state kept per browser)
+const GOTO_GROUP = { sig: 'mon', pat: 'mon', chat: 'log', proto: 'help', guide: 'help' };   // 도움말의 '탭 열기': 예전 탭 이름 -> 새 메뉴
+document.querySelectorAll('[data-goto]').forEach(b => { b.onclick = () => { try { const g = GOTO_GROUP[b.dataset.goto] || b.dataset.goto; (document.querySelector(`#tabs button[data-tab="${g}"]`) || document.querySelector('#btnHelp')).click(); window.scrollTo({ top: 0 }); } catch (e) { } }; });   // manual: jump to a tab
+document.querySelectorAll('.fold[data-fold]').forEach(b => {
+  const key = 'fold:' + b.dataset.fold; let open = true;
+  try { const v = localStorage.getItem(key); open = v === null ? b.dataset.foldDefault !== 'closed' : v !== '0'; } catch (e) { open = b.dataset.foldDefault !== 'closed'; }
+  const apply = () => { const body = document.getElementById(b.dataset.fold); if (body) body.hidden = !open; b.setAttribute('aria-expanded', String(open)); document.dispatchEvent(new CustomEvent('fold', { detail: { id: b.dataset.fold, open } })); };
+  const toggle = () => { open = !open; try { localStorage.setItem(key, open ? '1' : '0'); } catch (e) { } apply(); };
+  b.onclick = (e) => { e.stopPropagation(); toggle(); };
+  const h = b.closest('h3');                                        // the whole heading row is the click target, not just the ▾ icon
+  if (h) { h.classList.add('foldrow'); h.addEventListener('click', e => { if (e.target.closest('select, .dd, input, a, button:not(.fold), [data-nofold]')) return; toggle(); }); }
+  apply();
+});
+function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
+
