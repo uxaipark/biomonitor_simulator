@@ -174,6 +174,7 @@
 <!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 시그널 송출 · 메디컬 월드 생성) -->
 <section class="tab" data-tab="emunav" data-title="에뮬레이터 설정">
   <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="tx">시그널 송출</button><button data-ev="struct">메디컬 월드 생성</button></div>
+  <button class="small emureset" id="btnReset" title="시나리오 · 시그널 송출 · 메디컬 월드의 모든 설정을 출고 기본값으로 되돌립니다 (라우터 주소는 유지)">전체 기본값 복원</button>
 </section>
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
@@ -302,28 +303,30 @@
           <li><b>재현 실행</b> — 병원 시드와 시작 시각을 고정하고 1초 고정 간격을 켠 뒤 [병원·게이트웨이 재구성]. 같은 사건이 같은 순서로 다시 일어납니다.</li>
         </ol>
       </div>
-      <div class="card wgen"><h3>메디컬 월드 생성</h3>
-      <div class="help">세 가지를 따로 만듭니다. <b>병원 · 게이트웨이</b>는 자주, <b>환자 프로필</b>과 <b>파형 루프 은행</b>은 가끔 다시 만듭니다. 각자 시드가 있어 하나를 바꿔도 나머지는 그대로이고, 값이 같으면 같은 결과가 나옵니다. 바꾼 값은 아래 액션의 해당 버튼을 눌러야 반영됩니다.</div>
+      <div class="card wgen"><h3>병원 · 게이트웨이 <span class="wg-pend" id="wgPendHosp" hidden>재구성 필요</span><span class="wg-now" id="wgNowHosp"></span></h3>
+      <div class="help">병상 수 · 도면 · 건물 · 게이트웨이 설치·용량 · 병원 시드를 바꾸면 아래 [병원·게이트웨이 재구성]으로 반영합니다. 환자 명단과 루프 은행은 그대로이고, 재원 환자는 다시 배정되며 라우터 연결이 몇 초 끊겼다 다시 붙습니다.</div>
       <div class="wgrid">
-        <div class="wg-h">병원 · 게이트웨이 <span class="wg-pend" id="wgPendHosp" hidden>재구성 필요</span><span class="wg-now" id="wgNowHosp"></span></div>
         <div class="field"><span title="병원을 이 크기로 짓습니다 (환자 수 상한, 최대 약 4,850병상). 시나리오를 적용하면 그 시나리오의 병상 수로 바뀝니다.">병상 수</span><input type="number" id="g_beds" min="1" max="5000"></div>
-        <div class="field span3 wg-layout"><span>병원 도면</span><div class="wg-lrow"><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden><span class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></span></div></div>
         <div class="field span2"><span>건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
         <div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div>
         <div class="field"><span title="게이트웨이 1대가 동시에 붙일 수 있는 BLE 패치 수">GW 최대 연결</span><input type="number" id="gw_cap" min="1" max="64"></div>
         <div class="field"><span title="병원 배치·게이트웨이·입퇴원·이동·장애 사건의 시드">병원 시드</span><input type="number" id="g_seed"></div>
         <div class="field"><span title="재현 실행: 비우면 현재 시각에서 시작">시작 시각 고정</span><input type="text" id="g_fstart" placeholder="비우면 현재"></div>
-        <label class="chk wg-cell span2" title="재현 실행: 1초 고정 간격으로 진행"><input type="checkbox" id="g_fstep"> 1초 고정 간격 (재현 실행)</label>
+        <label class="chk wg-cell" title="재현 실행: 1초 고정 간격으로 진행 (병원 시드 · 시작 시각과 함께)"><input type="checkbox" id="g_fstep"> 1초 고정 간격</label>
         <div class="span4 wg-line"><label class="chk"><input type="checkbox" id="gw_cor"> 복도 · 엘리베이터 · 계단 게이트웨이 설치</label><span class="sub" id="hSizeInfo"></span></div>
-        <div class="wg-h">환자 프로필 <span class="wg-pend" id="wgPendProf" hidden>재생성 필요</span><span class="wg-now" id="wgNowProf"></span></div>
+      </div>
+      <div class="wg-foot"><div class="wg-lrow"><button class="small" id="btnLayoutExport">도면 내보내기</button><button class="small" id="btnLayoutImport">도면 가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden><span class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></span></div><button id="btnRebuild" class="small primary" title="병원 건물·병상·게이트웨이·망 구성을 새로 짓고 환자를 다시 배정합니다 (환자 프로필·루프 은행은 그대로)">병원·게이트웨이 재구성</button></div>
+    </div>
+      <div class="card wgen"><h3>환자 프로필 <span class="wg-pend" id="wgPendProf" hidden>재생성 필요</span><span class="wg-now" id="wgNowProf"></span></h3>
+      <div class="help">환자 이름·나이·질환·기저 리듬·주소를 정하는 명단입니다. 값을 바꾸면 아래 [환자 프로필 재생성]으로 반영합니다. 병원·게이트웨이와 루프 은행은 그대로입니다.</div>
+      <div class="wgrid">
         <div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div>
         <div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div>
         <div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div>
         <div class="field"><span title="심장질환 환자 중 페이스메이커 비율">페이스메이커 비율</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div>
         <div class="field"><span title="환자 이름·나이·질환·기저 리듬·주소를 정하는 시드">프로필 시드</span><input type="number" id="g_pseed"></div>
       </div>
-      <div class="wg-act">액션</div>
-      <div class="row tight wg-btns"><button id="btnRebuild" class="small primary" title="병원 건물·병상·게이트웨이·망 구성을 새로 짓고 환자를 다시 배정합니다 (환자 프로필·루프 은행은 그대로)">병원·게이트웨이 재구성</button><button id="btnProfRegen" class="small" title="환자 명단을 새로 만들고 다시 배정합니다 (병원·루프 은행은 그대로)">환자 프로필 재생성</button><button id="btnReset" class="small">기본값 복원</button></div>
+      <div class="wg-foot"><span></span><button id="btnProfRegen" class="small primary" title="환자 명단을 새로 만들고 다시 배정합니다 (병원·루프 은행은 그대로)">환자 프로필 재생성</button></div>
     </div>
     </div>
     <div class="dcol">

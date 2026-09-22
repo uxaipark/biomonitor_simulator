@@ -1089,3 +1089,10 @@ main .wgrid input[type=text], main .wgrid input[type=number], main .wgrid select
 .ft-ph .sub{font-weight:400}
 @media (max-width:1200px){ .ft-panes{grid-template-columns:1fr 1fr} .ft-pane:nth-child(2){grid-column:1 / -1;order:-1;padding:0 0 12px;border-left:0;border-bottom:1px solid var(--line);margin-bottom:12px} .ft-pane:nth-child(1){padding-left:0;border-left:0} }
 @media (max-width:760px){ .ft-panes{grid-template-columns:1fr} .ft-pane{padding:12px 0!important;border-left:0!important;border-top:1px solid var(--line)} }
+#emunav, section[data-tab="emunav"]{display:none}
+section[data-tab="emunav"].on{display:flex;align-items:center;gap:10px}
+.emureset{margin-left:auto;color:var(--err);border-color:color-mix(in srgb, var(--err) 45%, var(--line))}
+.wg-one{grid-template-columns:1fr}
+.wg-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.wg-foot > .wg-lrow{flex:1;min-width:0}
+.wg-foot > button.primary{min-width:220px;min-height:34px;margin-left:auto}

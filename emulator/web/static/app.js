@@ -507,7 +507,16 @@ async function loadWorldStatus() {
   $('#wgNowBank').textContent = d.bank.generating ? '생성 중…' : (d.bank.ready ? '' : '없음');
 }
 setInterval(() => { if (document.querySelector('section[data-tab="struct"].on')) loadWorldStatus(); }, 5000);
-$('#btnReset').onclick = async () => { await post('/config/reset'); await loadConfig(); toast('기본값 복원 (재구성 필요)'); };
+$('#btnReset').onclick = async () => {                          // 전체 옵션 초기화: 라우터 주소·포트는 유지 (지우면 운영 송출이 바로 끊김)
+  const t = CFG.transport || {};
+  if (!(await askConfirm('전체 기본값 복원', `시나리오 · 시그널 송출 · 메디컬 월드의 모든 설정을 출고 기본값으로 되돌립니다.\n라우터 주소(${t.target_ip}:${t.target_port})는 그대로 둡니다.\n병원·환자·루프 은행 값이 바뀌면 메디컬 월드 생성에서 해당 버튼으로 반영하세요.`, '복원'))) return;
+  try {
+    await post('/config/reset', { scope: 'all' });
+    await patch({ transport: { target_ip: t.target_ip, target_port: t.target_port } });
+  } catch (e) { toast('실패: ' + e.message); return; }
+  await loadConfig(); if (typeof loadScnPresets === 'function') loadScnPresets(false); if (typeof loadWorldStatus === 'function') loadWorldStatus();
+  toast('전체 기본값 복원 · 라우터 주소 유지');
+};
 $('#btnAtStart').onclick = async () => { const r = await post('/control/autotune', { action: 'start', step: Number($('#at_step').value), window_s: Number($('#at_win').value) }); toast(r.result); };
 $('#btnAtStop').onclick = async () => { const r = await post('/control/autotune', { action: 'stop' }); toast(r.result); };
 $$('button[data-trig]').forEach(b => b.onclick = async () => {
