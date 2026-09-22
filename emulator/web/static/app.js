@@ -178,6 +178,7 @@ function showTab(id) {
   if (shown.has('pat')) loadPatients();
   if (shown.has('data')) { loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
   if (shown.has('struct')) { loadBankFiles(); loadWorldStatus(); }
+  if (g.id === 'emu') setTimeout(updEmuFoldBtn, 0);
   if (shown.has('scn') || shown.has('dash') || shown.has('test')) loadRealism();
   if (shown.has('scn')) loadScnPresets();
   if (shown.has('test') || shown.has('tx')) loadScripts();
@@ -186,7 +187,21 @@ function showTab(id) {
 }
 nav.addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
 $('#logSeg').addEventListener('click', e => { const b = e.target.closest('button[data-lv]'); if (b) showLogView(b.dataset.lv); });
-$('#emuSeg').addEventListener('click', e => { const b = e.target.closest('button[data-ev]'); if (b) { setEmuView(b.dataset.ev); showTab('emu'); } });
+// 에뮬레이터 설정: 지금 보이는 하위 페이지의 카드를 한 번에 펼치기 (다 펼쳐져 있으면 모두 접기)
+function emuFolds() { return $$('section.tab.on .fold[data-fold]').filter(f => !f.closest('[data-tab="emunav"]')); }
+function updEmuFoldBtn() {
+  const b = $('#emuFoldAll'); if (!b) return;
+  const anyClosed = emuFolds().some(f => f.getAttribute('aria-expanded') === 'false');
+  b.textContent = anyClosed ? '⊞ 모두 펼치기' : '⊟ 모두 접기';
+  b.title = anyClosed ? '이 페이지의 접힌 카드를 모두 펼칩니다' : '이 페이지의 카드를 모두 접습니다';
+}
+$('#emuFoldAll').onclick = () => {
+  const fs = emuFolds(), anyClosed = fs.some(f => f.getAttribute('aria-expanded') === 'false');
+  fs.forEach(f => { if ((f.getAttribute('aria-expanded') === 'false') === anyClosed) f.click(); });
+  updEmuFoldBtn();
+};
+document.addEventListener('fold', () => setTimeout(updEmuFoldBtn, 0));
+$('#emuSeg').addEventListener('click', e => { const b = e.target.closest('button[data-ev]'); if (b) { setEmuView(b.dataset.ev); showTab('emu'); updEmuFoldBtn(); } });
 $('#btnHelp').onclick = () => showTab(curGroup === 'help' ? (prevGroup || 'dash') : 'help');
 sel.addEventListener('change', () => showTab(sel.value));
 let initTab = 'dash'; try { initTab = localStorage.getItem('tab') || 'dash'; } catch (e) { }

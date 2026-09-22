@@ -1094,3 +1094,5 @@ section[data-tab="emunav"].on{display:flex;align-items:center;gap:10px}
 .wg-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
 .wg-foot > .wg-lrow{flex:1;min-width:0}
 .wg-foot > button.primary{min-width:220px;min-height:34px;margin-left:auto}
+.emufold{margin-left:auto}
+.emufold + .emureset{margin-left:0}

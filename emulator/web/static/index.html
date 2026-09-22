@@ -174,6 +174,7 @@
 <!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 시그널 송출 · 메디컬 월드 생성) -->
 <section class="tab" data-tab="emunav" data-title="에뮬레이터 설정">
   <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="tx">시그널 송출</button><button data-ev="struct">메디컬 월드 생성</button></div>
+  <button class="small emufold" id="emuFoldAll" title="이 페이지의 접힌 카드를 모두 펼칩니다">⊞ 모두 펼치기</button>
   <button class="small emureset" id="btnReset" title="시나리오 · 시그널 송출 · 메디컬 월드의 모든 설정을 출고 기본값으로 되돌립니다 (라우터 주소는 유지)">전체 기본값 복원</button>
 </section>
 <!-- ================= 시나리오 -->
@@ -187,43 +188,43 @@
     </div>
   </div>
   <div class="grid scn" id="scnGrid">
-    <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>
+    <div class="card" data-card="scale"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-scale" aria-expanded="true">▾</button>입원 환자 수</h3><div class="scnb" id="scnb-scale">
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="5000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
       <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 병상 수 · 도면 · 시드 등은 [에뮬레이터 설정 › 메디컬 월드 생성]에서 바꾸고 재구성합니다.</div>
-    </div>
-    <div class="card" data-card="site"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>장소 시나리오</h3>
+    </div></div>
+    <div class="card" data-card="site"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-site" aria-expanded="true">▾</button>장소 시나리오</h3><div class="scnb" id="scnb-site">
       <div class="site-view" id="siteView"></div>
       <div class="help">입원 환자 수와 원외 MCOT 환자 수로 자동으로 정해집니다. 입원만 있으면 <b>병원 내</b>, 원외만 있으면 <b>원외 MCOT</b>, 둘 다 있으면 <b>혼합</b>입니다.</div>
-    </div>
-    <div class="card" data-card="mcot"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>원외 MCOT 환자 수</h3>
+    </div></div>
+    <div class="card" data-card="mcot"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-mcot" aria-expanded="true">▾</button>원외 MCOT 환자 수</h3><div class="scnb" id="scnb-mcot">
       <div class="field"><span>원외 MCOT 환자 수 (모바일 게이트웨이 1대당 1명)</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
       <div class="presets" id="outPresets"></div>
       <div class="help">1명 이상이면 장소가 자동으로 <b>혼합</b>(입원이 0명이면 <b>원외 MCOT</b>)이 됩니다.</div>
       <label class="chk" title="단말 동작 (앱 강제 종료 · 절전 모드 일괄 업로드 · 야간 OS 업데이트 · 비행기 모드 · 지방 커버리지)"><input type="checkbox" id="md_en"> 단말 동작 (앱 종료 · 절전 등)</label>
       
-    </div>
-    <div class="card" data-card="turnover"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입퇴원 회전 / 시뮬 속도</h3>
+    </div></div>
+    <div class="card" data-card="turnover"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-turnover" aria-expanded="true">▾</button>입퇴원 회전 / 시뮬 속도</h3><div class="scnb" id="scnb-turnover">
       <div class="row"><div class="field"><span>시간당 신규 입원 (명/h)</span><input type="number" id="g_adm" min="0" max="500"></div><div class="field"><span>시간당 퇴원 (명/h)</span><input type="number" id="g_dis" min="0" max="500"></div><div class="field"><span>시뮬 속도 ×</span><input type="number" id="g_speed" min="0.1" max="1000" step="0.1"></div></div>
       <div class="help">입원/퇴원 회전율: 시뮬레이션 1시간당 무작위(포아송)로 발생하는 신규 입원·퇴원 건수입니다. 총 인원은 위의 목표치 ±5명 안에서 유지되며, 퇴원한 환자의 패치는 전원 OFF·반납되고 신규 입원자는 대기 프로필에서 새 패치를 받습니다. 시뮬 속도를 올리면 배터리 소모·입퇴원·검사 일정이 같은 배율로 빨라집니다.</div>
       <div class="row"><div class="field"><span>재원 수 변동</span><select id="g_census"><option value="fixed">고정 (목표 인원 유지)</option><option value="weekly">요일·시간대 곡선 (주말 감소 · 오전 퇴원 · 오후 입원)</option></select></div></div>
       <div class="row tight"></div>
-    </div>
-    <div class="card" data-card="episode"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>부정맥 에피소드</h3>
+    </div></div>
+    <div class="card" data-card="episode"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-episode" aria-expanded="true">▾</button>부정맥 에피소드</h3><div class="scnb" id="scnb-episode">
       <label class="chk" title="자연 발생 부정맥 에피소드 (기저 리듬 위 발작성 리듬 전환)"><input type="checkbox" id="s_ep"> 자연 발생 부정맥 에피소드</label>
       <label class="chk" title="루프 변형 순환 (8~25분마다 같은 리듬의 다른 변형으로 전환해 1시간 반복 방지)"><input type="checkbox" id="s_hop"> 루프 변형 순환 (반복 방지)</label>
-    </div>
-    <div class="card" data-card="routine"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병원 일과 <span class="right sub" id="routineNow"></span></h3>
+    </div></div>
+    <div class="card" data-card="routine"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-routine" aria-expanded="true">▾</button>병원 일과 <span class="right sub" id="routineNow"></span></h3><div class="scnb" id="scnb-routine">
       <label class="chk"><input type="checkbox" id="rt_en"> 병원 일과 반영</label>
       <div class="help">06·10·14·18·22시 활력징후 측정, 08~10시 병동별 회진(패치 확인·재부착), 식사 시간 착석, 14~18시 면회, 19~21시 저녁 샤워, 22시 소등. 사람이 움직이면 신호가 흔들리므로 아티팩트 시나리오를 꺼도 일과는 적용되고, 아티팩트 강도는 흔들림의 세기만 바꿉니다.</div>
-    </div>
-    <div class="card" data-card="clinical"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>임상 악화</h3>
+    </div></div>
+    <div class="card" data-card="clinical"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-clinical" aria-expanded="true">▾</button>임상 악화</h3><div class="scnb" id="scnb-clinical">
       <label class="chk" title="자연 발생 (패혈증 · 심부전 악화 · 호흡부전 · 저혈당 · 출혈성 쇼크)"><input type="checkbox" id="cl_en"> 자연 발생 임상 악화</label>
       <div class="field"><span>발생 빈도 (1,000 환자·일당 건수)</span><input type="number" id="cl_rate" min="0" max="500" step="1"></div>
       
       <div class="help">몇 시간에 걸쳐 심박·호흡수·체온이 오르고 SpO2가 떨어졌다가 회복합니다. 일부는 최고조에서 코드블루(심실세동·흉부압박 아티팩트·호흡/SpO2 소실)로 진행하고, 5~20분 소생술 뒤 자발순환 회복 또는 사망(퇴원 처리)으로 끝납니다. 환자 정보에 NEWS2 점수가 표시됩니다.</div>
-    </div>
-    <div class="card" data-card="devices"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>기기 세트 (환자별 채널)</h3>
+    </div></div>
+    <div class="card" data-card="devices"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-devices" aria-expanded="true">▾</button>기기 세트 (환자별 채널)</h3><div class="scnb" id="scnb-devices">
       <div class="field"><span>배정 정책</span><select id="s_devpol"><option value="auto">증상 맞춤 (질환·병동·재원 형태별 자동)</option><option value="all">전체 장착 (ECG+체온+SpO2+CGM)</option><option value="minimal">ECG 패치만</option></select></div>
       <div class="help">신규 입원자는 이 정책으로 기기를 받습니다. 이미 입원한 환자에게 적용하려면 아래 버튼을 누르세요. 증상 맞춤: 호흡기·감염·심부전·심장수술·수면무호흡 환자는 SpO2 92%, 발열·수술·종양 병동은 체온 패치 95%, 당뇨는 CGM 95%, 원외 환자는 반지형/손목 SpO2.</div>
       <div class="field"><span title="SpO2 센서 종류 비율 (합계 기준 정규화, 원외 환자는 손끝 제외)">SpO2 센서 비율</span>
@@ -231,8 +232,8 @@
         <div class="sub one" id="d_mixNote"></div></div>
       <div class="row tight"><button id="btnDevApply" class="small primary">입원 환자 전체에 일괄 적용</button></div>
       <div id="devStats" class="sub one" style="margin-top:8px"></div>
-    </div>
-    <div class="card" data-card="network"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>네트워크 장애</h3>
+    </div></div>
+    <div class="card" data-card="network"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-network" aria-expanded="true">▾</button>네트워크 장애</h3><div class="scnb" id="scnb-network">
       <label class="chk"><input type="checkbox" id="n_en"> 시나리오 사용 <small class="sub">(기본: 무장애)</small></label>
       <div class="field"><span>강도</span><div class="rv"><input type="range" id="n_int" min="0" max="100"><output id="n_int_o"></output></div></div>
       <label class="chk"><input type="checkbox" id="n_wl"> 무선 노이즈 → 신호 저하/손실</label>
@@ -244,8 +245,8 @@
       <div class="field"><span>전파 방해 강도 (%)</span><div class="rv"><input type="range" id="rf_lvl" min="0" max="100" step="5"><output id="rf_lvl_o"></output></div></div>
       
       <div class="help">게이트웨이는 건물 코어 → 층 스위치 → (무선이면) AP 아래에 붙어 있습니다. 장비가 죽으면 그 아래 게이트웨이의 업링크가 한꺼번에 끊기고, 게이트웨이는 살아 있어 패치가 그대로 붙은 채 프레임을 쌓았다가 복구 때 올립니다. 정전 때는 UPS 계통(응급실·간호사실)은 유지, 비상 계통은 발전기 전환(8~15초) 뒤 재부팅, 일반 계통은 한전 복전까지 꺼지고, UPS 없는 층 스위치는 재부팅하는 동안 그 층 유선 게이트웨이를 끊습니다.</div>
-    </div>
-    <div class="card" data-card="artifact"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>아티팩트 / 환자 활동</h3>
+    </div></div>
+    <div class="card" data-card="artifact"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-artifact" aria-expanded="true">▾</button>아티팩트 / 환자 활동</h3><div class="scnb" id="scnb-artifact">
       <label class="chk"><input type="checkbox" id="a_en"> 시나리오 사용</label>
       <div class="field"><span>강도</span><div class="rv"><input type="range" id="a_int" min="0" max="100"><output id="a_int_o"></output></div></div>
       <label class="chk" title="움직임/뒤척임/보행/화장실 (motion artifact)"><input type="checkbox" id="a_mo"> 움직임 · 보행 · 화장실</label>
@@ -253,26 +254,26 @@
       <label class="chk" title="검사 이동 (복도·엘리베이터 핸드오버/음영, 패치 유지; MRI만 촬영 중 분리 후 새 패치로 교체)"><input type="checkbox" id="a_ex"> 검사 이동 (핸드오버 · 음영)</label>
       <label class="chk"><input type="checkbox" id="a_tr"> 병실 이동/타병원 전원 (패치 교체)</label>
       <label class="chk"><input type="checkbox" id="a_hm"> 원외: 전파 간섭, 음영, 모바일 GW 방전</label>
-    </div>
-    <div class="card" data-card="transit"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>이동 중 환자</h3>
+    </div></div>
+    <div class="card" data-card="transit"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-transit" aria-expanded="true">▾</button>이동 중 환자</h3><div class="scnb" id="scnb-transit">
       <div class="field"><span>병실 밖 이동 중인 환자 비율 (%)</span><div class="rv"><input type="range" id="x_ratio" min="0" max="20" step="0.5"><output id="x_ratio_o"></output></div></div>
       <div class="help">재원 환자 중 항상 이 비율이 검사실·외래·투석실·편의시설 등으로 나가 있습니다. 아티팩트 설정과 관계없이 적용되고 병원 탭의 이동 중 환자 목록과 도면에 표시됩니다.</div>
-    </div>
-    <div class="card" data-card="patch"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>패치 (웨어러블 BLE)</h3>
+    </div></div>
+    <div class="card" data-card="patch"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-patch" aria-expanded="true">▾</button>패치 (웨어러블 BLE)</h3><div class="scnb" id="scnb-patch">
       <div class="row"><div class="field"><span>패치 배터리 수명 (일)</span><input type="number" id="p_days" min="0.01" max="30" step="0.5"></div><div class="field"><span>교체 기준 (%)</span><input type="number" id="p_rep" min="0" max="50"></div></div>
       <label class="chk" title="배터리 감소 시뮬레이션 (입원 시간에 따라 소모)"><input type="checkbox" id="p_dr"> 배터리 소모</label>
       <label class="chk sub-opt" title="배터리가 교체 기준 이하면 새 패치로 교체합니다. 끄면 방전된 패치는 전송을 멈춥니다."><input type="checkbox" id="p_repl"> 교체 기준 이하면 새 패치로 교체</label>
       <label class="chk" title="리드 오프 이벤트 (전극 분리, 자연 발생)"><input type="checkbox" id="p_lo"> 리드 오프 (전극 분리)</label>
-    </div>
-    <div class="card" data-card="gateway"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>게이트웨이 장애</h3>
+    </div></div>
+    <div class="card" data-card="gateway"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-gateway" aria-expanded="true">▾</button>게이트웨이 장애</h3><div class="scnb" id="scnb-gateway">
       <label class="chk"><input type="checkbox" id="gw_f"> 시나리오 사용</label>
       <div class="field"><span>강도</span><div class="rv"><input type="range" id="gw_int" min="0" max="100"><output id="gw_int_o"></output></div></div>
       <label class="chk" title="무응답 장애 → 연결 패치 동시 끊김, 인접 게이트웨이로 재접속 (용량 이내), 복구 시 자동 복귀"><input type="checkbox" id="gw_out"> 무응답 장애 (인접 GW 재접속)</label>
       <label class="chk" title="성능 저하 → CPU 과부하, 패킷 손실, 지연 증가"><input type="checkbox" id="gw_deg"> 성능 저하 (손실 · 지연)</label>
       <label class="chk" title="하드웨어 고장 → 교체 대기(5~25분) 후 새 게이트웨이 번호·MAC의 장비로 교체, 새 장비로 라우터 재접속(META 재전송)"><input type="checkbox" id="gw_rep"> 하드웨어 고장 → 교체</label>
       <div class="help">병실·복도·엘리베이터·계단·검사실·화장실 게이트웨이(최대 32 BLE 연결)에 무작위로 발생합니다. 장애가 켜지면 상단에 GW 장애 ON으로 표시됩니다.</div>
-    </div>
-    <div class="card" data-card="drill"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>라우터 테스트 드릴 (전송 계층)</h3>
+    </div></div>
+    <div class="card" data-card="drill"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-drill" aria-expanded="true">▾</button>라우터 테스트 드릴 (전송 계층)</h3><div class="scnb" id="scnb-drill">
       <div class="help">라우터의 파서·접속 처리 내구성을 검증하는 설정입니다: 게이트웨이의 송출 동작(저장 후 전송, 재접속 완만화)과 파서 시험(오염 프레임, 정답 캡처). 연결 폭주·반열림·gw_id 중복 같은 일회성 이벤트는 [테스트 › 수동 제어]에 있습니다.</div>
       <div class="xhead">게이트웨이 송출 동작 · 파서 시험</div>
       <label class="chk" title="저장 후 전송 (게이트웨이 장애·회선 단절 중 프레임을 로컬 버퍼에 보관, 복구 시 과거 타임스탬프 프레임을 버스트로 재전송)"><input type="checkbox" id="sf_en"> 저장 후 전송 (장애 중 버퍼)</label>
@@ -282,11 +283,11 @@
       <label class="chk" title="재접속 완만화 (끄면 모든 게이트웨이가 동시에 재접속 → 상시 연결 폭주)"><input type="checkbox" id="t_storm"> 재접속 완만화</label>
       <div class="row tight" style="align-items:center"><label class="chk" style="margin:0" title="정답 데이터 캡처 (소켓에 보낸 원본 바이트를 기록, 송신 대상이 있을 때만)"><input type="checkbox" id="cap_en"> 송신 원본 캡처</label><button class="small" id="capClear">캡처 파일 삭제</button><span class="sub" id="capInfo"></span></div>
       <div class="help">캡처 위치는 <code>/var/lib/biosim/runtime/capture/w*.bin</code> 입니다. 라우터가 받은 프레임과 대조하려면 <code>/opt/biosim/venv/bin/python /opt/biosim/app/tools/verify_capture.py --capture /var/lib/biosim/runtime/capture --received &lt;수신 폴더&gt;</code> 를 실행합니다.</div>
-    </div>
-    <div class="card" data-card="reset"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>화면 배치</h3>
+    </div></div>
+    <div class="card" data-card="reset"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-reset" aria-expanded="true">▾</button>화면 배치</h3><div class="scnb" id="scnb-reset">
       <div class="help">시나리오 설정을 기본값으로 되돌리려면 위의 <b>0. 기본값</b>을 골라 [적용]하세요.</div>
       <div class="row tight"><button class="small" id="btnCardOrderReset">카드 순서 초기화</button></div>
-    </div>
+    </div></div>
   </div>
 </section>
 
@@ -304,7 +305,7 @@
         </ol>
         </div>
       </div>
-      <div class="card wgen"><h3>병원 · 게이트웨이 <span class="wg-pend" id="wgPendHosp" hidden>재구성 필요</span><span class="wg-now" id="wgNowHosp"></span></h3>
+      <div class="card wgen"><h3><button class="fold" data-fold="wgb-1" aria-expanded="true">▾</button>병원 · 게이트웨이 <span class="wg-pend" id="wgPendHosp" hidden>재구성 필요</span><span class="wg-now" id="wgNowHosp"></span></h3><div class="scnb" id="wgb-1">
       <div class="help">병상 수 · 도면 · 건물 · 게이트웨이 설치·용량 · 병원 시드를 바꾸면 아래 [병원·게이트웨이 재구성]으로 반영합니다. 환자 명단과 루프 은행은 그대로이고, 재원 환자는 다시 배정되며 라우터 연결이 몇 초 끊겼다 다시 붙습니다.</div>
       <div class="wgrid">
         <div class="field"><span title="병원을 이 크기로 짓습니다 (환자 수 상한, 최대 약 4,850병상). 시나리오를 적용하면 그 시나리오의 병상 수로 바뀝니다.">병상 수</span><input type="number" id="g_beds" min="1" max="5000"></div>
@@ -317,8 +318,8 @@
         <div class="span4 wg-line"><label class="chk"><input type="checkbox" id="gw_cor"> 복도 · 엘리베이터 · 계단 게이트웨이 설치</label><span class="sub" id="hSizeInfo"></span></div>
       </div>
       <div class="wg-foot"><div class="wg-lrow"><button class="small" id="btnLayoutExport">도면 내보내기</button><button class="small" id="btnLayoutImport">도면 가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden><span class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></span></div><button id="btnRebuild" class="small primary" title="병원 건물·병상·게이트웨이·망 구성을 새로 짓고 환자를 다시 배정합니다 (환자 프로필·루프 은행은 그대로)">병원·게이트웨이 재구성</button></div>
-    </div>
-      <div class="card wgen"><h3>환자 프로필 <span class="wg-pend" id="wgPendProf" hidden>재생성 필요</span><span class="wg-now" id="wgNowProf"></span></h3>
+    </div></div>
+      <div class="card wgen"><h3><button class="fold" data-fold="wgb-2" aria-expanded="true">▾</button>환자 프로필 <span class="wg-pend" id="wgPendProf" hidden>재생성 필요</span><span class="wg-now" id="wgNowProf"></span></h3><div class="scnb" id="wgb-2">
       <div class="help">환자 이름·나이·질환·기저 리듬·주소를 정하는 명단입니다. 값을 바꾸면 아래 [환자 프로필 재생성]으로 반영합니다. 병원·게이트웨이와 루프 은행은 그대로입니다.</div>
       <div class="wgrid">
         <div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div>
@@ -328,7 +329,7 @@
         <div class="field"><span title="환자 이름·나이·질환·기저 리듬·주소를 정하는 시드">프로필 시드</span><input type="number" id="g_pseed"></div>
       </div>
       <div class="wg-foot"><span></span><button id="btnProfRegen" class="small primary" title="환자 명단을 새로 만들고 다시 배정합니다 (병원·루프 은행은 그대로)">환자 프로필 재생성</button></div>
-    </div>
+    </div></div>
     </div>
     <div class="dcol">
       <div class="card"><h3><button class="fold" data-fold="bankBody" aria-expanded="true">▾</button>루프 파일 은행 (1시간 파형 데이터) <span class="wg-pend" id="wgPendBank" hidden>재생성 필요</span><span class="wg-now" id="wgNowBank"></span></h3><div id="bankBody">
@@ -351,7 +352,7 @@
 <section class="tab" data-tab="tx" data-title="시그널 송출">
   <div class="grid txgrid">
     <div class="card" style="grid-column:1/-1" data-apply="now">
-          <h3>전송 데이터 선택 <span class="right">모든 환자·패치에 공통 적용</span></h3>
+          <h3><button class="fold" data-fold="txb-0" aria-expanded="true">▾</button>전송 데이터 선택 <span class="right">모든 환자·패치에 공통 적용</span></h3><div class="scnb" id="txb-0">
           <div class="help">여기서 체크된 채널 중 환자가 착용한 기기가 제공하는 채널만 패킷에 담겨 전송됩니다. 아래 파형 미리보기도 같은 규칙을 따릅니다.</div>
           <div class="chips" id="chanChips"></div>
           <div class="row" style="margin-top:8px">
@@ -359,17 +360,17 @@
             <div class="field"><span>ECG 샘플링</span><select id="selEcgFs"><option value="250">250 Hz</option><option value="500">500 Hz</option></select></div>
             <div class="field"><span>환자별 기기 세트</span><div class="sub" style="min-height:44px;display:flex;align-items:center" id="devPolicyNote">SpO2 센서·체온 패치·CGM 장착 여부는 환자마다 다릅니다. 실제 전송 채널 = 위 선택 ∩ 환자 기기 채널. 정책은 [시나리오] 탭에서.</div></div>
           </div>
-    </div>
-    <div class="card tx-target" data-apply="now"><h3>송신 대상 (라우터)</h3>
+    </div></div>
+    <div class="card tx-target" data-apply="now"><h3><button class="fold" data-fold="txb-1" aria-expanded="true">▾</button>송신 대상 (라우터)</h3><div class="scnb" id="txb-1">
       <div class="row"><div class="field" style="flex:2"><span>서버 IP (비우면 생성만 수행)</span><input type="text" id="t_ip" placeholder="예: 192.168.0.10"></div><div class="field"><span>포트</span><input type="number" id="t_port" min="1" max="65535"></div></div>
       <div class="row"><div class="field"><span>번들 주기 (ms)</span><input type="number" id="t_bundle" min="50" max="2000" step="50"></div></div>
       <div class="row"><div class="field"><span>META 전송 주기 (프레임)</span><input type="number" id="t_meta" min="1" max="1000"></div><div class="field"><span>GW 상태 주기 (프레임)</span><input type="number" id="t_gws" min="1" max="1000"></div></div>
       <div class="row"><div class="field"><span>워커 프로세스 (0=자동)</span><input type="number" id="t_workers" min="0" max="16"></div><div class="field"><span>송신 백로그 한도 (bytes)</span><input type="number" id="t_backlog" min="4096" step="4096"></div></div>
       <div class="help">전송 설정은 즉시 반영됩니다 (워커가 소켓을 재연결).</div>
-    </div>
-    <div class="card tx-stats"><h3>전송 통계</h3><div class="kpis" id="txKpis"></div>
+    </div></div>
+    <div class="card tx-stats"><h3><button class="fold" data-fold="txb-2" aria-expanded="true">▾</button>전송 통계</h3><div class="scnb" id="txb-2"><div class="kpis" id="txKpis"></div>
       <h3 style="margin-top:10px">워커</h3><div class="tbl" style="max-height:30vh"><table id="wTable"><thead><tr><th>#</th><th>alive</th><th>패치</th><th>GW</th><th>ticks</th><th>overrun</th><th>build µs</th><th>send µs</th></tr></thead><tbody></tbody></table></div>
-    </div>
+    </div></div>
   </div>
 </section>
 
