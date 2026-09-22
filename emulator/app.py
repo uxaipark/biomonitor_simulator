@@ -59,7 +59,7 @@ app.add_middleware(GZipMiddleware, minimum_size=16384)      # gateway/patient li
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
-WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/presets/apply", "/api/v1/waveforms", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
+WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/control/profiles/regenerate", "/api/v1/presets/apply", "/api/v1/waveforms", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
 
 
 @app.middleware("http")
@@ -139,10 +139,11 @@ def get_config():
             "resp_sources": RESP_SOURCES, "spo2_sources": SPO2_SOURCES}
 
 
-STRUCTURAL = {("general", "seed"), ("general", "bed_capacity"), ("general", "profile_count"), ("general", "heart_disease_ratio"), ("hospital", "template"), ("hospital", "layout_file"),
-              ("general", "korean_ratio"), ("signals", "pacemaker_ratio"), ("scenario", "gateway", "capacity"), ("scenario", "gateway", "corridor_gateways"),
-              ("general", "fixed_start")}
-BANK_KEYS = {("signals", "ecg_fs"), ("signals", "ppg_fs"), ("signals", "resp_fs"), ("signals", "accel_fs"), ("signals", "variants_per_rhythm"), ("signals", "loop_seconds"), ("general", "seed")}
+STRUCTURAL = {("general", "seed"), ("general", "bed_capacity"), ("hospital", "template"), ("hospital", "layout_file"), ("hospital", "max_buildings"),
+              ("scenario", "gateway", "capacity"), ("scenario", "gateway", "corridor_gateways"), ("general", "fixed_start")}     # [병원·게이트웨이 재구성]
+PROFILE_KEYS = {("general", "profile_count"), ("general", "profile_seed"), ("general", "heart_disease_ratio"), ("general", "korean_ratio"),
+                ("signals", "pacemaker_ratio")}                                                                              # [환자 프로필 재생성]
+BANK_KEYS = {("signals", "ecg_fs"), ("signals", "ppg_fs"), ("signals", "resp_fs"), ("signals", "accel_fs"), ("signals", "variants_per_rhythm"), ("signals", "loop_seconds"), ("signals", "bank_seed")}   # [루프 은행 재생성]
 
 
 def _changed_paths(old: dict, new: dict, prefix=()):
@@ -167,6 +168,7 @@ def _apply_config(patch: dict, source: str) -> dict:
         if planned > have or planned < 0.6 * have:                    # the scenario outgrew (or shrank far below) the generated hospital
             needs_rebuild = True
     needs_bank = bool(changed & BANK_KEYS)
+    needs_profiles = bool(changed & PROFILE_KEYS)
     rw = getattr(e.world, "real", None)
     if rw and rw.recording is not None and not (changed & STRUCTURAL):
         with e.world.lock:
@@ -174,7 +176,7 @@ def _apply_config(patch: dict, source: str) -> dict:
     if not needs_rebuild:
         with e.world.lock:
             e.world.apply_config()
-    return {"config": new, "changed": [".".join(c) for c in changed], "needs_rebuild": needs_rebuild, "needs_generate": needs_bank,
+    return {"config": new, "changed": [".".join(c) for c in changed], "needs_rebuild": needs_rebuild, "needs_generate": needs_bank, "needs_profiles": needs_profiles,
             "note": "구조 설정(병상수/시드/게이트웨이 용량)은 POST /control/rebuild, 샘플링/변형 수는 /control/generate 로 반영"}
 
 
@@ -240,7 +242,7 @@ async def reset_config(body: dict | None = None):
     if scope != "runtime":
         return {"config": cfg.reset(source="reset:all"), "needs_rebuild": True}
     old = cfg.snapshot()
-    keep = STRUCTURAL | BANK_KEYS | {("hospital", "template"), ("hospital", "layout_file")}
+    keep = STRUCTURAL | PROFILE_KEYS | BANK_KEYS | {("hospital", "template"), ("hospital", "layout_file")}
     cfg.reset(source="reset:runtime")
     patch: dict = {}
     for path in keep:
@@ -288,6 +290,36 @@ async def control_rebuild():
     await asyncio.to_thread(E().rebuild)
     await asyncio.to_thread(_after_rebuild)
     return {"result": "rebuilt"}
+
+
+@app.post("/api/v1/control/profiles/regenerate")
+async def control_profiles_regenerate():
+    """환자 프로필을 지금 설정(프로필 수·비율·프로필 시드)으로 다시 만들고 병원에 다시 배정한다 (병원·루프 은행은 그대로)."""
+    await asyncio.to_thread(E().rebuild, True)
+    await asyncio.to_thread(_after_rebuild)
+    return {"result": "profiles regenerated", "profiles": E().world.profile_params}
+
+
+@app.get("/api/v1/world/status")
+def world_status():
+    """메디컬 월드의 세 생성물이 지금 설정과 맞는지: 병원·게이트웨이(재구성), 환자 프로필(재생성), 파형 루프 은행(재생성)."""
+    e = E(); w = e.world
+    cur = cfg.snapshot()
+    def get(d, p):
+        for k in p:
+            d = (d or {}).get(k)
+        return d
+    built = getattr(w, "built_cfg", None) or {}
+    hosp = sorted(".".join(p) for p in STRUCTURAL if get(cur, p) != get(built, p))
+    pp = w.profile_params or {}
+    want = w._profile_params_from_cfg(cur["general"], cur["signals"])
+    prof = sorted(k for k in want if want[k] != pp.get(k))
+    nb = e._make_bank()
+    bank_ok = e.bank.is_ready() and nb.signature() == e.bank.signature()
+    return {"hospital": {"pending": bool(hosp), "changed": hosp, "beds": w.hospital.bed_capacity, "gateways": len(w.hospital.gateways)},
+            "profiles": {"pending": bool(prof), "changed": prof, "applied": pp},
+            "bank": {"pending": not bank_ok, "ready": e.bank.is_ready(), "generating": bool(e.gen_thread and e.gen_thread.is_alive()),
+                     "progress": getattr(e.bank, "progress", None)}}
 
 
 @app.post("/api/v1/control/generate")

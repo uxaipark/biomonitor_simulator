@@ -48,7 +48,8 @@ SPO2_SOURCES = ["fingertip", "ring", "wrist_ptt"]
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "general": {
-        "seed": 20240905,
+        "seed": 20240905,              # 병원·게이트웨이·사건 시드 ([병원·게이트웨이 재구성])
+        "profile_seed": None,          # 환자 프로필 시드 ([환자 프로필 재생성]); 비어 있으면 처음에 seed 값으로 채움
         "profile_count": 10000,
         "autostart": True,       # start transmitting as soon as the engine is up (a deploy restarts the service)
         "bed_capacity": 2000,          # hospital beds (== max concurrent in-hospital patches)
@@ -75,6 +76,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "spo2_source": "fingertip",
         "pacemaker_ratio": 0.06,       # share of heart patients with a pacemaker
         "variants_per_rhythm": 12,     # pre-generated 1-hour loop files per rhythm class
+        "bank_seed": None,             # 루프 은행 시드 ([루프 은행 재생성]); 비어 있으면 처음에 general.seed 값으로 채움
         "loop_seconds": 3600,
     },
     "transport": {
@@ -276,6 +278,13 @@ class Config:
         s = d["signals"]
         s["ecg_fs"] = 500 if int(s["ecg_fs"]) >= 500 else 250
         s["variants_per_rhythm"] = int(max(1, min(200, s["variants_per_rhythm"])))
+        # 세 가지 생성물은 시드를 따로 쓴다 (예전 설정은 하나였던 seed 로 채워 기존 명단·루프 은행이 그대로 유효)
+        if g.get("profile_seed") in (None, ""):
+            g["profile_seed"] = int(g["seed"])
+        g["profile_seed"] = int(g["profile_seed"])
+        if s.get("bank_seed") in (None, ""):
+            s["bank_seed"] = int(g["seed"])
+        s["bank_seed"] = int(s["bank_seed"])
         s["loop_seconds"] = int(max(60, min(3600, s["loop_seconds"])))
         if s["resp_source"] not in RESP_SOURCES:
             s["resp_source"] = "capacitive"

@@ -85,7 +85,7 @@ class Engine:
     def _make_bank(self) -> LoopBank:
         s = self.cfg.get("signals")
         g = self.cfg.get("general")
-        return LoopBank(s["ecg_fs"], s["ppg_fs"], s["resp_fs"], s["accel_fs"], s["loop_seconds"], s["variants_per_rhythm"], g["seed"])
+        return LoopBank(s["ecg_fs"], s["ppg_fs"], s["resp_fs"], s["accel_fs"], s["loop_seconds"], s["variants_per_rhythm"], s.get("bank_seed") or g["seed"])
 
     def bank_args(self) -> dict:
         b = self.bank
@@ -121,7 +121,7 @@ class Engine:
         self.gen_thread.start()
         return True
 
-    def rebuild(self) -> None:
+    def rebuild(self, regen_profiles: bool = False) -> None:
         """Apply structural config (bed capacity, seed, fs...) - requires stop.  Exclusive: every API reader waits
         (the old SharedState is unmapped here; a reader still holding its arrays would segfault)."""
         with self.rw.write():
@@ -133,7 +133,7 @@ class Engine:
                     self.bank.load()
             with self.world.lock:
                 self.world.bank = self.bank
-                self.world.build()
+                self.world.build(regen_profiles=regen_profiles)
                 self.gather = Gather(self.bank, self.world.st) if self.bank.loaded else None   # swapped under the lock: no window with the old arrays
             self.log.add("system", "월드 재구성 완료")
 

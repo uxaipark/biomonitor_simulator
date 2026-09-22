@@ -138,6 +138,7 @@ class World:
         self.exam_book: dict[str, list[tuple[float, float]]] = {}      # room -> booked (start, end) intervals, sorted by start
         self.exam_load: collections.Counter = collections.Counter()  # room -> patients on an exam trip to it right now
         self.autotune: dict | None = None
+        self.profile_params: dict | None = None                   # 지금 명단을 만든 프로필 값 (build 에서 채움)
         self.net_events: list[dict] = []
         self.script: dict | None = None          # scheduled scenario script (test drills replayed at fixed sim times)
         self.rhythm_variants: dict[str, list[int]] = {}
@@ -145,7 +146,20 @@ class World:
         self.build()
 
     # ------------------------------------------------------------------ build
-    def build(self) -> None:
+    # ------------------------------------------------------------------ 환자 프로필: 따로 만들고 따로 다시 만든다
+    PROFILE_APPLIED = RUNTIME_DIR / "profiles_applied.json"
+
+    def _profile_params_from_cfg(self, g: dict, s: dict) -> dict:
+        return {"count": int(g["profile_count"]), "seed": int(g.get("profile_seed") or g["seed"]), "heart": float(g["heart_disease_ratio"]),
+                "korean": float(g["korean_ratio"]), "pm": float(s["pacemaker_ratio"])}
+
+    def applied_profile_params(self) -> dict | None:
+        try:
+            return json.loads(self.PROFILE_APPLIED.read_text("utf-8"))
+        except Exception:
+            return None
+
+    def build(self, regen_profiles: bool = False) -> None:
         cfg = self.cfg.snapshot()
         g, s, sc = cfg["general"], cfg["signals"], cfg["scenario"]
         with self.lock:
@@ -168,8 +182,25 @@ class World:
             self.hospital = Hospital(beds, g["seed"], sc["gateway"]["capacity"], sc["gateway"]["corridor_gateways"],
                                      outpatients=self.mobile_pool, template=hp.get("template", "auto"), layout_data=layout_data,
                                      max_buildings=int(hp.get("max_buildings", 3) or 3))
-            self.profiles = make_profiles(g["profile_count"], g["seed"], g["heart_disease_ratio"], g["korean_ratio"], s["pacemaker_ratio"])
-            arng = np.random.default_rng(g["seed"] + 99)
+            # 환자 프로필은 [환자 프로필 재생성] 때 정한 값으로 만든다 (병원을 다시 지어도 명단은 그대로).  병상이 늘어 모자라면 자동으로 다시 만든다.
+            want = self._profile_params_from_cfg(g, s)
+            pp = None if regen_profiles else self.applied_profile_params()
+            need = self.hospital.bed_capacity + self.mobile_pool + 100
+            if pp is not None and pp.get("count", 0) < need:
+                self.log.add("system", f"환자 프로필 {pp.get('count')}명으로는 병상·원외 {need}명을 채울 수 없어 프로필을 다시 만듭니다")
+                pp = None
+            if pp is None:
+                pp = want
+                try:
+                    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+                    self.PROFILE_APPLIED.write_text(json.dumps(pp), "utf-8")
+                except OSError:
+                    pass
+                if regen_profiles:
+                    self.log.add("system", f"환자 프로필 재생성: {pp['count']:,}명 · 시드 {pp['seed']}")
+            self.profile_params = pp
+            self.profiles = make_profiles(pp["count"], pp["seed"], pp["heart"], pp["korean"], pp["pm"])
+            arng = np.random.default_rng(pp["seed"] + 99)
             for p in self.profiles:
                 p["avatar"] = assign_avatar(arng, p)
                 p["status"] = "pool"
@@ -184,9 +215,12 @@ class World:
                 old.unlink()
             self.patches = {}
             self.admitted = {}
-            sig = {"seed": g["seed"], "profile_count": g["profile_count"], "bed_capacity": g["bed_capacity"], "mobile_pool": self.mobile_pool,
+            sig = {"seed": g["seed"], "profile_count": pp["count"], "bed_capacity": g["bed_capacity"], "mobile_pool": self.mobile_pool,
                    "template": self.hospital.template, "layout_file": hp.get("layout_file", ""),
-                   "heart_ratio": g["heart_disease_ratio"], "korean_ratio": g["korean_ratio"], "pm_ratio": s["pacemaker_ratio"]}
+                   "heart_ratio": pp["heart"], "korean_ratio": pp["korean"], "pm_ratio": pp["pm"]}
+            if pp["seed"] != g["seed"]:
+                sig["profile_seed"] = pp["seed"]                  # 예전 세션(시드 하나)과 같은 값이면 서명도 예전과 같게
+            self.built_cfg = cfg                                   # 지금 지어진 병원·게이트웨이의 설정 (재구성 필요 여부 비교용)
             kept = self.db.begin_session(sig)
             if hasattr(self, "_bld_beds"):
                 del self._bld_beds                                 # per-building bed counts are recomputed for the new hospital

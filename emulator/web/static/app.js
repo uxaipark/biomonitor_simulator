@@ -177,7 +177,7 @@ function showTab(id) {
   if (shown.has('proto')) loadProto();
   if (shown.has('pat')) loadPatients();
   if (shown.has('data')) { loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
-  if (shown.has('struct')) loadBankFiles();
+  if (shown.has('struct')) { loadBankFiles(); loadWorldStatus(); }
   if (shown.has('scn') || shown.has('dash') || shown.has('test')) loadRealism();
   if (shown.has('scn')) loadScnPresets();
   if (shown.has('test') || shown.has('tx')) loadScripts();
@@ -319,7 +319,7 @@ function linkStop() { if (linkTimer) { clearInterval(linkTimer); linkTimer = nul
 // ---------------------------------------------------------------- config binding
 const B = {  // element id -> config path
   g_active: ['general', 'active_patients'], g_out: ['general', 'outpatient_count'], g_adm: ['general', 'admissions_per_hour'], g_dis: ['general', 'discharges_per_hour'],
-  g_speed: ['general', 'sim_speed'], g_beds: ['general', 'bed_capacity'], g_prof: ['general', 'profile_count'], g_seed: ['general', 'seed'], g_heart: ['general', 'heart_disease_ratio'], g_kr: ['general', 'korean_ratio'],
+  g_speed: ['general', 'sim_speed'], g_beds: ['general', 'bed_capacity'], g_prof: ['general', 'profile_count'], g_seed: ['general', 'seed'], g_pseed: ['general', 'profile_seed'], s_bseed: ['signals', 'bank_seed'], g_heart: ['general', 'heart_disease_ratio'], g_kr: ['general', 'korean_ratio'],
   s_ep: ['scenario', 'rhythm_episodes'], s_hop: ['scenario', 'variant_hopping'], s_devpol: ['scenario', 'devices', 'policy'], d_mf: ['scenario', 'devices', 'spo2_mix', 'fingertip'], d_mr: ['scenario', 'devices', 'spo2_mix', 'ring'], d_mw: ['scenario', 'devices', 'spo2_mix', 'wrist_ptt'], n_en: ['scenario', 'network', 'enabled'], n_int: ['scenario', 'network', 'intensity'], n_wl: ['scenario', 'network', 'wireless_noise'], n_wd: ['scenario', 'network', 'wired_failure'], n_lat: ['scenario', 'network', 'latency'], n_pw: ['scenario', 'network', 'power_outage'],
   x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_tr: ['scenario', 'artifacts', 'transfer'], a_hm: ['scenario', 'artifacts', 'home_interference'],
   p_days: ['scenario', 'patch', 'battery_days'], p_rep: ['scenario', 'patch', 'replace_below_pct'], p_dr: ['scenario', 'patch', 'battery_drain_enabled'], p_lo: ['scenario', 'patch', 'lead_off_enabled'], p_repl: ['scenario', 'patch', 'replace_enabled'],
@@ -424,8 +424,10 @@ async function flush() {
   const body = pending; pending = {}; if (!Object.keys(body).length) return;
   try {
     const r = await patch(body); CFG = r.config; if (typeof scnRefresh === 'function') scnRefresh();
-    if (r.needs_rebuild) toast('월드 생성 값 변경: [재구성]을 눌러 반영');
-    else if (r.needs_generate) toast('샘플링/변형 설정 변경: [루프 은행 재생성] 필요');
+    if (r.needs_rebuild) toast('병원·게이트웨이 값 변경: [병원·게이트웨이 재구성]을 눌러 반영');
+    else if (r.needs_profiles) toast('환자 프로필 값 변경: [환자 프로필 재생성]을 눌러 반영');
+    else if (r.needs_generate) toast('루프 은행 값 변경: [루프 은행 재생성] 필요');
+    if (typeof loadWorldStatus === 'function') loadWorldStatus();
     else toast('설정 반영');
   } catch (e) { toast('설정 실패: ' + e.message); }
 }
@@ -478,12 +480,33 @@ function renderChips() {
 $('#btnStart').onclick = async () => { const r = await post('/control/start'); toast(r.result); refresh(); };
 $('#btnStop').onclick = async () => { const r = await post('/control/stop'); toast(r.result); refresh(); };
 async function doRebuild() {
-  const ok = await askConfirm('재구성', '병상 수와 월드 생성 값을 반영해 병원·환자를 새로 구성합니다.\n재원 환자와 패치 상태가 초기화되고 전송이 잠시 멈춥니다.\n계속할까요?', '재구성');
+  const ok = await askConfirm('병원·게이트웨이 재구성', '병상 수·도면·게이트웨이·병원 시드를 반영해 병원과 게이트웨이를 새로 짓고 환자를 다시 배정합니다.\n환자 프로필과 루프 은행은 그대로입니다. 재원 환자·패치 상태가 초기화되고 전송이 잠시 멈춥니다.', '재구성');
   if (!ok) return;
   toast('재구성 중...'); await post('/control/rebuild'); toast('재구성 완료 · 새로고침'); setTimeout(() => location.reload(), 400);
 }
 $('#btnRebuild').onclick = doRebuild;
-$('#btnGen2').onclick = async () => { const r = await post('/control/generate'); toast('루프 생성: ' + r.result); };
+$('#btnProfRegen').onclick = async () => {
+  if (!(await askConfirm('환자 프로필 재생성', '프로필 수·비율·프로필 시드로 환자 명단을 새로 만들고 병원에 다시 배정합니다.\n병원·게이트웨이와 루프 은행은 그대로입니다. 재원 환자·패치 상태가 초기화되고 전송이 잠시 멈춥니다.', '재생성'))) return;
+  toast('환자 프로필 재생성 중...'); const r = await post('/control/profiles/regenerate'); toast(`환자 프로필 ${cnum(r.profiles.count)}명 재생성 완료 · 새로고침`); setTimeout(() => location.reload(), 400);
+};
+$('#btnGen2').onclick = async () => {
+  if (!(await askConfirm('루프 은행 재생성', '리듬별 루프 변형 수·루프 시드·샘플링으로 1시간 루프 파형 파일을 다시 만듭니다. 수 분 걸립니다.\n병원·환자 프로필은 그대로입니다.', '재생성'))) return;
+  const r = await post('/control/generate'); toast('루프 생성: ' + r.result); loadWorldStatus();
+};
+// 메디컬 월드: 세 생성물이 지금 설정과 맞는지 (묶음 제목의 '재구성 필요' · '재생성 필요')
+async function loadWorldStatus() {
+  let d; try { d = await api('/world/status'); } catch (e) { return; }
+  const set = (id, on, title) => { const el = $('#' + id); if (el) { el.hidden = !on; el.title = title || ''; } };
+  set('wgPendHosp', d.hospital.pending, '바뀐 값: ' + d.hospital.changed.join(', '));
+  set('wgPendProf', d.profiles.pending, '바뀐 값: ' + d.profiles.changed.join(', '));
+  set('wgPendBank', d.bank.pending, d.bank.generating ? '생성 중' : '');
+  const p = d.profiles.applied || {};
+  const n = (x) => Number(x).toLocaleString('ko-KR');
+  $('#wgNowHosp').textContent = `지금: 병상 ${n(d.hospital.beds)} · 게이트웨이 ${n(d.hospital.gateways)}`;
+  $('#wgNowProf').textContent = p.count ? `지금 명단: ${n(p.count)}명 · 시드 ${p.seed}` : '';
+  $('#wgNowBank').textContent = d.bank.generating ? '생성 중…' : (d.bank.ready ? '' : '없음');
+}
+setInterval(() => { if (document.querySelector('section[data-tab="struct"].on')) loadWorldStatus(); }, 5000);
 $('#btnReset').onclick = async () => { await post('/config/reset'); await loadConfig(); toast('기본값 복원 (재구성 필요)'); };
 $('#btnAtStart').onclick = async () => { const r = await post('/control/autotune', { action: 'start', step: Number($('#at_step').value), window_s: Number($('#at_win').value) }); toast(r.result); };
 $('#btnAtStop').onclick = async () => { const r = await post('/control/autotune', { action: 'stop' }); toast(r.result); };
@@ -2901,7 +2924,6 @@ $$('.help').forEach(hp => {
   const BY_CARD = { scale: 'now', beds: 'rebuild', site: 'now', mcot: 'now', turnover: 'now', episode: 'now', devices: 'now', network: 'now', routine: 'now', clinical: 'now',
                     artifact: 'now', transit: 'now', patch: 'now', gateway: 'now', drill: 'now' };
   Object.entries(BY_CARD).forEach(([k, v]) => { const el = document.querySelector(`.card[data-card="${k}"]`); if (el) el.dataset.apply = v; });
-  const bank = document.querySelector('[data-fold="bankBody"]'); if (bank) bank.closest('.card').dataset.apply = 'bank';
   const LABEL = { now: '적용 시 반영', rebuild: '적용 시 재구성', bank: '파형 재생성 필요' };
   $$('.card[data-apply]').forEach(cd => {
     const h3 = cd.querySelector('h3'); if (!h3 || h3.querySelector('.apply')) return;
