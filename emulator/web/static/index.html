@@ -294,7 +294,7 @@
 <section class="tab" data-tab="struct" data-title="메디컬 월드 생성">
   <div class="structgrid">
     <div class="dcol">
-      <div class="card wg-guide"><h3>언제 · 어떤 순서로 쓰나요?</h3>
+      <div class="card wg-guide"><h3><button class="fold" data-fold="wgGuideBody" aria-expanded="true">▾</button>언제 · 어떤 순서로 쓰나요?</h3><div id="wgGuideBody">
         <div class="wg-when">메디컬 월드는 세 가지를 <b>따로</b> 만듭니다. 값을 바꾸면 그 묶음 제목에 <span class="wg-pend">재구성 필요</span> / <span class="wg-pend">재생성 필요</span>가 뜨고, 해당 버튼을 눌러야 반영됩니다. 평소 테스트 조건(장애·아티팩트·환자 수·실제 시그널)은 <b>[시나리오]</b>에서 바꿉니다.</div>
         <ol class="wg-steps">
           <li><b>병원 · 게이트웨이</b> (자주) — 병상 수 · 도면 · 건물 · 게이트웨이 설치·용량 · 병원 시드 → <b>[병원·게이트웨이 재구성]</b>. 환자는 다시 배정되고 라우터 연결이 몇 초 끊겼다 다시 붙습니다.</li>
@@ -302,6 +302,7 @@
           <li><b>파형 루프 은행</b> (가끔) — 리듬별 루프 변형 · 루프 시드 · ECG 샘플링 → 오른쪽 카드의 <b>[루프 은행 재생성]</b>. 수 분 걸립니다.</li>
           <li><b>재현 실행</b> — 병원 시드와 시작 시각을 고정하고 1초 고정 간격을 켠 뒤 [병원·게이트웨이 재구성]. 같은 사건이 같은 순서로 다시 일어납니다.</li>
         </ol>
+        </div>
       </div>
       <div class="card wgen"><h3>병원 · 게이트웨이 <span class="wg-pend" id="wgPendHosp" hidden>재구성 필요</span><span class="wg-now" id="wgNowHosp"></span></h3>
       <div class="help">병상 수 · 도면 · 건물 · 게이트웨이 설치·용량 · 병원 시드를 바꾸면 아래 [병원·게이트웨이 재구성]으로 반영합니다. 환자 명단과 루프 은행은 그대로이고, 재원 환자는 다시 배정되며 라우터 연결이 몇 초 끊겼다 다시 붙습니다.</div>
