@@ -2156,7 +2156,8 @@ let DEV = null;
 function mixNote() {
   const m = ((SV || CFG).scenario.devices || {}).spo2_mix || {}; const t = (m.fingertip || 0) + (m.ring || 0) + (m.wrist_ptt || 0) || 1;
   const pct = k => Math.round((m[k] || 0) / t * 100);
-  $('#d_mixNote').textContent = `병원 내: 손끝 ${pct('fingertip')}% · 반지형 ${pct('ring')}% · 손목 ${pct('wrist_ptt')}%  |  원외: 반지형 ${Math.round(((m.ring || 0) + (m.fingertip || 0)) / t * 100)}% · 손목 ${pct('wrist_ptt')}%`;
+  const out_r = Math.round(((m.ring || 0) + (m.fingertip || 0)) / t * 100);
+  $('#d_mixNote').textContent = `병원 ${pct('fingertip')}·${pct('ring')}·${pct('wrist_ptt')} % · 원외 0·${out_r}·${pct('wrist_ptt')} %`;
 }
 ['d_mf', 'd_mr', 'd_mw'].forEach(id => document.getElementById(id).addEventListener('input', () => { const m = (SV || CFG).scenario.devices.spo2_mix; m[{ d_mf: 'fingertip', d_mr: 'ring', d_mw: 'wrist_ptt' }[id]] = Number(document.getElementById(id).value); mixNote(); }));
 async function loadDevices() {
@@ -2481,7 +2482,7 @@ async function loadConfig() { META = await api('/config'); CFG = META.config; lo
 async function loadRealism() {
   let d; try { d = await api('/realism'); } catch (e) { return; }
   const rn = $('#routineNow'); if (rn) rn.textContent = `지금: ${d.routine.label}`;
-  const nd = $('#netDevStatus'); if (nd) { const n = d.network; nd.innerHTML = `장비 코어 ${n.devices.core} · 층 스위치 ${n.devices.switch} (UPS 없음 ${n.switch_no_ups}) · 무선 AP ${n.devices.ap}` +
+  const nd = $('#netDevStatus'); if (nd) { const n = d.network; nd.innerHTML = `코어 ${n.devices.core} · 스위치 ${n.devices.switch} (UPS 없음 ${n.switch_no_ups}) · AP ${n.devices.ap}` +
     (n.down.length ? ` · <span class="tag err">장애 ${n.down.length}</span> ${n.down.map(x => esc(x.id) + (x.state === 'boot' ? ' 재부팅' : '')).join(', ')}` : '') + (n.power_windows ? ` · <span class="tag warn">전원 차단·재부팅 GW ${n.power_windows}</span>` : ''); }
   const ph = $('#phoneStatus'); if (ph) { const P = d.phones || {}, bad = Object.entries(P).filter(([k]) => k !== 'ok'); ph.textContent = Object.keys(P).length ? `단말 정상 ${P.ok || 0}` + bad.map(([k, v]) => ` · ${{ killed: '앱 종료', saver: '절전', update: 'OS 업데이트', airplane: '비행기 모드' }[k] || k} ${v}`).join('') : ''; }
   const dl = $('#deterList'); if (dl) dl.innerHTML = d.deteriorating.length ? d.deteriorating.map(x => `<span class="tag ${x.stage === '코드블루' ? 'err' : 'warn'}">${esc(x.kind)} · ${esc(x.stage)}</span> ${esc(x.name)} (${x.elapsed_min}분)`).join('<br>') : '악화 중인 환자 없음';
@@ -2654,6 +2655,8 @@ async function loadScnPresets(keepPos = true) {
     if (p.id === scnPresets.current) { const f = scnPresets.presets.find(x => x.id === p.id); SCN_DRAFT = {}; scnCompute(); deepMerge(SV, f.values); SCN_DRAFT = clone(f.values); scnFill(); }
   };
 })();
+// ---------------- 한 줄 상태 표시: 잘린 내용은 마우스를 올리면 전체
+$$('.one').forEach(el => new MutationObserver(() => { el.title = el.textContent; }).observe(el, { childList: true, characterData: true, subtree: true }));
 // ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다
 $$('.help').forEach(hp => {
   if ((hp.textContent || '').trim().length < 90) return;

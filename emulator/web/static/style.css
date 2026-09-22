@@ -921,3 +921,8 @@ button.preset:hover{border-color:var(--acc2)}
 .pw-item{height:40px;margin-top:-20px;font-size:15px}
 .pw-item .pw-no{font-size:13px}
 .pd-head b{font-size:17px}
+
+/* 시나리오 탭: 항목 이름·상태 줄은 한 줄로 (자세한 설명은 마우스를 올리면) */
+section[data-tab="scn"] label.chk, section[data-tab="scn"] .field > span, .one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+section[data-tab="scn"] label.chk{display:block;line-height:32px}
+section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px}

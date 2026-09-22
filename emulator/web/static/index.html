@@ -188,7 +188,7 @@
       <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 장소 시나리오가 <b>원외 MCOT</b>면 입원 환자는 0명이 됩니다. 시드 등 그 외 구조 설정은 [설정·데이터] 탭의 구조 설정에서 재구성합니다.</div>
     </div>
     <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
-      <div class="row"><div class="field"><span>병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
+      <div class="row"><div class="field"><span title="병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)">병상 수 (환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
       <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small primary" id="btnRebuild2" title="병상 수·구조 설정을 반영해 병원과 환자를 새로 구성합니다">재구성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
       <div class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></div>
       <div class="help">병상 수를 바꾸고 위의 <b>[적용]</b>을 누르면 자동으로 재구성해 병원을 그 크기로 짓습니다(최대 약 4,850병상). 재원 환자와 패치 상태는 초기화되고 전송은 잠시 멈춥니다. [재구성]은 지금 적용된 값으로 다시 짓습니다.</div>
@@ -201,7 +201,7 @@
       <div class="field"><span>원외 MCOT 환자 수 (모바일 게이트웨이 1대당 1명)</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
       <div class="presets" id="outPresets"></div>
       <div class="help">장소 시나리오가 <b>원외 MCOT</b> 또는 <b>혼합</b>일 때만 반영됩니다.</div>
-      <label class="chk"><input type="checkbox" id="md_en"> 단말 동작 (앱 강제 종료 · 절전 모드 일괄 업로드 · 야간 OS 업데이트 · 비행기 모드 · 지방 커버리지)</label>
+      <label class="chk" title="단말 동작 (앱 강제 종료 · 절전 모드 일괄 업로드 · 야간 OS 업데이트 · 비행기 모드 · 지방 커버리지)"><input type="checkbox" id="md_en"> 단말 동작 (앱 종료 · 절전 등)</label>
       <div class="row tight"><button class="small" data-trig="phone" data-params='{"state":"killed","minutes":10}'>임의 MCOT 앱 종료 10분</button><button class="small" data-trig="phone" data-params='{"state":"saver","minutes":10}'>임의 MCOT 절전 모드 10분</button></div>
       <div class="sub" id="phoneStatus"></div>
     </div>
@@ -212,8 +212,8 @@
       <div class="row tight"><button class="small" data-trig="surge" data-params='{"over_min":60}'>대량 환자 유입 (병상 5 % · 60분)</button><span class="sub" id="surgeStatus"></span></div>
     </div>
     <div class="card" data-card="episode"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>부정맥 에피소드</h3>
-      <label class="chk"><input type="checkbox" id="s_ep"> 자연 발생 부정맥 에피소드 (기저 리듬 위 발작성 리듬 전환)</label>
-      <label class="chk"><input type="checkbox" id="s_hop"> 루프 변형 순환 (8~25분마다 같은 리듬의 다른 변형으로 전환해 1시간 반복 방지)</label>
+      <label class="chk" title="자연 발생 부정맥 에피소드 (기저 리듬 위 발작성 리듬 전환)"><input type="checkbox" id="s_ep"> 자연 발생 부정맥 에피소드</label>
+      <label class="chk" title="루프 변형 순환 (8~25분마다 같은 리듬의 다른 변형으로 전환해 1시간 반복 방지)"><input type="checkbox" id="s_hop"> 루프 변형 순환 (반복 방지)</label>
       <div class="row tight"><button class="small" data-trig="episode">임의 환자 부정맥 에피소드</button></div>
     </div>
     <div class="card" data-card="routine"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병원 일과 <span class="right sub" id="routineNow"></span></h3>
@@ -221,7 +221,7 @@
       <div class="help">06·10·14·18·22시 활력징후 측정, 08~10시 병동별 회진(패치 확인·재부착), 식사 시간 착석, 14~18시 면회, 19~21시 저녁 샤워, 22시 소등. 사람이 움직이면 신호가 흔들리므로 아티팩트 시나리오를 꺼도 일과는 적용되고, 아티팩트 강도는 흔들림의 세기만 바꿉니다.</div>
     </div>
     <div class="card" data-card="clinical"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>임상 악화</h3>
-      <label class="chk"><input type="checkbox" id="cl_en"> 자연 발생 (패혈증 · 심부전 악화 · 호흡부전 · 저혈당 · 출혈성 쇼크)</label>
+      <label class="chk" title="자연 발생 (패혈증 · 심부전 악화 · 호흡부전 · 저혈당 · 출혈성 쇼크)"><input type="checkbox" id="cl_en"> 자연 발생 임상 악화</label>
       <div class="field"><span>발생 빈도 (1,000 환자·일당 건수)</span><input type="number" id="cl_rate" min="0" max="500" step="1"></div>
       <div class="row tight"><button class="small" data-trig="deteriorate" data-params='{"fast":true}'>임의 환자 악화 (빠르게)</button><button class="small danger" data-trig="code_blue">임의 환자 코드블루</button></div>
       <div class="sub" id="deterList"></div>
@@ -230,11 +230,11 @@
     <div class="card" data-card="devices"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>기기 세트 (환자별 채널)</h3>
       <div class="field"><span>배정 정책</span><select id="s_devpol"><option value="auto">증상 맞춤 (질환·병동·재원 형태별 자동)</option><option value="all">전체 장착 (ECG+체온+SpO2+CGM)</option><option value="minimal">ECG 패치만</option></select></div>
       <div class="help">신규 입원자는 이 정책으로 기기를 받습니다. 이미 입원한 환자에게 적용하려면 아래 버튼을 누르세요. 증상 맞춤: 호흡기·감염·심부전·심장수술·수면무호흡 환자는 SpO2 92%, 발열·수술·종양 병동은 체온 패치 95%, 당뇨는 CGM 95%, 원외 환자는 반지형/손목 SpO2.</div>
-      <div class="field"><span>SpO2 센서 종류 비율 (합계 기준 정규화, 원외 환자는 손끝 제외)</span>
+      <div class="field"><span title="SpO2 센서 종류 비율 (합계 기준 정규화, 원외 환자는 손끝 제외)">SpO2 센서 비율</span>
         <div class="row"><div class="field" style="margin:0"><span>손끝 %</span><input type="number" id="d_mf" min="0" max="100"></div><div class="field" style="margin:0"><span>반지형 %</span><input type="number" id="d_mr" min="0" max="100"></div><div class="field" style="margin:0"><span>손목 밴드 %</span><input type="number" id="d_mw" min="0" max="100"></div></div>
-        <div class="sub" id="d_mixNote"></div></div>
+        <div class="sub one" id="d_mixNote"></div></div>
       <div class="row tight"><button id="btnDevApply" class="small primary">입원 환자 전체에 일괄 적용</button></div>
-      <div id="devStats" class="sub" style="margin-top:8px"></div>
+      <div id="devStats" class="sub one" style="margin-top:8px"></div>
     </div>
     <div class="card" data-card="network"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>네트워크 장애</h3>
       <label class="chk"><input type="checkbox" id="n_en"> 시나리오 사용 <small class="sub">(기본: 무장애)</small></label>
@@ -242,20 +242,20 @@
       <label class="chk"><input type="checkbox" id="n_wl"> 무선 노이즈 → 신호 저하/손실</label>
       <label class="chk"><input type="checkbox" id="n_wd"> 유선 네트워크 장애 (층 단위)</label>
       <label class="chk"><input type="checkbox" id="n_lat"> 네트워크 지연</label>
-      <label class="chk"><input type="checkbox" id="n_pw"> 건물 정전 (발전기 전환 · UPS 유지 · 일반 전원 차단)</label>
-      <label class="chk"><input type="checkbox" id="n_topo"> 네트워크 장비 장애 (건물 코어 · 층 스위치 · 무선 AP)</label>
-      <label class="chk"><input type="checkbox" id="rf_en"> 전파 방해 (2.4 GHz 혼잡: BLE 잦은 끊김 · 무선 AP 경유 손실)</label>
+      <label class="chk" title="건물 정전 (발전기 전환 · UPS 유지 · 일반 전원 차단)"><input type="checkbox" id="n_pw"> 건물 정전 · UPS</label>
+      <label class="chk" title="네트워크 장비 장애 (건물 코어 · 층 스위치 · 무선 AP)"><input type="checkbox" id="n_topo"> 장비 장애 (코어 · 스위치 · AP)</label>
+      <label class="chk" title="전파 방해 (2.4 GHz 혼잡: BLE 잦은 끊김 · 무선 AP 경유 손실)"><input type="checkbox" id="rf_en"> 전파 방해 (2.4 GHz)</label>
       <div class="field"><span>전파 방해 강도 (%)</span><div class="rv"><input type="range" id="rf_lvl" min="0" max="100" step="5"><output id="rf_lvl_o"></output></div></div>
       <div class="row tight"><button class="small" data-trig="network_event">네트워크 이벤트 1회</button><button class="small" data-trig="switch_fault">층 스위치 장애</button><button class="small" data-trig="ap_fault">무선 AP 장애</button><button class="small" data-trig="power_outage">건물 정전</button></div>
-      <div class="sub" id="netDevStatus"></div>
+      <div class="sub one" id="netDevStatus"></div>
       <div class="help">게이트웨이는 건물 코어 → 층 스위치 → (무선이면) AP 아래에 붙어 있습니다. 장비가 죽으면 그 아래 게이트웨이의 업링크가 한꺼번에 끊기고, 게이트웨이는 살아 있어 패치가 그대로 붙은 채 프레임을 쌓았다가 복구 때 올립니다. 정전 때는 UPS 계통(응급실·간호사실)은 유지, 비상 계통은 발전기 전환(8~15초) 뒤 재부팅, 일반 계통은 한전 복전까지 꺼지고, UPS 없는 층 스위치는 재부팅하는 동안 그 층 유선 게이트웨이를 끊습니다.</div>
     </div>
     <div class="card" data-card="artifact"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>아티팩트 / 환자 활동</h3>
       <label class="chk"><input type="checkbox" id="a_en"> 시나리오 사용</label>
       <div class="field"><span>강도</span><div class="rv"><input type="range" id="a_int" min="0" max="100"><output id="a_int_o"></output></div></div>
-      <label class="chk"><input type="checkbox" id="a_mo"> 움직임/뒤척임/보행/화장실 (motion artifact)</label>
+      <label class="chk" title="움직임/뒤척임/보행/화장실 (motion artifact)"><input type="checkbox" id="a_mo"> 움직임 · 보행 · 화장실</label>
       <label class="chk"><input type="checkbox" id="a_sh"> 샤워 (SpO2 센서 분리, 강한 노이즈)</label>
-      <label class="chk"><input type="checkbox" id="a_ex"> 검사 이동 (복도·엘리베이터 핸드오버/음영, 패치 유지; MRI만 촬영 중 분리 후 새 패치로 교체)</label>
+      <label class="chk" title="검사 이동 (복도·엘리베이터 핸드오버/음영, 패치 유지; MRI만 촬영 중 분리 후 새 패치로 교체)"><input type="checkbox" id="a_ex"> 검사 이동 (핸드오버 · 음영)</label>
       <label class="chk"><input type="checkbox" id="a_re"> 패치 분리/재부착</label>
       <label class="chk"><input type="checkbox" id="a_tr"> 병실 이동/타병원 전원 (패치 교체)</label>
       <label class="chk"><input type="checkbox" id="a_rp"> 배터리 소진 시 패치 교체</label>
@@ -268,16 +268,16 @@
     </div>
     <div class="card" data-card="patch"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>패치 (웨어러블 BLE)</h3>
       <div class="row"><div class="field"><span>패치 배터리 수명 (일)</span><input type="number" id="p_days" min="0.01" max="30" step="0.5"></div><div class="field"><span>교체 기준 (%)</span><input type="number" id="p_rep" min="0" max="50"></div></div>
-      <label class="chk"><input type="checkbox" id="p_dr"> 배터리 감소 시뮬레이션 (입원 시간에 따라 소모, 기준 이하 시 교체)</label>
-      <label class="chk"><input type="checkbox" id="p_lo"> 리드 오프 이벤트 (전극 분리, 자연 발생)</label>
+      <label class="chk" title="배터리 감소 시뮬레이션 (입원 시간에 따라 소모, 기준 이하 시 교체)"><input type="checkbox" id="p_dr"> 배터리 소모 (기준 이하 시 교체)</label>
+      <label class="chk" title="리드 오프 이벤트 (전극 분리, 자연 발생)"><input type="checkbox" id="p_lo"> 리드 오프 (전극 분리)</label>
       <div class="row tight"><button class="small" data-trig="lead_off">임의 리드 오프 60s</button><button class="small" data-trig="replace_patch">임의 패치 교체</button></div>
     </div>
     <div class="card" data-card="gateway"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>게이트웨이 장애</h3>
       <label class="chk"><input type="checkbox" id="gw_f"> 시나리오 사용</label>
       <div class="field"><span>강도</span><div class="rv"><input type="range" id="gw_int" min="0" max="100"><output id="gw_int_o"></output></div></div>
-      <label class="chk"><input type="checkbox" id="gw_out"> 무응답 장애 → 연결 패치 동시 끊김, 인접 게이트웨이로 재접속 (용량 이내), 복구 시 자동 복귀</label>
-      <label class="chk"><input type="checkbox" id="gw_deg"> 성능 저하 → CPU 과부하, 패킷 손실, 지연 증가</label>
-      <label class="chk"><input type="checkbox" id="gw_rep"> 하드웨어 고장 → 교체 대기(5~25분) 후 새 게이트웨이 번호·MAC의 장비로 교체, 새 장비로 라우터 재접속(META 재전송)</label>
+      <label class="chk" title="무응답 장애 → 연결 패치 동시 끊김, 인접 게이트웨이로 재접속 (용량 이내), 복구 시 자동 복귀"><input type="checkbox" id="gw_out"> 무응답 장애 (인접 GW 재접속)</label>
+      <label class="chk" title="성능 저하 → CPU 과부하, 패킷 손실, 지연 증가"><input type="checkbox" id="gw_deg"> 성능 저하 (손실 · 지연)</label>
+      <label class="chk" title="하드웨어 고장 → 교체 대기(5~25분) 후 새 게이트웨이 번호·MAC의 장비로 교체, 새 장비로 라우터 재접속(META 재전송)"><input type="checkbox" id="gw_rep"> 하드웨어 고장 → 교체</label>
       <div class="help">병실·복도·엘리베이터·계단·검사실·화장실 게이트웨이(최대 32 BLE 연결)에 무작위로 발생합니다. 장애가 켜지면 상단에 GW 장애 ON으로 표시됩니다.</div>
       <div class="row tight"><button class="small" data-trig="gateway_fault">임의 게이트웨이 장애 90s</button><button class="small" data-trig="gateway_replace">임의 게이트웨이 고장→30초 후 교체</button></div>
     </div>
@@ -285,16 +285,16 @@
       <div class="help">라우터의 파서·접속 처리 내구성을 검증합니다. 위 버튼은 일회성 이벤트이고, 아래는 게이트웨이의 송출 동작(저장 후 전송, 재접속 완만화)과 파서 시험(오염 프레임, 정답 캡처)입니다.</div>
       <div class="row tight"><button class="small" data-trig="storm" data-params='{"duration":20}'>연결 폭주 (전체 동시 재접속 20s)</button><button class="small" data-trig="half_open" data-params='{"count":5,"duration":60}'>반열림 연결 5대 60s</button><button class="small" data-trig="dup_id" data-params='{"duration":60}'>gw_id 중복 60s</button><button class="small" data-trig="network_event">네트워크 이벤트 1회</button></div>
       <div class="xhead">게이트웨이 송출 동작 · 파서 시험</div>
-      <label class="chk"><input type="checkbox" id="sf_en"> 저장 후 전송 (게이트웨이 장애·회선 단절 중 프레임을 로컬 버퍼에 보관, 복구 시 과거 타임스탬프 프레임을 버스트로 재전송)</label>
-      <div class="row"><div class="field"><span>게이트웨이별 버퍼 한도 (bytes)</span><input type="number" id="sf_max" min="65536" step="65536"></div><div class="field"><span>재전송 버스트 (프레임/주기)</span><input type="number" id="sf_burst" min="1" max="1000"></div></div>
-      <label class="chk"><input type="checkbox" id="fz_en"> 오염 프레임 주입 (파서 퍼징: bad_magic·bad_version·bad_len·truncated·oversize·garbage·dup·reorder·seq_gap·bad_record)</label>
-      <div class="row"><div class="field"><span>주입 비율 (프레임 1000개당)</span><input type="number" id="fz_rate" min="0" max="1000" step="0.5"></div><div class="field" style="flex:2"><span>종류 (쉼표 구분, 비우면 전체)</span><input type="text" id="fz_kinds" placeholder="bad_magic,truncated,dup"></div></div>
-      <label class="chk"><input type="checkbox" id="t_storm"> 재접속 완만화 (끄면 모든 게이트웨이가 동시에 재접속 → 상시 연결 폭주)</label>
-      <div class="row tight" style="align-items:center"><label class="chk" style="margin:0"><input type="checkbox" id="cap_en"> 정답 데이터 캡처 (소켓에 보낸 원본 바이트를 기록, 송신 대상이 있을 때만)</label><button class="small" id="capClear">캡처 파일 삭제</button><span class="sub" id="capInfo"></span></div>
+      <label class="chk" title="저장 후 전송 (게이트웨이 장애·회선 단절 중 프레임을 로컬 버퍼에 보관, 복구 시 과거 타임스탬프 프레임을 버스트로 재전송)"><input type="checkbox" id="sf_en"> 저장 후 전송 (장애 중 버퍼)</label>
+      <div class="row"><div class="field"><span title="게이트웨이별 버퍼 한도 (bytes)">GW 버퍼 한도 (B)</span><input type="number" id="sf_max" min="65536" step="65536"></div><div class="field"><span title="재전송 버스트 (프레임/주기)">재전송 버스트</span><input type="number" id="sf_burst" min="1" max="1000"></div></div>
+      <label class="chk" title="오염 프레임 주입 (파서 퍼징: bad_magic·bad_version·bad_len·truncated·oversize·garbage·dup·reorder·seq_gap·bad_record)"><input type="checkbox" id="fz_en"> 오염 프레임 주입 (퍼징)</label>
+      <div class="row"><div class="field"><span title="주입 비율 (프레임 1000개당)">비율 (1000개당)</span><input type="number" id="fz_rate" min="0" max="1000" step="0.5"></div><div class="field" style="flex:2"><span title="종류 (쉼표 구분, 비우면 전체)">종류 (비우면 전체)</span><input type="text" id="fz_kinds" placeholder="bad_magic,truncated,dup"></div></div>
+      <label class="chk" title="재접속 완만화 (끄면 모든 게이트웨이가 동시에 재접속 → 상시 연결 폭주)"><input type="checkbox" id="t_storm"> 재접속 완만화</label>
+      <div class="row tight" style="align-items:center"><label class="chk" style="margin:0" title="정답 데이터 캡처 (소켓에 보낸 원본 바이트를 기록, 송신 대상이 있을 때만)"><input type="checkbox" id="cap_en"> 송신 원본 캡처</label><button class="small" id="capClear">캡처 파일 삭제</button><span class="sub" id="capInfo"></span></div>
       <div class="help">캡처 위치는 <code>/var/lib/biosim/runtime/capture/w*.bin</code> 입니다. 라우터가 받은 프레임과 대조하려면 <code>/opt/biosim/venv/bin/python /opt/biosim/app/tools/verify_capture.py --capture /var/lib/biosim/runtime/capture --received &lt;수신 폴더&gt;</code> 를 실행합니다.</div>
     </div>
     <div class="card" data-card="script"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>시나리오 스크립트</h3>
-      <div class="row"><div class="field" style="flex:2"><span>스크립트 파일 (scenarios/*.json)</span><select id="scriptFile"></select></div><div class="field"><span>&nbsp;</span><div class="row tight"><button class="small" id="scriptStart">시작</button><button class="small" id="scriptStop">중지</button></div></div></div>
+      <div class="row"><div class="field" style="flex:2"><span title="스크립트 파일 (scenarios/*.json)">스크립트 파일</span><select id="scriptFile"></select></div><div class="field"><span>&nbsp;</span><div class="row tight"><button class="small" id="scriptStart">시작</button><button class="small" id="scriptStop">중지</button></div></div></div>
       <div class="row tight"><input type="text" id="recName" placeholder="녹화 이름 (예: 정전-훈련)" style="max-width:220px"><button class="small" id="recStart">● 녹화 시작</button><button class="small" id="recStop">■ 녹화 종료·저장</button><span class="sub" id="recStatus"></span></div>
       <div class="sub" id="scriptStatus">스크립트 없음</div>
       <div class="sub mono" id="scriptLog" style="font-size:11px;max-height:120px;overflow:auto"></div>
