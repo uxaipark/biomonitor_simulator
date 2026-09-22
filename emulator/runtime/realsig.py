@@ -129,6 +129,17 @@ def _hint_fs(name: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def _titles(line: str, delim: str | None, ncol: int) -> list[str]:
+    """제목 줄 → 열 제목.  공백 구분이면 'Elapsed time' 처럼 제목 안의 빈칸에 칸 수가 어긋나지 않도록 따옴표 · 두 칸 이상의
+    빈칸으로도 갈라 보고, 그래도 데이터 열 수와 맞지 않으면 제목을 버린다 (어긋난 제목으로 엉뚱한 열을 신호로 고르지 않도록)."""
+    if delim:
+        row = next(csv.reader([line], delimiter=delim))
+    else:
+        row = next((t for t in (line.split(), re.findall(r"'[^']*'|\"[^\"]*\"|\S+", line), re.split(r"\s{2,}", line.strip()))
+                    if len(t) == ncol), [])
+    return [t.strip().strip("'\"").strip() for t in row]
+
+
 def _sniff(path: Path) -> dict:
     """앞부분만 읽어 형식을 정한다: 열 제목, 구분자, 소수점 쉼표, 데이터가 시작하는 줄, 열 수, 시각 문자열 열, 머리 정보."""
     size = path.stat().st_size
@@ -138,6 +149,7 @@ def _sniff(path: Path) -> dict:
         head = list(itertools.islice(f, 400))
     info: dict = {}
     titles: list[str] = []
+    hdr, units = None, None                                          # CSV 계열의 제목 줄 · 단위 줄
     if head and head[0].startswith("ATF"):                            # Axon Text File
         try:
             n_hdr = int(re.split(r"[\t ,]+", head[1].strip())[0])
@@ -157,19 +169,20 @@ def _sniff(path: Path) -> dict:
         delim, dec = _sniff_delim(cand[2:] if len(cand) > 4 else cand)    # 앞 두 줄은 제목 · 단위 줄일 수 있다
         k = 0
         if cand and not all(_is_num(x) for x in _fields(cand[0], delim, dec) if x):
-            row = next(csv.reader([cand[0].rstrip("\r\n")], delimiter=delim)) if delim else cand[0].split()
-            titles = [t.strip().strip("'\"").strip() for t in row]
-            k = 1
+            hdr, k = cand[0].rstrip("\r\n"), 1
             if len(cand) > 1 and cand[1].lstrip()[:1] in ("'", '"'):
-                units = _fields(cand[1], delim, False)
-                if not any(_is_num(u) for u in units if u):           # MIT-BIH 내보내기의 단위 줄 ('seconds', 'mV')
-                    titles += [f"col{i}" for i in range(len(titles), len(units))]
-                    titles = [f"{t} ({units[i]})" if i < len(units) and units[i] else t for i, t in enumerate(titles)]
-                    k = 2
+                u = _fields(cand[1], delim, False)
+                if not any(_is_num(x) for x in u if x):               # MIT-BIH 내보내기의 단위 줄 ('seconds', 'mV')
+                    units, k = u, 2
         skip = idx[k] if k < len(idx) else len(head)
     rows = [_fields(l, delim, dec) for l in head[skip:] if l.strip() and not l.lstrip().startswith("#")][:50]
     counts = [len(r) - next((i for i, x in enumerate(reversed(r)) if x), len(r)) for r in rows]   # 줄 끝 구분자의 빈 칸은 빼고
     ncol = max(collections.Counter(counts).most_common(1)[0][0] if counts else len(titles), 1)
+    if hdr is not None:                                               # 제목은 데이터 열 수를 안 뒤에 가른다 (공백 구분 제목 맞추기)
+        titles = _titles(hdr, delim, ncol)
+        if units:
+            titles += [f"col{i}" for i in range(len(titles), len(units))]
+            titles = [f"{t} ({units[i]})" if i < len(units) and units[i] else t for i, t in enumerate(titles)]
     clock = {c for c in range(ncol) if any(c < len(r) and r[c] for r in rows)
              and all(_CLOCK.match(r[c]) for r in rows if c < len(r) and r[c])}
     return {"titles": titles, "delim": delim, "dec": dec, "skip": skip, "ncol": ncol, "clock": clock, "info": info}
@@ -285,8 +298,12 @@ def parse_file(path: str, target_fs: int) -> tuple[np.ndarray, np.ndarray, dict]
     del x
     ecg = np.clip(np.rint(xo), -32000, 32000).astype(np.int16)
     hr = _hr_series(xo, target_fs)
-    if not (hr > 0).any() and float(np.percentile(xo, 99.5) - np.percentile(xo, 0.5)) >= 200:
-        hr = np.zeros(0, dtype=np.uint8)                              # 박동을 못 찾았는데 평탄선(무수축)도 아님 → HR 은 덮어쓰지 않음
+    if not (hr > 0).any():                                            # 박동을 못 찾았는데 평탄선(무수축)도 아님 → HR 은 덮어쓰지 않음
+        k = max(1, int(0.3 * target_fs))                              # 평탄선 판단은 기저선 흔들림을 뺀 진폭으로 (흔들리는 무수축 기록은 HR 0)
+        cs = np.concatenate(([0.0], np.cumsum(xo, dtype=np.float64)))
+        hp = xo[k // 2:k // 2 + len(xo) - k + 1] - (cs[k:] - cs[:-k]) / k
+        if float(np.percentile(hp, 99.9) - np.percentile(hp, 0.1)) >= 200:
+            hr = np.zeros(0, dtype=np.uint8)
     return ecg, hr, {"title": titles[c], "fs_in": round(float(fs), 2), "fs_src": fs_src, "unit": unit_src, "seconds": round(n_out / target_fs, 1),
                      "hr_mean": int(np.median(hr[hr > 0])) if (hr > 0).any() else 0}
 
