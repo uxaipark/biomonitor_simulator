@@ -413,23 +413,28 @@
 <!-- ================= 현장 테스트 -->
 <section class="tab" data-tab="test" data-title="테스트">
   <h2 class="ft-sec">현장 테스트 <span>망·장비·서버·뷰어 설정을 마친 뒤, 특정 게이트웨이 · 환자에게 이벤트를 보내 그 게이트웨이를 보는 뷰어의 표시·경보음을 확인</span><span class="ft-tx" id="ftTx"></span></h2>
-  <div class="ftgrid">
-    <div class="card"><h3>1. 게이트웨이</h3>
-      <div class="row tight"><div class="field" style="flex:1"><select id="ftGw"></select></div><button class="small" id="ftGwRefresh" title="목록 새로고침">↻</button></div>
-      <label class="chk"><input type="checkbox" id="ftOnlyPat" checked> 환자가 연결된 게이트웨이만</label>
-      <div class="sub one" id="ftGwInfo"></div>
-      <h4 class="ft-sub">대상 환자</h4>
-      <div class="ft-pats" id="ftPats"></div>
-      <h4 class="ft-sub">유지 시간</h4>
-      <div class="seg ft-dur" id="ftDur"><button data-s="30">30초</button><button data-s="60" class="on">1분</button><button data-s="180">3분</button><button data-s="600">10분</button></div>
-    </div>
-    <div class="card"><h3>2. 이벤트 보내기 <span class="right sub">누르면 바로 전송 · 시간이 지나면 정상 복귀</span></h3>
-      <div id="ftEvents"></div>
-    </div>
-    <div class="card"><h3>3. 진행 중 <span class="sub" id="ftActN"></span><span class="right"><button class="small danger" id="ftClearAll">모두 정상 복귀</button></span></h3>
-      <div class="tbl"><table id="ftActive"><thead><tr><th>이벤트</th><th>게이트웨이 · 환자</th><th>남은</th><th></th></tr></thead><tbody></tbody></table></div>
-      <h4 class="ft-sub">최근 보낸 이벤트 <span class="sub">(보낸 시각과 뷰어 표시 시각을 비교)</span></h4>
-      <div class="ft-hist" id="ftHist"></div>
+  <div class="card ft-one"><h3>게이트웨이별 이벤트 시험 <span class="sub">게이트웨이 → 대상 환자 · 유지 시간 → 이벤트</span><span class="right"><span class="sub" id="ftActN"></span> <button class="small danger" id="ftClearAll">모두 정상 복귀</button></span></h3>
+    <div class="ft-panes">
+      <div class="ft-pane">
+        <h4 class="ft-ph">1. 게이트웨이</h4>
+        <div class="row tight"><div class="field" style="flex:1"><select id="ftGw"></select></div><button class="small" id="ftGwRefresh" title="목록 새로고침">↻</button></div>
+        <label class="chk"><input type="checkbox" id="ftOnlyPat" checked> 환자가 연결된 게이트웨이만</label>
+        <div class="sub one" id="ftGwInfo"></div>
+        <h4 class="ft-sub">대상 환자</h4>
+        <div class="ft-pats" id="ftPats"></div>
+        <h4 class="ft-sub">유지 시간</h4>
+        <div class="seg ft-dur" id="ftDur"><button data-s="30">30초</button><button data-s="60" class="on">1분</button><button data-s="180">3분</button><button data-s="600">10분</button></div>
+      </div>
+      <div class="ft-pane">
+        <h4 class="ft-ph">2. 이벤트 보내기 <span class="sub">누르면 바로 전송 · 시간이 지나면 정상 복귀</span></h4>
+        <div id="ftEvents"></div>
+      </div>
+      <div class="ft-pane">
+        <h4 class="ft-ph">3. 진행 중</h4>
+        <div class="tbl"><table id="ftActive"><thead><tr><th>이벤트</th><th>게이트웨이 · 환자</th><th>남은</th><th></th></tr></thead><tbody></tbody></table></div>
+        <h4 class="ft-sub">최근 보낸 이벤트 <span class="sub">(보낸 시각과 뷰어 표시 시각을 비교)</span></h4>
+        <div class="ft-hist" id="ftHist"></div>
+      </div>
     </div>
   </div>
   <h2 class="ft-sec">수동 제어 <span>무작위 대상 이벤트 · 스크립트 녹화/재생 · 성능 시험</span></h2>
