@@ -908,3 +908,8 @@ button.preset:hover{border-color:var(--acc2)}
 .pw-item.front{border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 16%,var(--panel));box-shadow:0 2px 8px color-mix(in srgb,var(--acc) 30%,transparent)}
 .pw-lens{display:none}
 .pw-item.applied::after{right:12px}
+/* 카드 크게: 클릭하기 쉬운 높이 */
+.pwheel{height:290px}
+.pw-item{height:40px;margin-top:-20px;font-size:15px}
+.pw-item .pw-no{font-size:13px}
+.pd-head b{font-size:17px}

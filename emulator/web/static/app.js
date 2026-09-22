@@ -2463,7 +2463,7 @@ async function loadLabelSummary() {
 // ---------------- 대표 테스트 시나리오 프리셋 휠: 휠(호버 중 마우스 휠 · 드래그 · 화살표)로 고르고 [적용]으로 반영
 let scnPresets = null;
 const PW = { pos: 0, target: 0, raf: 0, drag: null, acc: 0, built: '' };
-const PW_H = 38;                                               // 한 칸 높이 (px)
+const PW_H = 48;                                               // 한 칸 높이 (px) — 카드 40px + 간격 (클릭하기 쉬운 크기)
 // 순환 휠: 위치는 끝없이 늘어나는 실수, 항목 번호는 그 나머지
 const pwN = () => scnPresets?.presets.length || 1;
 const pwMod = (x) => ((x % pwN()) + pwN()) % pwN();
