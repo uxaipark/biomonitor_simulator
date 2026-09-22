@@ -400,6 +400,24 @@ def presets_reset(pid: str):
     return {"preset": pid, "saved": False}
 
 
+@app.get("/api/v1/realsig")
+def realsig_status():
+    """실제 시그널 송출 슬롯 20개: 파일 경로·이름, 읽기 상태(empty/loading/ready/error), 입력 표본율·단위·길이·평균 HR, 배정 환자, 순환 중 리듬."""
+    w = E().world
+    with w.lock:
+        return w.rsig.status()
+
+
+@app.get("/api/v1/fs/browse")
+def fs_browse(path: str = ""):
+    """에뮬레이터 로컬 디렉토리 탐색 (ATF·CSV·TSV·TXT 파일만 표시).  허용 루트: /home /media /mnt /srv /data 와 데이터 디렉토리."""
+    from .runtime.realsig import browse
+    try:
+        return browse(path)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+
 @app.get("/api/v1/realism")
 def realism_status():
     """병원 일과 구간, 임상 악화·코드블루 환자, 망 장비 장애·전원 구간, MCOT 단말 상태, 대량 유입, 녹화 상태."""

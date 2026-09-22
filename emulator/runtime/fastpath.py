@@ -24,6 +24,7 @@ from ..signals.loops import LoopBank
 from .protocol import (record_dtype, fill_constants, pace_record, frame, gwstat_block, meta_block, F_META, F_GWSTAT, F_KEEPALIVE, HEADER,
                        CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl)
 from collections import deque
+from .realsig import MAP_PATH as RS_MAP_PATH
 from .state import SharedState, CTL, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
 
 POSTURE_G = np.array([POSTURES[k] for k in ("supine", "left_lateral", "right_lateral", "sitting", "standing", "prone")], dtype=np.float32) * 1000.0
@@ -49,6 +50,42 @@ class Gather:
         self.pos_off = np.full(st.n_patches, -1, dtype=np.int64)     # offset_ms seen when pos was initialised
         self.tick_start = np.zeros(st.n_patches, dtype=np.float64)
         self.last_tick = np.full(st.n_patches, -1, dtype=np.int64)
+        # 실제 시그널 송출: row -> (µV int16 배열, 초당 HR, 경로), 재생 위치
+        self.rs_map: dict = {}
+        self.rs_keys = np.zeros(0, dtype=np.int64)
+        self.rs_pos: dict = {}
+        self.rs_mtime = 0.0
+        self.rs_check = 0.0
+
+    def _rs_poll(self) -> None:
+        now = time.time()
+        if now - self.rs_check < 1.0:
+            return
+        self.rs_check = now
+        try:
+            m = os.path.getmtime(RS_MAP_PATH)
+        except OSError:
+            m = 0.0
+        if m == self.rs_mtime:
+            return
+        self.rs_mtime = m
+        try:
+            with open(RS_MAP_PATH, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception:
+            raw = {}
+        new = {}
+        for k, v in raw.items():
+            try:
+                new[int(k)] = (np.load(v["ecg"], mmap_mode="r"), np.load(v["hr"]), v["ecg"])
+            except Exception:
+                pass
+        for r, e in new.items():
+            old = self.rs_map.get(r)
+            if not old or old[2] != e[2]:
+                self.rs_pos[r] = 0                                         # 새 파일은 처음부터
+        self.rs_map = new
+        self.rs_keys = np.array(sorted(new), dtype=np.int64)
 
     def advance(self, rows: np.ndarray, tick: int, spt: int, fs: int) -> np.ndarray:
         """Set tick start positions for `rows` and advance them by one bundle (idempotent per tick)."""
@@ -157,6 +194,15 @@ class Gather:
                 sw = rng.normal(0, 2500.0, (fresh.size, spt)).astype(np.float32)
                 sw = np.cumsum(sw, axis=1) / 6.0
                 x[fresh] = np.clip(rng.choice([-1.0, 1.0], fresh.size)[:, None] * RAIL * 0.5 + sw, -RAIL, RAIL)
+        self._rs_poll()
+        if self.rs_keys.size:                                                     # 실제 시그널: 파일 표본으로 교체, 끝나면 처음부터
+            for i in np.flatnonzero(np.isin(rows, self.rs_keys)):
+                if p["lead_off"][i] > 0:
+                    continue
+                r = int(rows[i]); e = self.rs_map[r][0]; n = e.shape[0]
+                pos = self.rs_pos.get(r, 0)
+                x[i] = e[(pos + np.arange(spt)) % n]
+                self.rs_pos[r] = (pos + spt) % n
         return np.clip(x, -32000, 32000).astype(np.int16)
 
     def ppg(self, rows, tick, spt, bundle_ms, fs):
@@ -224,6 +270,12 @@ class Gather:
         rr = np.where(rr > 0, np.rint(rr + p["rr_add"]), 0).astype(np.int16)
         sp = np.where(sp > 0, np.clip(np.rint(sp + p["spo2_add"]), 0, 100), 0).astype(np.int16)
         hr = np.where(hr_ov > 0, hr_ov, hr)
+        if self.rs_keys.size:                                                     # 실제 시그널: 파일에서 검출한 HR
+            fs = int(self.st.ctl[CTL["ecg_fs"]]) or 250
+            for i in np.flatnonzero(np.isin(rows, self.rs_keys)):
+                h = self.rs_map[int(rows[i])][1]
+                if h.size and not lead_off[i]:
+                    hr[i] = int(h[(self.rs_pos.get(int(rows[i]), 0) // fs) % h.size])
         temp = self.bank.temp[p["temp_var"], si] + p["temp_bias"] + p["temp_add"]
         temp = np.where(lead_off, 0.0, temp)                                     # patch off body -> no temp
         gl = self.bank.glucose[p["gluc_var"], si] + p["gl_add"]

@@ -255,6 +255,8 @@ class World:
             except ValueError:
                 self.sim_time = time.time()
             self.real = Realism(self)
+            from .realsig import RealSignal
+            self.rsig = RealSignal(self)
             # 이전 월드의 시각·주기 상태를 끊는다: 남겨 두면 추세 갱신·검사 배정 주기가 이전 실행 시각에 묶이고
             # (시작 시각을 과거로 고정하면 몇 시간 동안 갱신이 멈춘다) 재현 실행이 갈라진다. net_events 는 옛 병원의 GW 번호를 가리킨다.
             self._mod_last = 0.0
@@ -621,7 +623,7 @@ class World:
             new = -1
             rssi = -100
             rf = self.cfg.get("scenario", "rf_noise", default={}) or {}
-            rfl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") else 0.0
+            rfl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") and (self.cfg.get("scenario", "network", default={}) or {}).get("enabled") else 0.0
             if rec["location"] >= 0 and not rec["shadow"] and not (rec.get("rf_drop_until", 0) > self.sim_time):   # 전파 방해로 BLE 가 잠깐 끊긴 동안은 미연결
                 cands = h.candidate_gateways(rec["location"])
                 for gw in cands[:6]:
@@ -1234,7 +1236,7 @@ class World:
             P["temp_add"][row] = st["temp_add"] + dte
             P["gl_add"][row] = st["gl_add"] + dgl
             P["gain"][row] = rec.get("gain0", 1.0) * (1.0 + trend_model._drift(pid * 7919 + 9, now, 0.08))
-            if not hop:
+            if not hop or "rs_paced" in rec:                      # 실제 시그널 슬롯 환자는 슬롯이 리듬을 정한다
                 continue
             if now >= rec["next_hop"] and not rec["episode_until"]:
                 new = self._similar_variant(prof["rhythm"], rec["base_variant"])
@@ -1257,6 +1259,8 @@ class World:
         tick = self._tick_now()
         for pid, rec in self.admitted.items():
             row = rec["row"]
+            if "rs_paced" in rec:                                   # 실제 시그널 슬롯 환자: 에피소드 없음
+                continue
             if rec["episode_until"] and now > rec["episode_until"]:
                 rec["episode_until"] = 0.0
                 self._switch_variant(row, rec["base_variant"], tick)
@@ -1730,6 +1734,7 @@ class World:
             self._step_episodes()
             self._step_gateways(dt_s)
             self.real.step(dt_s)                                           # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)
+            self.rsig.step()                                               # 실제 시그널 송출 슬롯 (파일 재생 · 부정맥 순환)
             self._step_drills()
             self._step_script()
             # periodic relink (gateway recovery / capacity / rssi jitter): 1/5 of patients per second

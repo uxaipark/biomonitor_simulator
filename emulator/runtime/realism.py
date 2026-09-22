@@ -630,7 +630,8 @@ class Realism:
     def _step_rf(self, dt_s: float) -> None:
         w, now = self.w, self.w.sim_time
         rf = w.cfg.get("scenario", "rf_noise", default={}) or {}
-        lvl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") else 0.0
+        net_on = bool((w.cfg.get("scenario", "network", default={}) or {}).get("enabled"))
+        lvl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") and net_on else 0.0    # 네트워크 장애 카드의 '시나리오 사용'에 딸림
         G = w.st.gw.arr
         if not lvl:
             if getattr(self, "_rf_gws", None):                            # 끌 때 무선 GW 손실·지연 원복

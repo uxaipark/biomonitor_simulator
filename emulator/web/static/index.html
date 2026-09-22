@@ -176,7 +176,7 @@
   <div class="card presetbar" id="presetBar"><h3><button class="fold" data-fold="presetBody" aria-expanded="true">▾</button>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">휠로 고르면 아래 옵션에 미리 채워짐 · [적용]을 눌러야 에뮬레이터에 반영</span></h3>
     <div class="pwrap" id="presetBody">
       <div class="pwheel" id="pWheel" tabindex="0" role="listbox" aria-label="테스트 시나리오 선택 휠 (마우스 휠·드래그·화살표 키)"><div class="pw-lens"></div><div class="pw-track" id="pwTrack"></div></div>
-      <div class="pdesc" id="pDesc"></div>
+      <div class="pdcol"><div class="pdesc" id="pDesc"></div><div class="scnwarn" id="scnWarn" hidden></div></div>
       <div class="papply"><button class="primary" id="pApply">적용</button><div class="sub" id="pApplyNote"></div>
         <div class="psave"><button class="small" id="pSave" title="아래 옵션 값을 이 시나리오의 기본값으로 저장합니다 (적용은 따로 [적용])">저장</button><button class="small" id="pReset" title="저장한 기본값을 지우고 출고 기본값으로 되돌립니다">리셋</button></div></div>
     </div>
@@ -299,9 +299,9 @@
       <div class="sub" id="scriptStatus">스크립트 없음</div>
       <div class="sub mono" id="scriptLog" style="font-size:11px;max-height:120px;overflow:auto"></div>
     </div>
-    <div class="card" data-card="reset"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>파라미터 초기화 <span class="right sub">템플릿(도면)·루프 은행은 그대로</span></h3>
-      <div class="help">환자 수, 시나리오(네트워크·아티팩트·패치·게이트웨이), 기기 세트, 전송 설정, 드릴 설정을 모두 기본값으로 되돌립니다. 병원 도면과 루프 파일은 재생성하지 않습니다.</div>
-      <div class="row tight"><button class="small" id="btnResetRuntime">전체 파라미터 초기화…</button><button class="small" id="btnCardOrderReset">카드 순서 초기화</button></div>
+    <div class="card" data-card="reset"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>화면 배치</h3>
+      <div class="help">시나리오 설정을 기본값으로 되돌리려면 위의 <b>0. 기본값</b>을 골라 [적용]하세요.</div>
+      <div class="row tight"><button class="small" id="btnCardOrderReset">카드 순서 초기화</button></div>
     </div>
   </div>
 </section>

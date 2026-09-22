@@ -927,3 +927,36 @@ section[data-tab="scn"] label.chk, section[data-tab="scn"] .field > span, .one{w
 section[data-tab="scn"] label.chk{display:block;line-height:32px}
 section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px}
 .pwrap[hidden]{display:none}
+
+/* 실제 시그널 송출 슬롯 */
+.pdesc{max-height:290px;overflow:auto;padding-right:4px}
+.rs-auto{min-height:28px!important;font-size:12.5px}
+.rs-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+.rs-slot{position:relative;display:flex;min-width:0}
+.rs-pick{flex:1;min-width:0;display:flex;align-items:center;gap:6px;min-height:30px;padding:0 8px;font-size:12px;text-align:left;border:1.5px solid var(--line);border-radius:7px;background:var(--card)}
+.rs-no{flex:none;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;min-width:16px}
+.rs-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rs-mark{flex:none;font-weight:700}
+.rs-slot.empty .rs-name{color:var(--muted)}
+.rs-slot.ok .rs-pick{border-color:var(--ok, #16a34a)}
+.rs-slot.pend .rs-pick{border-style:dashed;border-color:var(--warn)}
+.rs-slot.load .rs-pick{border-color:var(--acc2)}
+.rs-slot.err .rs-pick{border-color:var(--bad, #dc2626)}
+.rs-slot.err .rs-mark{color:var(--bad, #dc2626)}
+.rs-clear{position:absolute;right:2px;top:2px;width:18px;height:18px;min-height:0;padding:0;font-size:12px;line-height:1;border:none;background:transparent;color:var(--muted);cursor:pointer}
+.rs-slot:has(.rs-clear) .rs-pick{padding-right:20px}
+.fsdlg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px}
+.fsbox{background:var(--card);color:var(--txt);border-radius:12px;width:min(640px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.fshead{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.fshead .fsx{margin-left:auto}
+.fspath{padding:8px 14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fslist{overflow:auto;padding:6px}
+.fsrow{padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fsrow:hover{background:var(--bg)}
+.fsrow .sub{margin-left:6px}
+.pdcol{min-width:0;display:flex;flex-direction:column;gap:6px;justify-content:center}
+.scnwarn{font-size:12px;color:var(--warn);border:1px solid currentColor;border-radius:8px;padding:6px 10px;background:color-mix(in srgb, var(--warn) 8%, transparent)}
+.scnwarn ul{margin:2px 0 0;padding-left:18px;color:var(--txt)}
+.scnwarn li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pdcol{max-height:290px}
+.pdcol .pdesc{max-height:none;flex:1 1 auto;min-height:0}

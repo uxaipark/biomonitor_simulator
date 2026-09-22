@@ -344,6 +344,23 @@ function scnMark() {
   if (scnPresets) pwDescribe(true);
   return pend.size;
 }
+// 서로 부딪치거나 효과가 없는 옵션 조합 (미리보기 값 기준)
+function scnConflicts(c) {
+  if (!c) return [];
+  const g = c.general, sc = c.scenario, out = [], n = sc.network || {}, a = sc.artifacts || {}, gw = sc.gateway || {}, rs = sc.realsig || {}, rf = sc.rf_noise || {};
+  if (sc.site === 'mcot' && g.active_patients > 0) out.push(`장소가 원외 MCOT라 입원 환자 수(${cnum(g.active_patients)})는 무시됩니다`);
+  if (sc.site === 'hospital' && g.outpatient_count > 0) out.push(`장소가 병원 내라 원외 MCOT 환자 수(${cnum(g.outpatient_count)})는 무시됩니다`);
+  if (g.active_patients > g.bed_capacity) out.push(`입원 환자 수(${cnum(g.active_patients)})가 병상 수(${cnum(g.bed_capacity)})보다 많아 병상 수로 제한됩니다`);
+  if (rf.enabled && !n.enabled) out.push('전파 방해는 네트워크 장애의 [시나리오 사용]을 켜야 동작합니다');
+  if (n.enabled && !['wireless_noise', 'wired_failure', 'latency', 'power_outage', 'topology'].some(k => n[k]) && !rf.enabled) out.push('네트워크 장애를 켰지만 세부 항목이 모두 꺼져 있습니다');
+  if (gw.fault_enabled && !gw.outage && !gw.degrade && !gw.replace) out.push('게이트웨이 장애를 켰지만 세부 항목이 모두 꺼져 있습니다');
+  if (a.enabled && !['motion', 'shower', 'exam_trips', 'patch_reattach', 'transfer', 'patch_replace', 'home_interference'].some(k => a[k])) out.push('아티팩트를 켰지만 세부 항목이 모두 꺼져 있습니다');
+  if (a.enabled && a.patch_replace && !(sc.patch || {}).battery_drain_enabled) out.push('배터리 소모가 꺼져 있어 [배터리 소진 시 패치 교체]는 일어나지 않습니다');
+  if ((n.enabled || gw.fault_enabled) && !(c.transport.store_forward || {}).enabled) out.push('저장 후 전송이 꺼져 있어 장애 동안의 데이터는 버려집니다');
+  if (rs.enabled && sc.site === 'mcot') out.push('실제 시그널 송출은 입원 환자에게 적용되는데 장소가 원외 MCOT입니다');
+  if (rs.enabled && g.active_patients < 20) out.push(`실제 시그널 슬롯은 20개인데 입원 환자가 ${g.active_patients}명이라 나머지 슬롯은 쉽니다`);
+  return out;
+}
 function scnFill() {
   for (const id of SCN_IDS) {
     const el = document.getElementById(id); if (!el || !B[id]) continue;
@@ -2043,11 +2060,6 @@ $('#vmTrends').onclick = () => { $('#vmBottom').scrollIntoView({ behavior: 'smoo
     b.disabled = false;
   });
 })();
-$('#btnResetRuntime').onclick = async () => {
-  const ok = await askConfirm('전체 파라미터 초기화', '환자 수, 시나리오, 기기 세트, 전송·드릴 설정을 모두 기본값으로 되돌립니다.\n병원 도면(템플릿)과 루프 파일 은행은 그대로 둡니다.\n계속할까요?', '초기화');
-  if (!ok) return;
-  try { const r = await post('/config/reset', { scope: 'runtime' }); CFG = r.config; fillForm(); toast('파라미터 초기화 완료'); } catch (e) { toast('실패: ' + e.message); }
-};
 function openPatientFromMap(row) {
   showTab('pat');
   loadPatientList().then(async () => {
@@ -2558,19 +2570,86 @@ function pwDescribe(fromMark) {
     if (had && PW.shownOnce) toast('고친 값은 버리고 고른 시나리오 값으로 채웠습니다');
     PW.shownOnce = true; scnRefresh(); return;
   }
-  const g = (SV || CFG).general, n = SV ? scnPending().length + (JSON.stringify((SV.transport.fuzz || {}).kinds || []) !== JSON.stringify((CFG.transport.fuzz || {}).kinds || []) ? 1 : 0) : 0;
+  const g = (SV || CFG).general, n = SV ? scnPending().length + (JSON.stringify((SV.transport.fuzz || {}).kinds || []) !== JSON.stringify((CFG.transport.fuzz || {}).kinds || []) ? 1 : 0)
+    + (JSON.stringify(SV.scenario.realsig || {}) !== JSON.stringify(CFG.scenario.realsig || {}) ? 1 : 0) : 0;
   $('#pDesc').innerHTML = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
     `${p.saved ? '<span class="pd-saved" title="[저장]한 기본값 사용 중 · [리셋]으로 출고값 복원">저장값</span>' : ''}` +
     `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
     `<div class="pd-text sub">병상 ${cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[(SV || CFG).scenario.site] || '-'}</div>` +
-    `<div class="pd-text">${esc(p.desc)}</div>` +
-    `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` +
+    (p.id === 'realsig' ? '' : `<div class="pd-text">${esc(p.desc)}</div>`) +
+    (p.id === 'realsig' ? rsPanel() : `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`) +
     (p.actions_text ? `<div class="pd-act">적용 즉시: <b>${esc(p.actions_text)}</b></div>` : '');
+  if (p.id === 'realsig') rsBind(); else rsStop();
   const btn = $('#pApply'), note = $('#pApplyNote');
   btn.textContent = isCur && !n ? '다시 적용' : '적용';
   note.textContent = n ? `변경 ${n}개 대기 · [적용]을 눌러야 반영` : (isCur ? '현재 적용된 시나리오' : '아래 옵션은 미리보기입니다');
   note.classList.toggle('pnote-pend', n > 0);
   $('#pReset').disabled = !p.saved;
+  const cf = scnConflicts(SV || CFG), cw = $('#scnWarn');
+  if (cw) { cw.hidden = !cf.length; cw.innerHTML = cf.length ? `<b>⚠ 옵션 확인 ${cf.length}건</b><ul>${cf.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''; }
+}
+// ---------------- 실제 시그널 송출: 슬롯 20개 (에뮬레이터 로컬 ATF/CSV 파일), 빈 슬롯은 자동 생성(부정맥 순환)
+let RS = null, rsTimer = null;
+const rsCfg = () => ((SV || CFG).scenario.realsig) || { slots: [], auto_cycle: true };
+function rsPanel() {
+  const c = rsCfg(), applied = (CFG.scenario.realsig || {}).slots || [], st = RS ? RS.slots : [];
+  const cells = Array.from({ length: 20 }, (_, i) => {
+    const path = (c.slots || [])[i] || '', name = path.split('/').pop(), s = st[i] || {};
+    const pend = path !== (applied[i] || '');
+    let cls = 'empty', tip = '파일을 고르세요', mark = '';
+    if (path && pend) { cls = 'pend'; tip = `${path}\n[적용]을 눌러야 반영`; }
+    else if (path && s.state === 'ready') { cls = 'ok'; tip = `${path}\n${s.info.seconds}초 · 입력 ${s.info.fs_in} Hz(${s.info.fs_src}) · 단위 ${s.info.unit} · 평균 HR ${s.info.hr_mean}`; }
+    else if (path && s.state === 'loading') { cls = 'load'; tip = `${path}\n읽는 중…`; mark = '…'; }
+    else if (path && s.state === 'error') { cls = 'err'; tip = `${path}\n읽기 실패: ${s.error}`; mark = '!'; }
+    const who = s.patient ? `${s.patient}` : '';
+    const auto = !path && s.cycling ? `자동 · ${s.cycling}` : (!path ? (c.auto_cycle ? '자동 생성' : '비어 있음') : '');
+    return `<div class="rs-slot ${cls}" title="${esc(tip + (who ? `\n환자: ${who}` : ''))}"><button class="rs-pick" data-i="${i}"><span class="rs-no">${i + 1}</span>` +
+      `<span class="rs-name">${esc(name || auto)}</span>${mark ? `<span class="rs-mark">${mark}</span>` : ''}</button>` +
+      (path ? `<button class="rs-clear" data-i="${i}" title="파일 해제">×</button>` : '') + `</div>`;
+  }).join('');
+  return `<label class="chk rs-auto"><input type="checkbox" id="rsAuto" ${c.auto_cycle ? 'checked' : ''}> 파일이 없거나 읽지 못한 슬롯은 자동 생성 (부정맥 순환)</label>` +
+    `<div class="rs-grid">${cells}</div>`;
+}
+function rsSet(fn) {
+  const c = clone(rsCfg()); c.slots = Array.from({ length: 20 }, (_, i) => (c.slots || [])[i] || '');
+  fn(c); scnEdit(['scenario', 'realsig'], c);
+}
+function rsBind() {
+  const box = $('#pDesc');
+  const a = $('#rsAuto', box); if (a) a.onchange = () => rsSet(c => { c.auto_cycle = a.checked; });
+  $$('.rs-pick', box).forEach(b => b.onclick = () => fsPick(Number(b.dataset.i)));
+  $$('.rs-clear', box).forEach(b => b.onclick = (e) => { e.stopPropagation(); rsSet(c => { c.slots[Number(b.dataset.i)] = ''; }); });
+  if (!rsTimer) { rsLoad(); rsTimer = setInterval(() => { if (document.querySelector('section[data-tab="scn"].on')) rsLoad(); }, 3000); }
+}
+function rsStop() { if (rsTimer) { clearInterval(rsTimer); rsTimer = null; } }
+async function rsLoad() {
+  try { RS = await api('/realsig'); } catch (e) { return; }
+  const p = scnSelected(); if (p && p.id === 'realsig' && !document.querySelector('.fsdlg')) { const y = $('#pDesc').scrollTop; pwDescribe(true); $('#pDesc').scrollTop = y; }
+}
+let fsLast = '';
+try { fsLast = localStorage.getItem('rs:dir') || ''; } catch (e) { }
+async function fsPick(i) {
+  const dlg = document.createElement('div'); dlg.className = 'fsdlg';
+  dlg.innerHTML = `<div class="fsbox"><div class="fshead"><b>슬롯 ${i + 1} 파일 선택</b> <span class="sub">에뮬레이터 로컬 · ATF / CSV / TSV / TXT</span><button class="small fsx">닫기</button></div>` +
+    `<div class="fspath mono"></div><div class="fslist"></div></div>`;
+  document.body.appendChild(dlg);
+  const close = () => dlg.remove();
+  dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
+  $('.fsx', dlg).onclick = close;
+  const go = async (path) => {
+    let d;
+    try { d = await api('/fs/browse?path=' + encodeURIComponent(path)); } catch (e) { if (path) return go(''); $('.fslist', dlg).innerHTML = `<div class="sub">${esc(e.message)}</div>`; return; }
+    fsLast = d.path; try { localStorage.setItem('rs:dir', d.path); } catch (e) { }
+    $('.fspath', dlg).textContent = d.path || '위치 선택';
+    const kb = (b) => cbytes ? cbytes(b) : b;
+    $('.fslist', dlg).innerHTML = (d.parent !== null ? `<div class="fsrow dir" data-p="${esc(d.parent)}">⬆ 상위 폴더</div>` : '') +
+      d.dirs.map(x => `<div class="fsrow dir" data-p="${esc(x.path)}">📁 ${esc(x.name)}</div>`).join('') +
+      d.files.map(x => `<div class="fsrow file" data-f="${esc(x.path)}">📄 ${esc(x.name)} <span class="sub">${kb(x.bytes)}</span></div>`).join('') +
+      (!d.dirs.length && !d.files.length ? '<div class="sub" style="padding:10px">ATF/CSV 파일이 없습니다</div>' : '');
+    $$('.fsrow.dir', dlg).forEach(r => r.onclick = () => go(r.dataset.p));
+    $$('.fsrow.file', dlg).forEach(r => r.onclick = () => { rsSet(c => { c.slots[i] = r.dataset.f; }); close(); toast(`슬롯 ${i + 1}: ${r.dataset.f.split('/').pop()} — [적용]을 눌러야 반영`); });
+  };
+  go(fsLast);
 }
 async function loadScnPresets(keepPos = true) {
   try { scnPresets = await api('/presets'); } catch (e) { return; }
