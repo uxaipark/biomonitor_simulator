@@ -1044,3 +1044,5 @@ main .wgrid input[type=text], main .wgrid input[type=number], main .wgrid select
 .wgrid .wg-line .sub{margin-left:auto}
 .wgrid label.wg-cell{min-height:30px;white-space:nowrap}
 .wgrid label.chk input[type=checkbox]{width:18px;height:18px}
+.wg-btns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.wg-btns button{width:100%;margin:0}
