@@ -50,10 +50,10 @@ class Gather:
         self.pos_off = np.full(st.n_patches, -1, dtype=np.int64)     # offset_ms seen when pos was initialised
         self.tick_start = np.zeros(st.n_patches, dtype=np.float64)
         self.last_tick = np.full(st.n_patches, -1, dtype=np.int64)
-        # 실제 시그널 송출: row -> (µV int16 배열, 초당 HR, 경로), 재생 위치
+        # 실제 시그널 송출: row -> (µV int16 배열, 초당 HR, 경로, 재생 시작 tick).  재생 위치는 tick 에서 바로 구한다 —
+        # 워커(게이트웨이 샤드)마다 · 미리보기마다 따로 위치를 들고 있으면 환자가 다른 워커의 게이트웨이로 옮길 때 파일이 튄다.
         self.rs_map: dict = {}
         self.rs_keys = np.zeros(0, dtype=np.int64)
-        self.rs_pos: dict = {}
         self.rs_mtime = 0.0
         self.rs_check = 0.0
 
@@ -77,15 +77,18 @@ class Gather:
         new = {}
         for k, v in raw.items():
             try:
-                new[int(k)] = (np.load(v["ecg"], mmap_mode="r"), np.load(v["hr"]), v["ecg"])
+                old = self.rs_map.get(int(k))
+                ecg, hr = (old[0], old[1]) if old and old[2] == v["ecg"] else (np.load(v["ecg"], mmap_mode="r"), np.load(v["hr"]))
+                new[int(k)] = (ecg, hr, v["ecg"], int(v.get("t0", 0)))
             except Exception:
                 pass
-        for r, e in new.items():
-            old = self.rs_map.get(r)
-            if not old or old[2] != e[2]:
-                self.rs_pos[r] = 0                                         # 새 파일은 처음부터
         self.rs_map = new
         self.rs_keys = np.array(sorted(new), dtype=np.int64)
+
+    def _rs_at(self, row: int, tick: int, spt: int) -> int:
+        """실제 시그널 재생 위치(표본): 지도에 적힌 시작 tick 부터 한 tick 에 spt 씩, 파일 끝에서 처음으로."""
+        e = self.rs_map[row]
+        return ((tick - e[3]) * spt) % e[0].shape[0]
 
     def advance(self, rows: np.ndarray, tick: int, spt: int, fs: int) -> np.ndarray:
         """Set tick start positions for `rows` and advance them by one bundle (idempotent per tick)."""
@@ -199,10 +202,8 @@ class Gather:
             for i in np.flatnonzero(np.isin(rows, self.rs_keys)):
                 if p["lead_off"][i] > 0:
                     continue
-                r = int(rows[i]); e = self.rs_map[r][0]; n = e.shape[0]
-                pos = self.rs_pos.get(r, 0)
-                x[i] = e[(pos + np.arange(spt)) % n]
-                self.rs_pos[r] = (pos + spt) % n
+                r = int(rows[i]); e = self.rs_map[r][0]
+                x[i] = e[(self._rs_at(r, tick, spt) + np.arange(spt)) % e.shape[0]]
         return np.clip(x, -32000, 32000).astype(np.int16)
 
     def ppg(self, rows, tick, spt, bundle_ms, fs):
@@ -270,12 +271,14 @@ class Gather:
         rr = np.where(rr > 0, np.rint(rr + p["rr_add"]), 0).astype(np.int16)
         sp = np.where(sp > 0, np.clip(np.rint(sp + p["spo2_add"]), 0, 100), 0).astype(np.int16)
         hr = np.where(hr_ov == 255, 0, np.where(hr_ov > 0, hr_ov, hr))     # 255 = 현장 테스트 무수축 (HR 0)
-        if self.rs_keys.size:                                                     # 실제 시그널: 파일에서 검출한 HR
+        self._rs_poll()                                                           # 숫자만 보는 미리보기(중앙 감시 숫자판 · NEWS2)도 지도를 읽도록
+        if self.rs_keys.size:                                                     # 실제 시그널: 파일에서 검출한 HR (빈 배열 = 검출 못 함 → 그대로)
             fs = int(self.st.ctl[CTL["ecg_fs"]]) or 250
+            spt = fs * bundle_ms // 1000
             for i in np.flatnonzero(np.isin(rows, self.rs_keys)):
-                h = self.rs_map[int(rows[i])][1]
+                r = int(rows[i]); h = self.rs_map[r][1]
                 if h.size and not lead_off[i]:
-                    hr[i] = int(h[(self.rs_pos.get(int(rows[i]), 0) // fs) % h.size])
+                    hr[i] = int(h[min(self._rs_at(r, tick, spt) // fs, h.size - 1)])
         temp = self.bank.temp[p["temp_var"], si] + p["temp_bias"] + p["temp_add"]
         temp = np.where(lead_off, 0.0, temp)                                     # patch off body -> no temp
         gl = self.bank.glucose[p["gluc_var"], si] + p["gl_add"]
