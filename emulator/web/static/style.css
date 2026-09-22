@@ -1064,3 +1064,7 @@ main .wgrid input[type=text], main .wgrid input[type=number], main .wgrid select
 @media (max-width:1200px){ .ft2{grid-template-columns:1fr} }
 @media (max-width:640px){ .ft-manual .ftm-g{grid-template-columns:1fr} .ftm-st{grid-column:1} }
 .ft-sec .ft-tx{margin-left:auto;font-weight:600;color:var(--acc)}
+.wgrid .span3{grid-column:span 3}
+.wg-lrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:30px}
+.wg-lrow button{min-height:30px;padding:3px 10px}
+@media (max-width:1100px){ .wgrid .span3{grid-column:1 / -1} }

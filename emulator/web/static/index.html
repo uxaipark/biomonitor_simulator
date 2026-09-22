@@ -189,13 +189,7 @@
     <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="5000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
-      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 시드 등 그 외 값은 [에뮬레이터 설정 › 메디컬 월드 생성]에서 바꾸고 재구성합니다.</div>
-    </div>
-    <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
-      <div class="row"><div class="field"><span title="병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)">병상 수 (환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
-      <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small primary" id="btnRebuild2" title="병상 수·월드 생성 값을 반영해 병원과 환자를 새로 구성합니다">재구성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
-      <div class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></div>
-      <div class="help">병상 수를 바꾸고 위의 <b>[적용]</b>을 누르면 자동으로 재구성해 병원을 그 크기로 짓습니다(최대 약 4,850병상). 재원 환자와 패치 상태는 초기화되고 전송은 잠시 멈춥니다. [재구성]은 지금 적용된 값으로 다시 짓습니다.</div>
+      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 병상 수 · 도면 · 시드 등은 [에뮬레이터 설정 › 메디컬 월드 생성]에서 바꾸고 재구성합니다.</div>
     </div>
     <div class="card" data-card="site"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>장소 시나리오</h3>
       <div class="site-view" id="siteView"></div>
@@ -313,6 +307,8 @@
       <div class="help">병원 규모·환자 프로필·게이트웨이 구성과 파형을 정하는 값입니다. 바꾼 뒤 [재구성]해야 반영되며, 재구성하면 전송이 잠시 멈추고 입원 환자가 새로 배정됩니다. 시드·시작 시각·고정 간격이 같으면 같은 사건이 같은 순서로 다시 일어납니다(수동 조작은 [테스트 › 수동 제어]의 스크립트 녹화로).</div>
       <div class="wgrid">
         <div class="wg-h">병원 · 게이트웨이</div>
+        <div class="field"><span title="병원을 이 크기로 짓습니다 (환자 수 상한, 최대 약 4,850병상). 시나리오를 적용하면 그 시나리오의 병상 수로 바뀝니다.">병상 수</span><input type="number" id="g_beds" min="1" max="5000"></div>
+        <div class="field span3 wg-layout"><span>병원 도면</span><div class="wg-lrow"><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden><span class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></span></div></div>
         <div class="field span2"><span>건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
         <div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div>
         <div class="field"><span title="게이트웨이 1대가 동시에 붙일 수 있는 BLE 패치 수">GW 최대 연결</span><input type="number" id="gw_cap" min="1" max="64"></div>

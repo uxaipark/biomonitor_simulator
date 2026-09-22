@@ -423,7 +423,7 @@ function queue(p, v) { setPath(pending, p, v); clearTimeout(pendT); pendT = setT
 async function flush() {
   const body = pending; pending = {}; if (!Object.keys(body).length) return;
   try {
-    const r = await patch(body); CFG = r.config;
+    const r = await patch(body); CFG = r.config; if (typeof scnRefresh === 'function') scnRefresh();
     if (r.needs_rebuild) toast('월드 생성 값 변경: [재구성]을 눌러 반영');
     else if (r.needs_generate) toast('샘플링/변형 설정 변경: [루프 은행 재생성] 필요');
     else toast('설정 반영');
@@ -482,7 +482,7 @@ async function doRebuild() {
   if (!ok) return;
   toast('재구성 중...'); await post('/control/rebuild'); toast('재구성 완료 · 새로고침'); setTimeout(() => location.reload(), 400);
 }
-$('#btnRebuild').onclick = doRebuild; $('#btnRebuild2').onclick = doRebuild;
+$('#btnRebuild').onclick = doRebuild;
 $('#btnGen2').onclick = async () => { const r = await post('/control/generate'); toast('루프 생성: ' + r.result); };
 $('#btnReset').onclick = async () => { await post('/config/reset'); await loadConfig(); toast('기본값 복원 (재구성 필요)'); };
 $('#btnAtStart').onclick = async () => { const r = await post('/control/autotune', { action: 'start', step: Number($('#at_step').value), window_s: Number($('#at_win').value) }); toast(r.result); };
@@ -2617,7 +2617,7 @@ function pwDescribe(fromMark) {
   $('#pDesc').innerHTML = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
     `${p.saved ? '<span class="pd-saved" title="[저장]한 기본값 사용 중 · [리셋]으로 출고값 복원">저장값</span>' : ''}` +
     `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
-    `<div class="pd-text sub">병상 ${cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[siteOf(g)]}</div>` +
+    `<div class="pd-text sub">병상 ${g.bed_capacity !== CFG.general.bed_capacity ? `${cnum(CFG.general.bed_capacity)} → <b>${cnum(g.bed_capacity)}</b> (적용 시 재구성)` : cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[siteOf(g)]}</div>` +
     (p.id === 'realsig' ? '' : `<div class="pd-text">${esc(p.desc)}</div>`) +
     (p.id === 'realsig' ? rsPanel() : `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`) +
     (p.actions_text ? `<div class="pd-act">적용 즉시: <b>${esc(p.actions_text)}</b></div>` : '');
