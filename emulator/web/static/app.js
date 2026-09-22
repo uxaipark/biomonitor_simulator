@@ -120,14 +120,13 @@ const TAB_GROUPS = [
   { id: 'dash', title: '운영 현황', show: ['dash'] },
   { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
   { id: 'hosp', title: '병원', show: ['hosp'] },
-  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 월드 생성 (show[1] 이 바뀜)
-  { id: 'tx', title: '송출', show: ['tx'] },
+  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 월드 생성 · 송출 (show[1] 이 바뀜)
   { id: 'test', title: '테스트', show: ['test'] },
   { id: 'log', title: '로그', show: ['log'] },
   { id: 'data', title: '데이터', show: ['data'] },
 ];
 const HELP_GROUP = { id: 'help', title: '도움말', show: ['guide', 'proto'] };
-const GROUP_OF = { chat: 'log', struct: 'emu' };
+const GROUP_OF = { chat: 'log', struct: 'emu', tx: 'emu' };
 [...TAB_GROUPS, HELP_GROUP].forEach(g => { GROUP_OF[g.id] = g.id; g.show.forEach(sid => { GROUP_OF[sid] = g.id; }); });
 let curGroup = 'dash', prevGroup = 'dash';
 TAB_GROUPS.forEach(g => {
@@ -151,17 +150,18 @@ function showLogView(v) {
   if (v === 'chat') chatOpen();
   updateLinkPolling();
 }
-// 에뮬레이터 설정 하위 메뉴: 시나리오 / 월드 생성
-let emuView = 'scn'; try { emuView = localStorage.getItem('emuView') === 'struct' ? 'struct' : 'scn'; } catch (e) { }
+// 에뮬레이터 설정 하위 메뉴: 시나리오 / 월드 생성 / 송출
+const EMU_VIEWS = ['scn', 'struct', 'tx'];
+let emuView = 'scn'; try { const v = localStorage.getItem('emuView'); if (EMU_VIEWS.includes(v)) emuView = v; } catch (e) { }
 function setEmuView(v) {
-  emuView = v === 'struct' ? 'struct' : 'scn';
+  emuView = EMU_VIEWS.includes(v) ? v : 'scn';
   TAB_GROUPS.find(x => x.id === 'emu').show[1] = emuView;
   try { localStorage.setItem('emuView', emuView); } catch (e) { }
   $$('#emuSeg button').forEach(b => b.classList.toggle('on', b.dataset.ev === emuView));
 }
 setEmuView(emuView);
 function showTab(id) {
-  if (id === 'scn' || id === 'struct') setEmuView(id);                 // 딥링크 ?tab=scn / ?tab=struct
+  if (EMU_VIEWS.includes(id)) setEmuView(id);                          // 딥링크 ?tab=scn / struct / tx
   const gid = GROUP_OF[id] || 'dash';
   const g = gid === 'help' ? HELP_GROUP : (TAB_GROUPS.find(x => x.id === gid) || TAB_GROUPS[0]);
   if (g.id !== curGroup) prevGroup = curGroup;
@@ -2322,10 +2322,20 @@ document.addEventListener('click', async e => {
 });
 $('#cfgHistReload').onclick = loadConfigHistory; $('#cfgHistQ').addEventListener('input', () => { clearTimeout(window.__cfgHistT); window.__cfgHistT = setTimeout(loadConfigHistory, 300); });
 setInterval(() => { if ($('[data-tab="data"]').classList.contains('on') && !isFolded('cfgHistBody')) loadConfigHistory(); }, 15000);
+const BANK_USE = { ecg: 'ECG 파형 (리듬 변형별 1시간 루프)', ppg: 'PPG 맥파 파형', resp: '호흡 파형', sec: '초당 수치 (HR · 호흡수 · SpO2)',
+  pace: '페이스메이커 스파이크 위치', accel: '가속도 (활동 템플릿)', art: '움직임 아티팩트 (ECG)', level: '활동 강도',
+  temp: '체온 루프', glucose: '혈당 루프', noise: '기본 잡음', index: '목록 · 메타데이터' };
 async function loadBankFiles() {
   try {
-    const c = await api('/signals/catalog'); const b = c.bank;
-    $('#bankFiles').innerHTML = `<div>${esc(b.dir)}</div>` + Object.entries(b.files).map(([k, v]) => `<div>${k}: ${esc(v.split('/').pop())}</div>`).join('') + `<div style="margin-top:6px">변형 ${c.variants.length}개 · 리듬 ${Object.keys(c.rhythms).length}종 · 활동 템플릿 ${c.activities.length}종</div>`;
+    const c = await api('/signals/catalog'); const b = c.bank, fi = b.file_info || {};
+    const dt = (t) => { const d = new Date(t * 1000), z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`; };
+    const rows = Object.entries(b.files).map(([k, v]) => { const f = fi[k];
+      return `<tr><td>${esc(BANK_USE[k] || k)}</td><td class="mono">${esc(v.split('/').pop())}</td><td class="num">${f ? cbytes(f.bytes) : '없음'}</td><td class="mono">${f ? dt(f.mtime) : '-'}</td></tr>`; }).join('');
+    const total = Object.values(fi).reduce((a, f) => a + (f ? f.bytes : 0), 0);
+    $('#bankFiles').innerHTML = `<div class="sub mono one" title="${esc(b.dir)}">${esc(b.dir)}</div>` +
+      `<div class="tbl"><table class="banktbl"><thead><tr><th>용도</th><th>파일</th><th>크기</th><th>생성</th></tr></thead><tbody>${rows}</tbody>` +
+      `<tfoot><tr><td colspan="2">합계</td><td class="num">${cbytes(total)}</td><td></td></tr></tfoot></table></div>` +
+      `<div class="sub" style="margin-top:6px">변형 ${c.variants.length}개 · 리듬 ${Object.keys(c.rhythms).length}종 · 활동 템플릿 ${c.activities.length}종</div>`;
   } catch (e) { }
 }
 

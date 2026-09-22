@@ -1013,3 +1013,11 @@ label.chk.sub-opt{padding-left:26px}
 .emuseg{margin-bottom:2px}
 .structgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:start}
 @media (max-width:900px){ .structgrid{grid-template-columns:1fr} }
+.banktbl{font-size:12px}
+.banktbl td,.banktbl th{white-space:nowrap}
+.banktbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+.banktbl tfoot td{font-weight:700;border-top:1px solid var(--line)}
+.wg-guide .wg-when{font-size:13px;line-height:1.6;margin-bottom:6px}
+.wg-steps{margin:4px 0 0;padding-left:20px;font-size:13px;line-height:1.6}
+.wg-steps li{margin-bottom:3px}
+.wg-steps li::marker{font-weight:700;color:var(--acc)}

@@ -1160,11 +1160,23 @@ def emr_patches(status: str = "all", q: str = "", offset: int = 0, limit: int = 
 
 
 # ------------------------------------------------------------------ signals
+def _bank_file_info(b) -> dict:
+    """루프 은행 파일별 크기(bytes)와 만든 시각(epoch 초, 파일 수정 시각)."""
+    out = {}
+    for k, v in b.paths().items():
+        try:
+            st = os.stat(v)
+            out[k] = {"bytes": st.st_size, "mtime": st.st_mtime}
+        except OSError:
+            out[k] = None
+    return out
+
+
 @app.get("/api/v1/signals/catalog")
 def signals_catalog():
     e = E()
     b = e.bank
-    return {"rhythms": RHYTHMS, "activities": ACTIVITIES, "variants": b.index.get("variants", []) if b.loaded else [], "bank": {"loaded": b.loaded, "dir": str(b.dir), "files": b.paths()}}
+    return {"rhythms": RHYTHMS, "activities": ACTIVITIES, "variants": b.index.get("variants", []) if b.loaded else [], "bank": {"loaded": b.loaded, "dir": str(b.dir), "files": b.paths(), "file_info": _bank_file_info(b)}}
 
 
 @app.get("/api/v1/signals/preview/{row}")

@@ -171,9 +171,9 @@
   <div class="card"><h3><button class="fold" data-fold="wardBody" aria-expanded="true">▾</button>병동 <span class="sub" id="wardCount"></span></h3><div class="tbl" id="wardBody" style="max-height:40vh"><table id="wardTable"><thead><tr><th>병동</th><th>진료과</th><th>위치</th><th>병상</th><th>재원</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 
-<!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 월드 생성) -->
+<!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 월드 생성 · 송출) -->
 <section class="tab" data-tab="emunav" data-title="에뮬레이터 설정">
-  <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="struct">월드 생성</button></div>
+  <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="struct">월드 생성</button><button data-ev="tx">송출</button></div>
 </section>
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
@@ -313,6 +313,16 @@
 <section class="tab" data-tab="struct" data-title="월드 생성">
   <div class="structgrid">
     <div class="dcol">
+      <div class="card wg-guide"><h3>언제 · 어떤 순서로 쓰나요?</h3>
+        <div class="wg-when"><b>언제</b> 병원 규모·건물 구성, 환자 구성(프로필 수·질환·국적·페이스메이커 비율), 게이트웨이 설치·용량, 파형 종류 자체를 바꿀 때와 같은 조건으로 결과를 <b>재현</b>해야 할 때 씁니다.
+          평소 테스트 조건(장애·아티팩트·환자 수·실제 시그널)은 <b>[시나리오]</b>에서 바꿉니다.</div>
+        <ol class="wg-steps">
+          <li><b>값 바꾸기</b> — 아래 카드에서 시드·프로필 수·템플릿·건물 수·게이트웨이 용량 등을 고칩니다. 병상 수는 [시나리오]에서 정합니다.</li>
+          <li><b>[재구성]</b> — 병원과 환자를 새로 짓습니다. 재원 환자·패치 상태가 초기화되고 라우터 연결이 몇 초 끊겼다가 자동으로 다시 붙습니다.</li>
+          <li><b>[루프 은행 재생성]</b> — 시드 · 리듬별 루프 변형 수 · 표본율을 바꿨을 때만. 수 분 걸리며 오른쪽 카드에 진행률이 보입니다.</li>
+          <li><b>재현 실행</b>이면 시작 시각 고정과 1초 고정 간격을 켠 뒤 [재구성]합니다. 같은 시드·시각이면 같은 사건이 같은 순서로 다시 일어납니다.</li>
+        </ol>
+      </div>
       <div class="card" data-apply="rebuild"><h3>월드 생성</h3>
       <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
       <div class="row"><div class="field" style="flex:2"><span>재현 실행: 시뮬 시작 시각 고정 (비우면 현재 시각)</span><input type="text" id="g_fstart" placeholder="2026-09-22T09:00"></div><div class="field"><span>&nbsp;</span><label class="chk" style="margin:0"><input type="checkbox" id="g_fstep"> 1초 고정 간격 진행</label></div></div>
@@ -334,7 +344,7 @@
       <div id="bankInfo2" class="sub"></div>
       <div class="progress" style="margin:8px 0"><div id="bankBar2"></div></div>
       <div class="help">모든 파형은 1시간 단위로 시작·끝이 이어지는 루프 파일에서 재생됩니다. 샘플링·변형 수·시드를 바꾸면 재생성이 필요하며, 생성 중에는 전송이 정지됩니다.</div>
-      <div id="bankFiles" class="sub mono" style="font-size:11px"></div>
+      <div id="bankFiles"></div>
     </div></div>
     </div>
   </div>
@@ -484,12 +494,12 @@
         <div class="gitem" id="g101-2"><h4>2. 시나리오 탭에서 규모 정하기 <button class="small" data-goto="scn">탭 열기</button></h4>
           <figure><img src="/static/guide/scn.jpg" alt="맨 위 카드의 숫자 버튼이 환자 수 프리셋입니다"><figcaption>맨 위 카드의 숫자 버튼이 환자 수 프리셋입니다</figcaption></figure>
           <ol class="gsteps"><li><i>모니터링 환자 수</i>: 50 · 100 · 200 · 500 · 1000 · 2000 중 하나를 누릅니다.</li><li><i>MCOT 환자 수</i>(원외): 10 · 50 · 100 · 200.</li><li>상단 칩 <i>환자 n / 패치 연결 n</i>으로 확인합니다. 바로 반영됩니다.</li></ol></div>
-        <div class="gitem" id="g101-3"><h4>3. 송출 탭에서 라우터 서버 붙이기 <button class="small" data-goto="tx">탭 열기</button></h4>
+        <div class="gitem" id="g101-3"><h4>3. [에뮬레이터 설정 › 송출]에서 라우터 서버 붙이기 <button class="small" data-goto="tx">탭 열기</button></h4>
           <figure><img src="/static/guide/tx.jpg" alt="전송 데이터 선택, 송신 대상, 전송 통계"><figcaption>전송 데이터 선택, 송신 대상, 전송 통계. 서버 IP와 포트만 넣으면 워커가 바로 소켓을 엽니다</figcaption></figure>
           <ol class="gsteps"><li><i>서버 IP</i>와 <i>포트</i>(기본 9100)를 입력합니다. IP를 비우면 "생성만"(전송 없음).</li><li>라우터가 없으면 참고 수신기로 확인: <code>python tools/receiver.py --port 9100</code> 후 IP에 <code>127.0.0.1</code>.</li><li>전송 통계의 <i>백로그 드롭</i>·<i>미연결 드롭</i>이 0에 가까우면 정상입니다.</li></ol></div>
         <div class="gitem" id="g101-4"><h4>4. 모니터링 탭 둘러보기 <button class="small" data-goto="mon">탭 열기</button></h4>
           <figure><img src="/static/guide/monitor.jpg" alt="왼쪽 환자 목록, 오른쪽 실시간 파형·수치·이벤트 주입·환자 정보"><figcaption>왼쪽 환자 목록, 오른쪽 실시간 파형·수치·이벤트 주입·환자 정보</figcaption></figure>
-          <ol class="gsteps"><li>목록에서 환자를 누르면 오른쪽에 그 환자의 파형과 수치가 실시간으로 흐릅니다.</li><li>열 이름 클릭 = 정렬. 검색은 이름·환자번호·리듬·병동·진료과·패치. 상태 드롭다운으로 입원만·MCOT만 거를 수 있습니다.</li><li>수치 카드 끝 ⌄ 버튼: 1·2·3일 추세 그래프. 환자 정보 아래에는 입원 기록·검사·동선·패치 이력이 이어집니다.</li><li>모든 환자에 공통인 전송 채널 선택은 송출 탭으로 옮겼습니다.</li></ol></div>
+          <ol class="gsteps"><li>목록에서 환자를 누르면 오른쪽에 그 환자의 파형과 수치가 실시간으로 흐릅니다.</li><li>열 이름 클릭 = 정렬. 검색은 이름·환자번호·리듬·병동·진료과·패치. 상태 드롭다운으로 입원만·MCOT만 거를 수 있습니다.</li><li>수치 카드 끝 ⌄ 버튼: 1·2·3일 추세 그래프. 환자 정보 아래에는 입원 기록·검사·동선·패치 이력이 이어집니다.</li><li>모든 환자에 공통인 전송 채널 선택은 [에뮬레이터 설정 › 송출]으로 옮겼습니다.</li></ol></div>
         <div class="gitem" id="g101-6"><h4>5. 병원 탭 둘러보기 <button class="small" data-goto="hosp">탭 열기</button></h4>
           <figure><img src="/static/guide/hosp.jpg" alt="위: 검색·건물층·표시 모드 / 왼쪽: 도면 / 오른쪽: 측면도"><figcaption>위: 검색·건물층·표시 모드 / 왼쪽: 도면 / 오른쪽: 측면도</figcaption></figure>
           <ol class="gsteps"><li>측면도의 층을 누르면 도면이 바뀝니다. 도면 클릭 = 확대, 드래그 = 이동.</li><li>환자 아이콘 → 모니터링 탭, <b>게이트웨이 아이콘 → 중앙 모니터</b>.</li><li>표시 모드 <i>게이트웨이 음영지역</i>은 전파 사각지대를 빗금으로 보여 줍니다.</li></ol></div>
@@ -532,7 +542,7 @@
         <div class="gitem" id="t02"><h4>T-02 무선 노이즈·간섭 <button class="small apply" data-apply='{"scenario":{"network":{"enabled":true,"intensity":60,"wireless_noise":true,"wired_failure":false,"latency":false,"power_outage":false}}}'>이 설정 적용</button></h4>
       <div class="gsub">BLE/무선 구간 잡음으로 손실·지연·지터가 섞인 스트림.</div><ol class="gsteps"><li>상단 칩 NET 장애 ON 확인.</li><li>로그 탭에서 "무선 노이즈/간섭" 이벤트가 층 단위로 생기는지.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터가 seq gap을 손실로 집계하고 늦게 오는 프레임을 버리지 않는지.</div></div>
         <div class="gitem" id="t03"><h4>T-03 유선 장애 · 순간 정전 <button class="small apply" data-apply='{"scenario":{"network":{"enabled":true,"intensity":50,"wireless_noise":false,"wired_failure":true,"latency":false,"power_outage":true}},"transport":{"store_forward":{"enabled":true}}}'>이 설정 적용</button></h4>
-      <div class="gsub">한 층 또는 한 동의 게이트웨이가 동시에 끊겼다가 복구.</div><ol class="gsteps"><li>복구 시 저장 후 전송 버스트가 도착합니다(송출 탭 통계 <i>재전송 프레임</i>).</li><li>라우터 접속 수가 떨어졌다가 돌아오는지.</li></ol><div class="gexp"><b>확인 포인트</b> 복구 후 과거 타임스탬프 프레임이 순서대로 들어오고 중복이 없어야 함.</div></div>
+      <div class="gsub">한 층 또는 한 동의 게이트웨이가 동시에 끊겼다가 복구.</div><ol class="gsteps"><li>복구 시 저장 후 전송 버스트가 도착합니다([에뮬레이터 설정 › 송출] 통계 <i>재전송 프레임</i>).</li><li>라우터 접속 수가 떨어졌다가 돌아오는지.</li></ol><div class="gexp"><b>확인 포인트</b> 복구 후 과거 타임스탬프 프레임이 순서대로 들어오고 중복이 없어야 함.</div></div>
         <div class="gitem" id="t04"><h4>T-04 네트워크 지연·지터 <button class="small apply" data-apply='{"scenario":{"network":{"enabled":true,"intensity":70,"wireless_noise":false,"wired_failure":false,"latency":true,"power_outage":false}}}'>이 설정 적용</button></h4>
       <div class="gsub">수백 ms 지연과 지터.</div><ol class="gsteps"><li>대시보드 게이트웨이 표의 지연 열을 봅니다.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터 타임스탬프 정렬·버퍼링 정책 확인.</div></div>
         <div class="gitem" id="t05"><h4>T-05 아티팩트 최대 <button class="small apply" data-apply='{"scenario":{"artifacts":{"enabled":true,"intensity":100,"motion":true,"shower":true,"exam_trips":true,"patch_reattach":true,"transfer":true,"patch_replace":true,"home_interference":true}}}'>이 설정 적용</button></h4>
@@ -546,7 +556,7 @@
         <div class="gitem" id="t09"><h4>T-09 원외(MCOT) 100명 <button class="small apply" data-apply='{"general":{"outpatient_count":100},"scenario":{"site":"mcot","artifacts":{"enabled":true,"intensity":50,"home_interference":true}}}'>이 설정 적용</button></h4>
       <div class="gsub">휴대폰 게이트웨이, 가정 간섭, 이동.</div><ol class="gsteps"><li>대시보드의 MCOT 환자 수, 게이트웨이 유형 mobile.</li></ol><div class="gexp"><b>확인 포인트</b> 모바일 게이트웨이(용량 1)의 잦은 재접속 처리.</div></div>
         <div class="gitem" id="t10"><h4>T-10 혼합 대규모 2000 + 200 <button class="small apply" data-apply='{"general":{"active_patients":2000,"outpatient_count":200},"scenario":{"site":"mixed"}}'>이 설정 적용</button></h4>
-      <div class="gsub">최대 규모 부하.</div><ol class="gsteps"><li>대시보드 워커 표: overrun 0, build/send µs.</li><li>필요하면 송출 탭에서 워커 수·번들 주기 조정.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터 수신 프레임/초 ≈ 게이트웨이 수 × 5 유지, 소켓 수 = 게이트웨이 수.</div></div>
+      <div class="gsub">최대 규모 부하.</div><ol class="gsteps"><li>대시보드 워커 표: overrun 0, build/send µs.</li><li>필요하면 [에뮬레이터 설정 › 송출]에서 워커 수·번들 주기 조정.</li></ol><div class="gexp"><b>확인 포인트</b> 라우터 수신 프레임/초 ≈ 게이트웨이 수 × 5 유지, 소켓 수 = 게이트웨이 수.</div></div>
         <div class="gitem" id="t11"><h4>T-11 저장 후 전송 검증 <button class="small apply" data-apply='{"transport":{"store_forward":{"enabled":true,"max_bytes_per_gw":2097152,"burst_frames_per_cycle":40},"capture":{"enabled":true},"storm_smoothing":true}}' data-trig='{"what":"gateway_fault"}'>이 설정 적용</button></h4>
       <div class="gsub">장애 중 버퍼링 → 복구 후 버스트 재전송을 정답 캡처와 대조.</div><ol class="gsteps"><li>수신기를 <code>--strict --save-frames recv/</code>로 띄웁니다.</li><li>적용 후 [임의 게이트웨이 장애 90s]가 자동 주입됩니다.</li><li>끝나면 <code>python tools/verify_capture.py --capture data/runtime/capture --received recv/</code>.</li></ol><div class="gexp"><b>확인 포인트</b> missing 0 · duplicate 0, out_of_order는 재전송 구간에서만.</div></div>
         <div class="gitem" id="t12"><h4>T-12 파서 퍼징 <button class="small apply" data-apply='{"transport":{"fuzz":{"enabled":true,"rate_per_1000":20,"kinds":["bad_magic","bad_version","bad_len","truncated","oversize","garbage","dup","reorder","seq_gap","bad_record"]}}}'>이 설정 적용</button></h4>
@@ -565,7 +575,7 @@
           <ol class="gsteps"><li><code>GET /api/v1</code> 디스커버리, <code>PATCH /api/v1/config</code>, <code>POST /api/v1/control/start|stop|trigger</code>, <code>GET /api/v1/status</code>, <code>GET /api/v1/events?since=</code>.</li><li>EMR: <code>/emr/hospital|floors|gateways|admissions|patients|patches|layout</code>, DB: <code>POST /api/v1/db/query</code>.</li><li>실시간: <code>ws://host/ws/live</code> + <code>{"rows":[...]}</code>(숫자만 <code>"numeric":true</code>).</li></ol>
           <pre>curl -X POST localhost:5445/api/v1/control/trigger -H 'Content-Type: application/json' -d '{"what":"storm","duration":20}'</pre></div>
         <div class="gitem" id="g301-3"><h4>자동 최적화와 성능</h4>
-          <ol class="gsteps"><li>대시보드 [자동 최적화]: 환자 수를 단계적으로 올려 안정 최대치를 찾습니다.</li><li>워커 수(0=자동)·번들 주기·백로그는 송출 탭. Pi4 기준 워커 3, 200 ms.</li></ol></div>
+          <ol class="gsteps"><li>대시보드 [자동 최적화]: 환자 수를 단계적으로 올려 안정 최대치를 찾습니다.</li><li>워커 수(0=자동)·번들 주기·백로그는 [에뮬레이터 설정 › 송출]. Pi4 기준 워커 3, 200 ms.</li></ol></div>
         <div class="gitem" id="g301-4"><h4>자동 테스트 · 배포</h4>
           <ol class="gsteps"><li><code>.venv/bin/python -m pytest -q tests</code></li><li>Pi: <code>python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt</code>, 최초 <code>python run.py --pregen</code>, 이후 <code>python run.py --port 5445</code>.</li></ol></div>
       </div>
