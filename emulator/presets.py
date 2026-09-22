@@ -15,7 +15,7 @@ from .config import BASE_DIR, DEFAULT_CONFIG
 
 # 시나리오 계층: 프리셋 적용 때 기본값으로 되돌리는 경로
 LAYER = [("scenario",), ("general", "census_mode"), ("general", "admissions_per_hour"), ("general", "discharges_per_hour"), ("transport", "fuzz"), ("transport", "storm_smoothing"), ("transport", "store_forward")]
-KEEP_IN_SCENARIO = ("site", "devices")           # 장소·기기 정책은 사용자 설정 유지 (프리셋이 명시하면 덮어씀)
+KEEP_IN_SCENARIO = ("devices",)                   # 기기 정책은 사용자 설정 유지 (장소는 환자 수에서 자동으로 정해짐)
 
 _ALL_NET = {"wireless_noise": True, "wired_failure": True, "latency": True, "power_outage": True, "topology": True}
 _NO_NET = {"enabled": False}
@@ -29,11 +29,11 @@ PRESETS = [
     {"id": "baseline", "name": "무장애 기준선", "purpose": "처리량·장기 안정성 측정",
      "desc": "장애·아티팩트·일과·임상 악화·단말 동작을 모두 끕니다. 라우터·뷰어의 처리 성능과 메모리 누수를 잴 때 변수를 없앤 기준선입니다.",
      "patch": {"general": {"bed_capacity": 2200, "active_patients": 2000, "outpatient_count": 100},
-               "scenario": {**_QUIET, "site": "mixed", "patch": {"battery_drain_enabled": False, "lead_off_enabled": False}, "exam_trip_ratio": 0.0}}},
+               "scenario": {**_QUIET, "patch": {"battery_drain_enabled": False, "lead_off_enabled": False}, "exam_trip_ratio": 0.0}}},
     {"id": "ward_day", "name": "일상 병동 운영", "purpose": "현실적인 하루 (디지털 트윈 기본)",
      "desc": "병원 일과·자연 임상 악화·요일/시간대 재원 곡선·약한 무선 간섭과 장비 장애·게이트웨이 장애 10 %. 현장과 가장 비슷한 평상시입니다.",
      "patch": {"general": {"census_mode": "weekly", "bed_capacity": 5000, "active_patients": 1000, "outpatient_count": 50},
-               "scenario": {"site": "mixed", "network": {"enabled": True, "intensity": 15, "wireless_noise": True, "wired_failure": False, "latency": True, "power_outage": False, "topology": True},
+               "scenario": {"network": {"enabled": True, "intensity": 15, "wireless_noise": True, "wired_failure": False, "latency": True, "power_outage": False, "topology": True},
                             "artifacts": {"enabled": True, "intensity": 40}, "gateway": {"fault_enabled": True, "fault_intensity": 10}}}},
     {"id": "network", "name": "네트워크 장비 장애", "purpose": "업링크 단절·버퍼·재전송 처리",
      "desc": "코어·층 스위치·무선 AP 장애와 무선 간섭·지연을 강하게 겁니다. 적용 즉시 층 스위치 하나를 5분간 떨어뜨립니다.",
@@ -49,9 +49,9 @@ PRESETS = [
      "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000}, "scenario": {"gateway": {"fault_enabled": True, "fault_intensity": 80, "outage": True, "degrade": True, "replace": True}}},
      "actions": [{"what": "gateway_replace"}]},
     {"id": "artifacts", "name": "움직임 · 아티팩트 최대", "purpose": "신호 품질 판정·잡음 내성",
-     "desc": "움직임·샤워·검사 이동·재부착·전동·패치 교체를 최대 빈도로, 병실 밖 이동 비율 15 %. 신호 품질 판정 로직의 최악 조건입니다.",
-     "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000}, "scenario": {"artifacts": {"enabled": True, "intensity": 100, "motion": True, "shower": True, "exam_trips": True, "patch_reattach": True,
-                                          "transfer": True, "patch_replace": True, "home_interference": True}, "exam_trip_ratio": 15.0}}},
+     "desc": "움직임·샤워·검사 이동·전동을 최대 빈도로, 병실 밖 이동 비율 15 %. 신호 품질 판정 로직의 최악 조건입니다.",
+     "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000}, "scenario": {"artifacts": {"enabled": True, "intensity": 100, "motion": True, "shower": True, "exam_trips": True, 
+                                          "transfer": True, "home_interference": True}, "exam_trip_ratio": 15.0}}},
     {"id": "clinical", "name": "임상 악화 · 코드블루 다발", "purpose": "조기경보·부정맥 분석 검증",
      "desc": "임상 악화를 1,000 환자·일당 300건으로 올리고 부정맥 에피소드를 켭니다. 적용 즉시 세 명을 빠르게 악화시키고 한 명에게 코드블루를 겁니다. 정답 라벨로 채점하세요.",
      "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000}, "scenario": {"clinical": {"enabled": True, "per_1000_patient_days": 300}, "rhythm_episodes": True, "artifacts": {"enabled": True, "intensity": 20}}},
@@ -59,7 +59,7 @@ PRESETS = [
                  {"what": "deteriorate", "params": {"fast": True}}, {"what": "code_blue"}]},
     {"id": "mcot", "name": "원외 MCOT 중심", "purpose": "모바일 회선·단말 끊김·일괄 업로드",
      "desc": "장소를 혼합으로, 원외 환자를 200명으로 늘리고 단말 동작(앱 강제 종료·절전 일괄 업로드·OS 업데이트)과 가정 전파 간섭을 켭니다. 적용 즉시 한 명의 앱을 10분 종료시킵니다.",
-     "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000, "outpatient_count": 200}, "scenario": {"site": "mixed", "mcot_device": {"enabled": True},
+     "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000, "outpatient_count": 200}, "scenario": {"mcot_device": {"enabled": True},
                                                                    "artifacts": {"enabled": True, "intensity": 60, "home_interference": True}}},
      "actions": [{"what": "phone", "params": {"state": "killed", "minutes": 10}}]},
     {"id": "router_stress", "name": "라우터 내구성", "purpose": "파서·재접속·폭주 처리",
@@ -70,7 +70,7 @@ PRESETS = [
     {"id": "performance", "name": "퍼포먼스", "purpose": "최대 부하 처리량 측정",
      "desc": "병상 2,500 · 패치 2,000 · 원외 MCOT 200명으로 규모를 키우고 네트워크·게이트웨이 장애를 끕니다. 라우터·뷰어가 큰 규모에서 버티는지 잴 때 씁니다.",
      "patch": {"general": {"bed_capacity": 2500, "active_patients": 2000, "outpatient_count": 200},
-               "scenario": {"site": "mixed", "network": _NO_NET, "gateway": {"fault_enabled": False}}}},
+               "scenario": {"network": _NO_NET, "gateway": {"fault_enabled": False}}}},
     {"id": "rf_noise", "name": "전파 방해 (2.4 GHz)", "purpose": "BLE 잦은 끊김·무선 구간 손실",
      "desc": "2.4 GHz 대역이 붐비는 병원(무선랜·전자레인지·의료기기 혼잡)을 흉내 냅니다. BLE 신호가 약해지고 흔들려 경계의 패치가 자주 떨어지고, 수 초~수십 초 짧은 끊김이 잦습니다. 무선 AP 로 올라가는 게이트웨이는 손실·지연이 생깁니다.",
      "patch": {"general": {"bed_capacity": 2000, "active_patients": 1000}, "scenario": {"rf_noise": {"enabled": True, "level": 70},
@@ -78,10 +78,10 @@ PRESETS = [
     {"id": "realsig", "name": "실제 시그널 송출", "purpose": "실측 심전도 파일 반복 전송",
      "desc": "병상 20 · 환자 20명, 원외 0명. 슬롯마다 에뮬레이터의 ATF/CSV 심전도 파일을 읽어 끝없이 반복 전송합니다. 파일이 없는 슬롯은 자동 생성이 켜져 있으면 여러 부정맥을 차례로 돌며 바꿉니다.",
      "patch": {"general": {"bed_capacity": 20, "active_patients": 20, "outpatient_count": 0, "admissions_per_hour": 0, "discharges_per_hour": 0},
-               "scenario": {**_QUIET, "site": "hospital", "rhythm_episodes": False, "variant_hopping": False, "exam_trip_ratio": 0.0,
+               "scenario": {**_QUIET, "rhythm_episodes": False, "variant_hopping": False, "exam_trip_ratio": 0.0,
                             "patch": {"battery_drain_enabled": False, "lead_off_enabled": False}, "realsig": {"enabled": True}}}},
 ]
-POINTS = {'default': (['아티팩트 40 % · 게이트웨이 장애 20 %', '병원 일과 · 임상 악화(1,000 환자·일당 20건) · MCOT 단말 동작 켬', '네트워크 장애 꺼짐 · 재원 수 고정'], ''), 'baseline': (['네트워크 · 게이트웨이 장애 꺼짐', '아티팩트 · 병원 일과 · 임상 악화 · 단말 동작 꺼짐', '패치 배터리 소모 · 리드 오프 꺼짐, 병실 밖 이동 0 %', '진행 중이던 장애·악화도 정리'], ''), 'ward_day': (['병원 일과 · 자연 임상 악화 켬', '요일·시간대 재원 곡선', '무선 간섭 · 지연 · 장비 장애 약하게 (15 %)', '게이트웨이 장애 10 % · 아티팩트 40 %'], ''), 'network': (['네트워크 장애 70 % (무선 · 유선 · 지연 · 장비)', '정전은 제외', '게이트웨이 장애 10 %'], '층 스위치 하나 5분 장애'), 'power': (['정전만 켬 (강도 40 %)', '개별 게이트웨이 장애 끔', 'UPS 유지 → 발전기 전환 재부팅 → 일반 전원 복전 → 층 스위치 재부팅'], '한 건물 5분 정전'), 'gateway': (['게이트웨이 장애 80 % (무응답 · 성능 저하 · 하드웨어 고장)', '교체되면 새 번호·MAC 으로 재접속, META 재전송'], '게이트웨이 1대 고장 → 교체'), 'artifacts': (['아티팩트 100 % (움직임 · 샤워 · 검사 이동 · 재부착 · 전동 · 패치 교체)', '가정 전파 간섭 켬 · 병실 밖 이동 15 %'], ''), 'clinical': (['임상 악화 1,000 환자·일당 300건', '부정맥 에피소드 켬 · 아티팩트 20 %', '정답 라벨(임상 CSV)로 채점'], '3명 빠른 악화 · 1명 코드블루'), 'mcot': (['장소 혼합 · 원외 환자 200명', 'MCOT 단말 동작 켬 (앱 종료 · 절전 일괄 업로드 · OS 업데이트)', '가정 전파 간섭 · 아티팩트 60 %'], '1명 앱 강제 종료 10분'), 'router_stress': (['오염 프레임 1,000개당 5개 (전 종류)', '재접속 완만화 끔 (폭주)', '네트워크 · 게이트웨이 장애 50 %'], '20초 연결 폭주')}
+POINTS = {'default': (['아티팩트 40 % · 게이트웨이 장애 20 %', '병원 일과 · 임상 악화(1,000 환자·일당 20건) · MCOT 단말 동작 켬', '네트워크 장애 꺼짐 · 재원 수 고정'], ''), 'baseline': (['네트워크 · 게이트웨이 장애 꺼짐', '아티팩트 · 병원 일과 · 임상 악화 · 단말 동작 꺼짐', '패치 배터리 소모 · 리드 오프 꺼짐, 병실 밖 이동 0 %', '진행 중이던 장애·악화도 정리'], ''), 'ward_day': (['병원 일과 · 자연 임상 악화 켬', '요일·시간대 재원 곡선', '무선 간섭 · 지연 · 장비 장애 약하게 (15 %)', '게이트웨이 장애 10 % · 아티팩트 40 %'], ''), 'network': (['네트워크 장애 70 % (무선 · 유선 · 지연 · 장비)', '정전은 제외', '게이트웨이 장애 10 %'], '층 스위치 하나 5분 장애'), 'power': (['정전만 켬 (강도 40 %)', '개별 게이트웨이 장애 끔', 'UPS 유지 → 발전기 전환 재부팅 → 일반 전원 복전 → 층 스위치 재부팅'], '한 건물 5분 정전'), 'gateway': (['게이트웨이 장애 80 % (무응답 · 성능 저하 · 하드웨어 고장)', '교체되면 새 번호·MAC 으로 재접속, META 재전송'], '게이트웨이 1대 고장 → 교체'), 'artifacts': (['아티팩트 100 % (움직임 · 샤워 · 검사 이동 · 전동)', '가정 전파 간섭 켬 · 병실 밖 이동 15 %'], ''), 'clinical': (['임상 악화 1,000 환자·일당 300건', '부정맥 에피소드 켬 · 아티팩트 20 %', '정답 라벨(임상 CSV)로 채점'], '3명 빠른 악화 · 1명 코드블루'), 'mcot': (['장소 혼합 · 원외 환자 200명', 'MCOT 단말 동작 켬 (앱 종료 · 절전 일괄 업로드 · OS 업데이트)', '가정 전파 간섭 · 아티팩트 60 %'], '1명 앱 강제 종료 10분'), 'router_stress': (['오염 프레임 1,000개당 5개 (전 종류)', '재접속 완만화 끔 (폭주)', '네트워크 · 게이트웨이 장애 50 %'], '20초 연결 폭주')}
 POINTS.update({'realsig': (['병상 20 · 환자 20명 · 원외 0명, 입퇴원 없음', '슬롯별 ATF/CSV 파일을 표본율 맞춰 반복 재생 (HR 은 파일에서 검출)', '빈 슬롯: 자동 생성 켜면 부정맥 순환 (60초마다)', '장애 · 아티팩트 · 일과 · 에피소드 꺼짐'], ''),
                'performance': (['병상 2,500 · 패치 2,000 · 원외 MCOT 200명 (혼합)', '네트워크 · 게이트웨이 장애 꺼짐', '아티팩트 · 일과 · 임상 악화는 기본값'], ''),
                'rf_noise': (['BLE 신호 감쇠 · 흔들림 (강도 70 %)', '패치당 시간당 최대 약 8번 짧은 끊김 (3~25초)', '무선 AP 경유 게이트웨이 손실 · 지연', '무선 간섭 · 지연 네트워크 장애 40 %'], '')})

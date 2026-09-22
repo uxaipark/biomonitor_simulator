@@ -361,14 +361,21 @@ class Realism:
                     rec["deter"] = None
                     w.log.add("clinical", f"{prof['name']} {DETER[d['kind']]['label']} 호전 — 활력징후 기준치 복귀", patient_id=pid)
                 continue
-            if p_new and not rec["outpatient"] and self.rng.random() < p_new:
+            if p_new and not rec["outpatient"] and not self._busy(pid, rec) and self.rng.random() < p_new:
                 self.start_deterioration(pid)
+
+    def _busy(self, pid: int, rec: dict) -> bool:
+        """우선순위: 현장 테스트 > 실제 시그널 > 임상 악화·코드블루 > 부정맥 에피소드 > 루프 변형 순환."""
+        ft = getattr(self.w, "ft", None)
+        return "rs_paced" in rec or bool(ft and any(a["pid"] == pid for a in ft.active))
 
     def code_blue(self, pid: int, cause: str = "급성 심정지") -> str:
         w = self.w
         rec, prof = w.admitted.get(pid), w.by_id.get(pid)
         if not rec or rec.get("code_blue"):
             return "not eligible"
+        if self._busy(pid, rec):
+            return "not eligible (현장 테스트·실제 시그널 환자)"
         now = w.sim_time
         dur = float(self.rng.uniform(300, 1200))
         rec["code_blue"] = {"t0": now, "until": now + dur, "rosc": bool(self.rng.random() < 0.6), "cause": cause, "label_t0": time.time()}
@@ -388,7 +395,9 @@ class Realism:
             d = rec["deter"]
             self._label_add("deterioration", DETER[d["kind"]]["label"], patient_id=pid, patch_id=self._patch_id(rec), t0=d["label_t0"], t1=time.time(), meta={"kind": d["kind"]})
             rec["deter"] = None
-        if cb["rosc"]:
+        if self._busy(pid, rec):                                          # 코드블루 중 현장 테스트가 걸렸으면 리듬은 테스트가 정한다
+            pass
+        elif cb["rosc"]:
             rec["episode_until"] = w.sim_time + 1800                      # 자발순환 회복: 30분 동빈맥 뒤 기저 리듬
             w._switch_variant(rec["row"], w._variant_for("sinus_tachy", prof["age"]), w._tick_now())
             w._set_activity(rec, "still", 1800, 0.02, "supine")

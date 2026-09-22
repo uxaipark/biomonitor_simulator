@@ -145,6 +145,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "battery_drain_enabled": True,
             "lead_off_enabled": True,
             "replace_below_pct": 5,
+            "replace_enabled": True,       # 배터리가 기준 이하면 새 패치로 교체 (끄면 방전된 패치는 전송을 멈춤)
         },
         "gateway": {
             "capacity": 32,
@@ -305,8 +306,11 @@ class Config:
         hp["headroom_pct"] = float(max(0.0, min(60.0, hp.get("headroom_pct", 20) or 0)))
         hp["max_buildings"] = int(max(1, min(8, hp.get("max_buildings", 3) or 3)))
         sc = d["scenario"]
-        if sc["site"] not in ("hospital", "mcot", "mixed"):
-            sc["site"] = "hospital"
+        # 장소는 환자 수에서 정한다 (입원·원외 수와 장소가 어긋나는 조합을 없앰)
+        a_n, o_n = g["active_patients"], g["outpatient_count"]
+        sc["site"] = "mixed" if a_n > 0 and o_n > 0 else ("mcot" if o_n > 0 else "hospital")
+        pt = sc.setdefault("patch", {})
+        pt["replace_enabled"] = bool(pt.get("replace_enabled", True))
         for sec in ("network", "artifacts"):
             sc[sec]["intensity"] = int(max(0, min(100, sc[sec]["intensity"])))
         sc["gateway"]["capacity"] = int(max(1, min(64, sc["gateway"]["capacity"])))

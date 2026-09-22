@@ -626,7 +626,7 @@ class World:
             rssi = -100
             rf = self.cfg.get("scenario", "rf_noise", default={}) or {}
             rfl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") and (self.cfg.get("scenario", "network", default={}) or {}).get("enabled") else 0.0
-            if rec["location"] >= 0 and not rec["shadow"] and not (rec.get("rf_drop_until", 0) > self.sim_time):   # 전파 방해로 BLE 가 잠깐 끊긴 동안은 미연결
+            if rec["location"] >= 0 and not rec["shadow"] and not rec.get("batt_dead") and not (rec.get("rf_drop_until", 0) > self.sim_time):   # 전파 방해로 BLE 가 잠깐 끊긴 동안은 미연결
                 cands = h.candidate_gateways(rec["location"])
                 for gw in cands[:6]:
                     gw = int(gw)
@@ -1209,8 +1209,16 @@ class World:
                 if removed and removed <= now and not rec.get("mri_pending"):
                     rec["patch_removed_until"] = 0.0
             P["flags"][row] = f
-            if patch.battery <= pc["replace_below_pct"] and rec["activity"] != "shower":
-                self._replace_patch(rec, f"배터리 {patch.battery:.0f}%")
+            if rec.get("batt_dead") and (patch.battery > 0.0 or not drain):  # 새 패치(교체)·배터리 소모 끔 → 다시 전송
+                rec["batt_dead"] = False
+                self._relink(rec, force=True)
+            if pc.get("replace_enabled", True):
+                if patch.battery <= pc["replace_below_pct"] and rec["activity"] != "shower":
+                    self._replace_patch(rec, f"배터리 {patch.battery:.0f}%")
+            elif drain and patch.battery <= 0.0 and not rec.get("batt_dead"):  # 교체하지 않음: 방전된 패치는 전송을 멈춘다
+                rec["batt_dead"] = True
+                self.log.add("patch", f"{prof['name']} 패치 {patch.serial} 배터리 방전 — 교체 안 함 설정이라 전송 중지", patient_id=pid)
+                self._relink(rec, force=True)
 
     # ------------------------------------------------------------------ slow multi-day modulation
     def _step_modulation(self) -> None:
@@ -2222,7 +2230,7 @@ class World:
             if what == "surge":
                 return self.real.start_surge(params.get("count"), float(params.get("over_min", 60)))
             if what in ("deteriorate", "code_blue"):
-                ids = [k for k, r in self.admitted.items() if not r["outpatient"] and not r.get("deter") and not r.get("code_blue")] or list(self.admitted.keys())
+                ids = [k for k, r in self.admitted.items() if not r["outpatient"] and not r.get("deter") and not r.get("code_blue") and not self.real._busy(k, r)] or list(self.admitted.keys())
                 if not ids:
                     return "no patients"
                 pid = target if target in self.admitted else int(self.rng.choice(ids))

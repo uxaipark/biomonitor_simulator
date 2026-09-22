@@ -308,9 +308,9 @@ function linkStop() { if (linkTimer) { clearInterval(linkTimer); linkTimer = nul
 const B = {  // element id -> config path
   g_active: ['general', 'active_patients'], g_out: ['general', 'outpatient_count'], g_adm: ['general', 'admissions_per_hour'], g_dis: ['general', 'discharges_per_hour'],
   g_speed: ['general', 'sim_speed'], g_beds: ['general', 'bed_capacity'], g_prof: ['general', 'profile_count'], g_seed: ['general', 'seed'], g_heart: ['general', 'heart_disease_ratio'], g_kr: ['general', 'korean_ratio'],
-  s_site: ['scenario', 'site'], s_ep: ['scenario', 'rhythm_episodes'], s_hop: ['scenario', 'variant_hopping'], s_devpol: ['scenario', 'devices', 'policy'], d_mf: ['scenario', 'devices', 'spo2_mix', 'fingertip'], d_mr: ['scenario', 'devices', 'spo2_mix', 'ring'], d_mw: ['scenario', 'devices', 'spo2_mix', 'wrist_ptt'], n_en: ['scenario', 'network', 'enabled'], n_int: ['scenario', 'network', 'intensity'], n_wl: ['scenario', 'network', 'wireless_noise'], n_wd: ['scenario', 'network', 'wired_failure'], n_lat: ['scenario', 'network', 'latency'], n_pw: ['scenario', 'network', 'power_outage'],
-  x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_re: ['scenario', 'artifacts', 'patch_reattach'], a_tr: ['scenario', 'artifacts', 'transfer'], a_rp: ['scenario', 'artifacts', 'patch_replace'], a_hm: ['scenario', 'artifacts', 'home_interference'],
-  p_days: ['scenario', 'patch', 'battery_days'], p_rep: ['scenario', 'patch', 'replace_below_pct'], p_dr: ['scenario', 'patch', 'battery_drain_enabled'], p_lo: ['scenario', 'patch', 'lead_off_enabled'],
+  s_ep: ['scenario', 'rhythm_episodes'], s_hop: ['scenario', 'variant_hopping'], s_devpol: ['scenario', 'devices', 'policy'], d_mf: ['scenario', 'devices', 'spo2_mix', 'fingertip'], d_mr: ['scenario', 'devices', 'spo2_mix', 'ring'], d_mw: ['scenario', 'devices', 'spo2_mix', 'wrist_ptt'], n_en: ['scenario', 'network', 'enabled'], n_int: ['scenario', 'network', 'intensity'], n_wl: ['scenario', 'network', 'wireless_noise'], n_wd: ['scenario', 'network', 'wired_failure'], n_lat: ['scenario', 'network', 'latency'], n_pw: ['scenario', 'network', 'power_outage'],
+  x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_tr: ['scenario', 'artifacts', 'transfer'], a_hm: ['scenario', 'artifacts', 'home_interference'],
+  p_days: ['scenario', 'patch', 'battery_days'], p_rep: ['scenario', 'patch', 'replace_below_pct'], p_dr: ['scenario', 'patch', 'battery_drain_enabled'], p_lo: ['scenario', 'patch', 'lead_off_enabled'], p_repl: ['scenario', 'patch', 'replace_enabled'],
   h_tpl: ['hospital', 'template'], h_maxb: ['hospital', 'max_buildings'], gw_f: ['scenario', 'gateway', 'fault_enabled'], gw_out: ['scenario', 'gateway', 'outage'], gw_deg: ['scenario', 'gateway', 'degrade'], gw_rep: ['scenario', 'gateway', 'replace'], gw_int: ['scenario', 'gateway', 'fault_intensity'], gw_cap: ['scenario', 'gateway', 'capacity'], gw_cor: ['scenario', 'gateway', 'corridor_gateways'],
   n_topo: ['scenario', 'network', 'topology'], rt_en: ['scenario', 'routine', 'enabled'], cl_en: ['scenario', 'clinical', 'enabled'],
   cl_rate: ['scenario', 'clinical', 'per_1000_patient_days'], md_en: ['scenario', 'mcot_device', 'enabled'], g_census: ['general', 'census_mode'],
@@ -342,25 +342,40 @@ function scnMark() {
   const pend = new Set(scnPending());
   if (SV && JSON.stringify((SV.transport.fuzz || {}).kinds || []) !== JSON.stringify((CFG.transport.fuzz || {}).kinds || [])) pend.add('fz_kinds');
   SCN_IDS.forEach(id => { const el = document.getElementById(id); const box = el && (el.closest('.field, label.chk') || el); if (box) box.classList.toggle('pend', pend.has(id)); });
+  scnGate();
   if (scnPresets) pwDescribe(true);
   return pend.size;
 }
 // 서로 부딪치거나 효과가 없는 옵션 조합 (미리보기 값 기준)
+const SITE_KO = { hospital: '병원 내 연속 모니터링 (입원 환자만)', mcot: '원외 MCOT (원외 환자만)', mixed: '혼합 (병원 + 원외)' };
+const siteOf = (g) => g.active_patients > 0 && g.outpatient_count > 0 ? 'mixed' : (g.outpatient_count > 0 ? 'mcot' : 'hospital');
+// 남은 확인 사항 (막을 수 없고 의도일 수도 있는 조합)
 function scnConflicts(c) {
   if (!c) return [];
   const g = c.general, sc = c.scenario, out = [], n = sc.network || {}, a = sc.artifacts || {}, gw = sc.gateway || {}, rs = sc.realsig || {}, rf = sc.rf_noise || {};
-  if (sc.site === 'mcot' && g.active_patients > 0) out.push(`장소가 원외 MCOT라 입원 환자 수(${cnum(g.active_patients)})는 무시됩니다`);
-  if (sc.site === 'hospital' && g.outpatient_count > 0) out.push(`장소가 병원 내라 원외 MCOT 환자 수(${cnum(g.outpatient_count)})는 무시됩니다`);
-  if (g.active_patients > g.bed_capacity) out.push(`입원 환자 수(${cnum(g.active_patients)})가 병상 수(${cnum(g.bed_capacity)})보다 많아 병상 수로 제한됩니다`);
-  if (rf.enabled && !n.enabled) out.push('전파 방해는 네트워크 장애의 [시나리오 사용]을 켜야 동작합니다');
   if (n.enabled && !['wireless_noise', 'wired_failure', 'latency', 'power_outage', 'topology'].some(k => n[k]) && !rf.enabled) out.push('네트워크 장애를 켰지만 세부 항목이 모두 꺼져 있습니다');
   if (gw.fault_enabled && !gw.outage && !gw.degrade && !gw.replace) out.push('게이트웨이 장애를 켰지만 세부 항목이 모두 꺼져 있습니다');
-  if (a.enabled && !['motion', 'shower', 'exam_trips', 'patch_reattach', 'transfer', 'patch_replace', 'home_interference'].some(k => a[k])) out.push('아티팩트를 켰지만 세부 항목이 모두 꺼져 있습니다');
-  if (a.enabled && a.patch_replace && !(sc.patch || {}).battery_drain_enabled) out.push('배터리 소모가 꺼져 있어 [배터리 소진 시 패치 교체]는 일어나지 않습니다');
+  if (a.enabled && !['motion', 'shower', 'transfer', 'home_interference'].some(k => a[k])) out.push('아티팩트를 켰지만 세부 항목이 모두 꺼져 있습니다');
   if ((n.enabled || gw.fault_enabled) && !(c.transport.store_forward || {}).enabled) out.push('저장 후 전송이 꺼져 있어 장애 동안의 데이터는 버려집니다');
-  if (rs.enabled && sc.site === 'mcot') out.push('실제 시그널 송출은 입원 환자에게 적용되는데 장소가 원외 MCOT입니다');
   if (rs.enabled && g.active_patients < 20) out.push(`실제 시그널 슬롯은 20개인데 입원 환자가 ${g.active_patients}명이라 나머지 슬롯은 쉽니다`);
   return out;
+}
+// 부모 스위치가 꺼지면 효과 없는 하위 옵션은 흐리게 막는다
+const SCN_GATE = [
+  ['n_en', ['n_int', 'n_wl', 'n_wd', 'n_lat', 'n_pw', 'n_topo', 'rf_en', 'rf_lvl']], ['rf_en', ['rf_lvl']],
+  ['gw_f', ['gw_int', 'gw_out', 'gw_deg', 'gw_rep']],
+  ['a_en', ['a_int', 'a_mo', 'a_sh', 'a_tr', 'a_hm']],
+  ['cl_en', ['cl_rate']], ['p_dr', ['p_days', 'p_repl', 'p_rep']], ['p_repl', ['p_rep']],
+  ['sf_en', ['sf_max', 'sf_burst']], ['fz_en', ['fz_rate', 'fz_kinds']],
+];
+function scnGate() {
+  if (!SV) return;
+  const off = new Set();
+  SCN_GATE.forEach(([par, kids]) => { const v = getPath(SV, B[par]); if (!v || off.has(par)) kids.forEach(k => off.add(k)); });
+  if (!(SV.general.outpatient_count > 0)) off.add('md_en');
+  SCN_IDS.forEach(id => { const el = document.getElementById(id); if (!el) return; const box = el.closest('.field, label.chk') || el;
+    el.disabled = off.has(id); box.classList.toggle('gated', off.has(id)); });
+  const sv = $('#siteView'); if (sv) { const k = siteOf(SV.general); sv.innerHTML = `<b>${SITE_KO[k]}</b> <span class="sub">입원 ${cnum(SV.general.active_patients)} · 원외 ${cnum(SV.general.outpatient_count)}</span>`; }
 }
 function scnFill() {
   for (const id of SCN_IDS) {
@@ -410,7 +425,11 @@ for (const [id, p] of Object.entries(B)) {
     const o = document.getElementById(id + '_o'); if (o) o.value = v;
     if (SCN_IDS.has(id)) {                            // 시나리오 탭: 폼에만 반영, [적용]에서 한꺼번에
       scnEdit(p, v);
-      if (id === 'g_beds') $('#g_active').max = v;
+      if (id === 'rf_en' && v && !getPath(SV, B.n_en)) { scnEdit(B.n_en, true); $('#n_en').checked = true; toast('전파 방해는 네트워크 장애에 딸려 있어 네트워크 장애도 켰습니다'); }
+      if (id === 'g_beds') {
+        $('#g_active').max = v;
+        if (SV.general.active_patients > v) { scnEdit(B.g_active, v); $('#g_active').value = v; $('#g_active_o').value = v; toast(`병상 수에 맞춰 입원 환자 수를 ${cnum(v)}명으로 줄였습니다`); }
+      }
       if (id === 'g_active' || id === 'g_out' || id === 'g_beds') renderPresets();
       return;
     }
@@ -2576,7 +2595,7 @@ function pwDescribe(fromMark) {
   $('#pDesc').innerHTML = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
     `${p.saved ? '<span class="pd-saved" title="[저장]한 기본값 사용 중 · [리셋]으로 출고값 복원">저장값</span>' : ''}` +
     `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
-    `<div class="pd-text sub">병상 ${cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[(SV || CFG).scenario.site] || '-'}</div>` +
+    `<div class="pd-text sub">병상 ${cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[siteOf(g)]}</div>` +
     (p.id === 'realsig' ? '' : `<div class="pd-text">${esc(p.desc)}</div>`) +
     (p.id === 'realsig' ? rsPanel() : `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`) +
     (p.actions_text ? `<div class="pd-act">적용 즉시: <b>${esc(p.actions_text)}</b></div>` : '');

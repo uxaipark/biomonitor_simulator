@@ -987,3 +987,9 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 .ft-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ftc);margin-right:6px;vertical-align:middle}
 .ft-hist{display:flex;flex-direction:column;gap:3px;max-height:320px;overflow:auto}
 .ft-hrow{display:grid;grid-template-columns:auto auto auto minmax(0,1fr);gap:6px;align-items:center;font-size:12.5px;white-space:nowrap}
+
+/* 하위 옵션 막힘 · 장소 자동 */
+#scnGrid .gated{opacity:.42}
+#scnGrid .gated input, #scnGrid .gated select{cursor:not-allowed}
+label.chk.sub-opt{padding-left:26px}
+.site-view{min-height:40px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}

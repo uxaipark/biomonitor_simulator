@@ -185,7 +185,7 @@
     <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="5000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
-      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 장소 시나리오가 <b>원외 MCOT</b>면 입원 환자는 0명이 됩니다. 시드 등 그 외 구조 설정은 [설정·데이터] 탭의 구조 설정에서 재구성합니다.</div>
+      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 시드 등 그 외 구조 설정은 [설정·데이터] 탭의 구조 설정에서 재구성합니다.</div>
     </div>
     <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
       <div class="row"><div class="field"><span title="병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)">병상 수 (환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
@@ -194,13 +194,13 @@
       <div class="help">병상 수를 바꾸고 위의 <b>[적용]</b>을 누르면 자동으로 재구성해 병원을 그 크기로 짓습니다(최대 약 4,850병상). 재원 환자와 패치 상태는 초기화되고 전송은 잠시 멈춥니다. [재구성]은 지금 적용된 값으로 다시 짓습니다.</div>
     </div>
     <div class="card" data-card="site"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>장소 시나리오</h3>
-      <div class="field"><select id="s_site"><option value="hospital">병원 내 연속 모니터링 (BLE 패치 + 게이트웨이)</option><option value="mcot">원외 MCOT (모바일 게이트웨이)</option><option value="mixed">혼합 (병원 + 원외)</option></select></div>
-      <div class="help">어느 환자가 실제로 모니터링될지 정합니다. <b>병원 내</b>는 입원 환자만, <b>원외 MCOT</b>는 원외 환자만(입원 환자 수는 무시됨), <b>혼합</b>은 둘 다 돌립니다.</div>
+      <div class="site-view" id="siteView"></div>
+      <div class="help">입원 환자 수와 원외 MCOT 환자 수로 자동으로 정해집니다. 입원만 있으면 <b>병원 내</b>, 원외만 있으면 <b>원외 MCOT</b>, 둘 다 있으면 <b>혼합</b>입니다.</div>
     </div>
     <div class="card" data-card="mcot"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>원외 MCOT 환자 수</h3>
       <div class="field"><span>원외 MCOT 환자 수 (모바일 게이트웨이 1대당 1명)</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
       <div class="presets" id="outPresets"></div>
-      <div class="help">장소 시나리오가 <b>원외 MCOT</b> 또는 <b>혼합</b>일 때만 반영됩니다.</div>
+      <div class="help">1명 이상이면 장소가 자동으로 <b>혼합</b>(입원이 0명이면 <b>원외 MCOT</b>)이 됩니다.</div>
       <label class="chk" title="단말 동작 (앱 강제 종료 · 절전 모드 일괄 업로드 · 야간 OS 업데이트 · 비행기 모드 · 지방 커버리지)"><input type="checkbox" id="md_en"> 단말 동작 (앱 종료 · 절전 등)</label>
       <div class="row tight"><button class="small" data-trig="phone" data-params='{"state":"killed","minutes":10}'>임의 MCOT 앱 종료 10분</button><button class="small" data-trig="phone" data-params='{"state":"saver","minutes":10}'>임의 MCOT 절전 모드 10분</button></div>
       <div class="sub" id="phoneStatus"></div>
@@ -256,9 +256,7 @@
       <label class="chk" title="움직임/뒤척임/보행/화장실 (motion artifact)"><input type="checkbox" id="a_mo"> 움직임 · 보행 · 화장실</label>
       <label class="chk"><input type="checkbox" id="a_sh"> 샤워 (SpO2 센서 분리, 강한 노이즈)</label>
       <label class="chk" title="검사 이동 (복도·엘리베이터 핸드오버/음영, 패치 유지; MRI만 촬영 중 분리 후 새 패치로 교체)"><input type="checkbox" id="a_ex"> 검사 이동 (핸드오버 · 음영)</label>
-      <label class="chk"><input type="checkbox" id="a_re"> 패치 분리/재부착</label>
       <label class="chk"><input type="checkbox" id="a_tr"> 병실 이동/타병원 전원 (패치 교체)</label>
-      <label class="chk"><input type="checkbox" id="a_rp"> 배터리 소진 시 패치 교체</label>
       <label class="chk"><input type="checkbox" id="a_hm"> 원외: 전파 간섭, 음영, 모바일 GW 방전</label>
       <div class="row tight"><button class="small" data-trig="exam">임의 환자 MRI 이동</button></div>
     </div>
@@ -268,7 +266,8 @@
     </div>
     <div class="card" data-card="patch"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>패치 (웨어러블 BLE)</h3>
       <div class="row"><div class="field"><span>패치 배터리 수명 (일)</span><input type="number" id="p_days" min="0.01" max="30" step="0.5"></div><div class="field"><span>교체 기준 (%)</span><input type="number" id="p_rep" min="0" max="50"></div></div>
-      <label class="chk" title="배터리 감소 시뮬레이션 (입원 시간에 따라 소모, 기준 이하 시 교체)"><input type="checkbox" id="p_dr"> 배터리 소모 (기준 이하 시 교체)</label>
+      <label class="chk" title="배터리 감소 시뮬레이션 (입원 시간에 따라 소모)"><input type="checkbox" id="p_dr"> 배터리 소모</label>
+      <label class="chk sub-opt" title="배터리가 교체 기준 이하면 새 패치로 교체합니다. 끄면 방전된 패치는 전송을 멈춥니다."><input type="checkbox" id="p_repl"> 교체 기준 이하면 새 패치로 교체</label>
       <label class="chk" title="리드 오프 이벤트 (전극 분리, 자연 발생)"><input type="checkbox" id="p_lo"> 리드 오프 (전극 분리)</label>
       <div class="row tight"><button class="small" data-trig="lead_off">임의 리드 오프 60s</button><button class="small" data-trig="replace_patch">임의 패치 교체</button></div>
     </div>
