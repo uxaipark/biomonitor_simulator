@@ -926,3 +926,4 @@ button.preset:hover{border-color:var(--acc2)}
 section[data-tab="scn"] label.chk, section[data-tab="scn"] .field > span, .one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 section[data-tab="scn"] label.chk{display:block;line-height:32px}
 section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px}
+.pwrap[hidden]{display:none}
