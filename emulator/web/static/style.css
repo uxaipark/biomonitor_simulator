@@ -145,6 +145,8 @@ select.dd-src{display:none!important}
 .presets{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 10px}
 .presets button{flex:1;min-width:48px;min-height:40px;padding:6px 8px;font-variant-numeric:tabular-nums}
 .presets button.on{background:var(--acc);color:var(--acc-txt);border-color:transparent;font-weight:700}
+#activePresets{display:grid;grid-template-columns:repeat(4,1fr)}
+#activePresets button{min-width:0;white-space:nowrap}
 #btnTheme{min-width:44px;padding:8px 10px}
 
 /* ---- protocol tab */
