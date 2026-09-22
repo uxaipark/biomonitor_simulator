@@ -2464,7 +2464,10 @@ async function loadLabelSummary() {
 let scnPresets = null;
 const PW = { pos: 0, target: 0, raf: 0, drag: null, acc: 0, built: '' };
 const PW_H = 38;                                               // 한 칸 높이 (px)
-function pwIndex() { return Math.max(0, Math.min((scnPresets?.presets.length || 1) - 1, Math.round(PW.target))); }
+// 순환 휠: 위치는 끝없이 늘어나는 실수, 항목 번호는 그 나머지
+const pwN = () => scnPresets?.presets.length || 1;
+const pwMod = (x) => ((x % pwN()) + pwN()) % pwN();
+function pwIndex() { return pwMod(Math.round(PW.target)); }
 function pwBuild() {
   const key = scnPresets.presets.map(p => p.id).join();
   if (PW.built === key) return;
@@ -2472,13 +2475,16 @@ function pwBuild() {
   $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item" data-i="${i}" role="option"><span class="pw-no">${i === 0 ? '·' : i}</span>${esc(p.name)}</div>`).join('');
 }
 function pwRender() {
-  const items = $$('#pwTrack .pw-item');
+  const items = $$('#pwTrack .pw-item'), n = items.length, R = 96, STEP = 21 * Math.PI / 180;   // 원통 반지름(px) · 한 칸 각도
   items.forEach((el, i) => {
-    const d = i - PW.pos, a = Math.abs(d);
-    el.style.transform = `translateY(${d * PW_H * 0.92}px) rotateX(${-d * 19}deg) scale(${Math.max(0.72, 1 - a * 0.07)})`;
-    el.style.opacity = a > 3.2 ? 0 : String(Math.max(0.12, 1 - a * 0.3));
+    let d = (i - PW.pos) % n; if (d < -n / 2) d += n; if (d >= n / 2) d -= n;   // 가장 가까운 쪽으로 감아 둔 거리 (순환)
+    const a = Math.abs(d), ang = Math.max(-1.45, Math.min(1.45, d * STEP));
+    const scale = Math.max(0.55, 1.32 - 0.24 * a);                    // 가운데가 가장 크고 멀수록 작게
+    el.style.transform = `translateY(${R * Math.sin(ang)}px) rotateX(${-ang * 180 / Math.PI}deg) scale(${scale})`;
+    el.style.opacity = a > 3.3 ? 0 : String(Math.max(0.1, 1 - a * 0.3));
+    el.style.zIndex = String(100 - Math.round(a * 10));
     el.classList.toggle('front', a < 0.5);
-    el.classList.toggle('applied', scnPresets && scnPresets.presets[i].id === scnPresets.current);
+    el.classList.toggle('applied', !!scnPresets && scnPresets.presets[i].id === scnPresets.current);
   });
 }
 function pwAnimate() {
@@ -2491,11 +2497,14 @@ function pwAnimate() {
   };
   PW.raf = requestAnimationFrame(step);
 }
-function pwGo(idx, animate = true) {
-  const n = scnPresets.presets.length;
-  PW.target = Math.max(0, Math.min(n - 1, idx));
+function pwGo(idx, animate = true) {                            // idx 는 끝없는 위치 (순환): 번호로 가려면 pwGoTo
+  PW.target = idx;
   if (animate) pwAnimate(); else { PW.pos = PW.target; pwRender(); }
   pwDescribe();
+}
+function pwGoTo(i, animate = true) {                             // 항목 i 로: 가장 짧은 방향으로 돈다
+  const n = pwN(); let d = (i - PW.target) % n; if (d < -n / 2) d += n; if (d > n / 2) d -= n;
+  pwGo(Math.round(PW.target) + Math.round(d), animate);
 }
 function pwDescribe() {
   const i = pwIndex(), p = scnPresets.presets[i], isCur = p.id === scnPresets.current;
@@ -2513,7 +2522,7 @@ async function loadScnPresets(keepPos = true) {
   pwBuild();
   const cur = scnPresets.presets.find(p => p.id === scnPresets.current) || scnPresets.presets[0];
   $('#presetState').innerHTML = `현재: <b>${esc(cur.name)}</b>${scnPresets.modified ? ' <span class="tag warn">수정됨</span>' : ''}`;
-  if (!keepPos || PW.initd !== true) { PW.initd = true; pwGo(scnPresets.presets.indexOf(cur), false); } else { pwRender(); pwDescribe(); }
+  if (!keepPos || PW.initd !== true) { PW.initd = true; pwGoTo(scnPresets.presets.indexOf(cur), false); } else { pwRender(); pwDescribe(); }
 }
 (() => {
   const wh = $('#pWheel');
@@ -2521,7 +2530,7 @@ async function loadScnPresets(keepPos = true) {
     if (!scnPresets) return;
     e.preventDefault();
     PW.acc += e.deltaY;
-    if (Math.abs(PW.acc) >= 40) { pwGo(pwIndex() + Math.sign(PW.acc)); PW.acc = 0; }
+    if (Math.abs(PW.acc) >= 40) { pwGo(Math.round(PW.target) + Math.sign(PW.acc)); PW.acc = 0; }
   }, { passive: false });
   wh.addEventListener('pointerdown', e => {
     if (!scnPresets || e.button) return;
@@ -2534,16 +2543,16 @@ async function loadScnPresets(keepPos = true) {
     const now = performance.now(), dy = e.clientY - d.y;
     d.v = dy / Math.max(1, now - d.t); d.t = now; d.y = e.clientY;
     if (Math.abs(e.clientY - d.y0) > 3) d.moved = true;
-    const n = scnPresets.presets.length;
-    PW.pos = Math.max(-0.4, Math.min(n - 0.6, d.p0 - (e.clientY - d.y0) / PW_H));   // 끝에서 살짝 넘어가는 탄성
+    PW.pos = d.p0 - (e.clientY - d.y0) / PW_H;                     // 순환이라 끝이 없다
     PW.target = PW.pos; pwRender();
   });
   const end = () => {
     const d = PW.drag; if (!d) return;
     PW.drag = null; wh.classList.remove('dragging');
     if (!d.moved) {                                                // 탭/클릭: 누른 높이의 항목으로 돌림 (3D 변형 항목의 판정 대신 위치로 계산)
-      const r = wh.getBoundingClientRect();
-      pwGo(Math.round(PW.pos + (d.y0 - (r.top + r.height / 2)) / (PW_H * 0.92))); return;
+      const r = wh.getBoundingClientRect(), dy = (d.y0 - (r.top + r.height / 2)) / 96;   // 누른 높이 → 원통 각도 → 칸 수
+      const steps = Math.round(Math.asin(Math.max(-1, Math.min(1, dy))) / (21 * Math.PI / 180));
+      pwGo(Math.round(PW.pos) + steps); return;
     }
     const v = performance.now() - d.t > 80 ? 0 : d.v;             // 멈췄다가 놓으면 관성 없음
     pwGo(Math.round(PW.pos - v * 140 / PW_H));                     // 놓을 때 속도만큼 관성
@@ -2551,8 +2560,8 @@ async function loadScnPresets(keepPos = true) {
   wh.addEventListener('pointerup', end); wh.addEventListener('pointercancel', end);
   wh.addEventListener('keydown', e => {
     if (!scnPresets) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); pwGo(pwIndex() + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); pwGo(pwIndex() - 1); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); pwGo(Math.round(PW.target) + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); pwGo(Math.round(PW.target) - 1); }
     else if (e.key === 'Enter') { e.preventDefault(); $('#pApply').click(); }
   });
   $('#pApply').onclick = async () => {

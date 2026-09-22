@@ -867,17 +867,17 @@ button.preset:hover{border-color:var(--acc2)}
 .ev.clinical .k{color:var(--err)}
 
 /* 대표 테스트 시나리오: 휠 | 설명 | 적용 */
-.pwrap{display:grid;grid-template-columns:minmax(220px,280px) minmax(0,1fr) auto;gap:14px;align-items:stretch}
-.pwheel{position:relative;height:210px;overflow:hidden;border-radius:12px;background:var(--panel2);border:1px solid var(--line);perspective:520px;cursor:grab;user-select:none;touch-action:none;outline:none;
+.pwrap{display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr) auto;gap:14px;align-items:stretch}
+.pwheel{position:relative;height:230px;overflow:hidden;border-radius:12px;background:var(--panel2);border:1px solid var(--line);perspective:520px;cursor:grab;user-select:none;touch-action:none;outline:none;
   -webkit-mask-image:linear-gradient(transparent,#000 22%,#000 78%,transparent);mask-image:linear-gradient(transparent,#000 22%,#000 78%,transparent)}
 .pwheel:focus-visible{box-shadow:0 0 0 2px var(--acc2)}
 .pwheel.dragging{cursor:grabbing}
-.pw-lens{position:absolute;left:6px;right:6px;top:50%;height:38px;margin-top:-19px;border-radius:9px;background:color-mix(in srgb,var(--acc) 16%,transparent);border:1px solid color-mix(in srgb,var(--acc) 55%,transparent);pointer-events:none}
+.pw-lens{position:absolute;left:6px;right:6px;top:50%;height:50px;margin-top:-25px;border-radius:9px;background:color-mix(in srgb,var(--acc) 16%,transparent);border:1px solid color-mix(in srgb,var(--acc) 55%,transparent);pointer-events:none}
 .pw-track{position:absolute;inset:0;transform-style:preserve-3d}
 .pw-item{position:absolute;left:0;right:0;top:50%;height:38px;margin-top:-19px;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:14px;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;backface-visibility:hidden;will-change:transform,opacity}
 .pw-item .pw-no{flex:0 0 18px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;opacity:.7}
-.pw-item.front{color:var(--txt);font-weight:700;font-size:15px}
+.pw-item.front{color:var(--txt);font-weight:700}
 .pw-item.applied::after{content:'적용 중';margin-left:auto;font-size:10px;font-weight:600;color:var(--acc);border:1px solid currentColor;border-radius:999px;padding:0 6px}
 .pdesc{min-width:0;display:flex;flex-direction:column;gap:6px;justify-content:center}
 .pd-head b{font-size:16px}
@@ -889,3 +889,6 @@ button.preset:hover{border-color:var(--acc2)}
 .papply button{min-height:52px;font-size:15px;padding:0 22px}
 .papply .sub{text-align:center}
 @media (max-width:900px){ .pwrap{grid-template-columns:1fr} .pwheel{height:180px} }
+/* 왼쪽 기준으로 키운다: 가운데(×1.32)도 번호·이름·'적용 중'이 휠 안에 들어오게 폭을 76 %로 */
+.pw-item{right:auto;left:6px;width:calc(76% - 6px);transform-origin:0 50%}
+.pw-item.front .pw-no{color:var(--acc);opacity:1}
