@@ -66,6 +66,9 @@ class FieldTest:
                 return {"ok": False, "error": f"{gid} 에 연결된 환자가 없습니다"}
         done, skipped = [], []
         for pid in pids:
+            if ev in RHYTHM_EVS and w.admitted[pid].get("code_blue"):        # 심실세동·소생술 중: 리듬은 코드블루가 정한다 (진행 중인 다른 테스트는 그대로 둔다)
+                skipped.append((pid, "코드블루 진행 중"))
+                continue
             for a in [x for x in self.active if x["pid"] == pid]:            # 같은 환자의 이전 테스트는 먼저 풀기
                 self._end(a, note="새 테스트로 대체")
             r = self._apply(pid, ev, until)
@@ -111,8 +114,6 @@ class FieldTest:
         P = w.st.patch.arr
         e = EVENTS[ev]
         prof = w.by_id[pid]
-        if ev in RHYTHM_EVS and rec.get("code_blue"):
-            return "코드블루 진행 중"                                          # 심실세동·소생술 중: 리듬은 코드블루가 정한다
         if e.get("rhythm"):
             if e["rhythm"] not in w.rhythm_variants:
                 return "리듬 없음(루프 은행)"
