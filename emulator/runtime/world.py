@@ -652,7 +652,7 @@ class World:
         row = rec["row"]
         if rec["outpatient"]:
             gw = rec["mobile_gw"]
-            ok = gw >= 0 and G["status"][gw] != 2 and rec["home_state"] != "shadow"
+            ok = gw >= 0 and G["status"][gw] != 2 and rec["home_state"] != "shadow" and not rec.get("batt_dead")   # 교체 안 함 설정의 방전 패치는 원외도 전송 중지
             new = gw if ok else -1
             rssi = -55 - (25 if rec["home_state"] == "outside" else 0) + self.rng.normal(0, 3)
         else:

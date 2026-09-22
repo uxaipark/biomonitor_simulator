@@ -16,6 +16,8 @@ from .config import BASE_DIR, DEFAULT_CONFIG
 # 시나리오 계층: 프리셋 적용 때 기본값으로 되돌리는 경로
 LAYER = [("scenario",), ("general", "census_mode"), ("general", "admissions_per_hour"), ("general", "discharges_per_hour"), ("transport", "fuzz"), ("transport", "storm_smoothing"), ("transport", "store_forward")]
 KEEP_IN_SCENARIO = ("devices",)                   # 기기 정책은 사용자 설정 유지 (장소는 환자 수에서 자동으로 정해짐)
+RS_KEEP = ("slots", "auto_cycle", "cycle_s")      # 실제 시그널 슬롯 파일·자동 생성·주기: 프리셋을 바꿔도 지금 값 유지, 프리셋 저장값에 넣지 않음
+RS_SAVED = {"realsig": ("auto_cycle",)}          # 예외: 12번 프리셋의 자동 생성은 그 프리셋 옵션이라 [저장]값을 쓴다
 
 _ALL_NET = {"wireless_noise": True, "wired_failure": True, "latency": True, "power_outage": True, "topology": True}
 _NO_NET = {"enabled": False}
@@ -125,9 +127,20 @@ def filter_values(values: dict) -> dict:
         v = _get(values or {}, path)
         if v is not None:
             _set(out, path, copy.deepcopy(v))
-    for k in ("preset", "preset_modified"):
+    for k in ("preset", "preset_modified", "site"):                   # site 는 환자 수에서 정해지는 파생값 (config._validate)
         (out.get("scenario") or {}).pop(k, None)
     return out
+
+
+def _drop_rs_keep(values: dict, preset_id: str | None = None) -> dict:
+    """values 의 scenario.realsig 에서 프리셋과 무관하게 유지하는 값(RS_KEEP)을 뺀다 (제자리 수정).
+    preset_id 를 주면 그 프리셋이 저장값으로 가질 수 있는 값(RS_SAVED)은 남긴다."""
+    rs = (values.get("scenario") or {}).get("realsig")
+    if isinstance(rs, dict):
+        for k in RS_KEEP:
+            if k not in RS_SAVED.get(preset_id, ()):
+                rs.pop(k, None)
+    return values
 
 
 def load_user() -> dict:
@@ -144,7 +157,7 @@ def save_user(preset_id: str, values: dict | None) -> None:
         if values is None:
             d.pop(preset_id, None)
         else:
-            d[preset_id] = filter_values(values)
+            d[preset_id] = _drop_rs_keep(filter_values(values), preset_id)   # 슬롯 파일 목록은 저장하지 않는다 (적용할 때 지금 슬롯을 덮지 않게)
         USER_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = USER_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), "utf-8")
@@ -161,11 +174,12 @@ def build_patch(preset_id: str, current: dict, user: dict | None = None) -> dict
         if k in (current.get("scenario") or {}):
             patch["scenario"][k] = copy.deepcopy(current["scenario"][k])
     rs = (current.get("scenario") or {}).get("realsig") or {}                  # 실제 시그널 파일 경로는 프리셋을 바꿔도 유지
-    for k in ("slots", "auto_cycle", "cycle_s"):
+    for k in RS_KEEP:
         if k in rs:
             patch["scenario"]["realsig"][k] = copy.deepcopy(rs[k])
     _merge(patch, p["patch"])
-    saved = (load_user() if user is None else user).get(preset_id)
+    saved = copy.deepcopy((load_user() if user is None else user).get(preset_id) or {})
+    _drop_rs_keep(saved, preset_id)                                    # 예전 버전이 저장해 둔 슬롯 목록이 있어도 지금 슬롯을 유지
     if saved:
         _merge(patch, saved)
     patch["scenario"]["preset"] = preset_id
@@ -175,12 +189,7 @@ def build_patch(preset_id: str, current: dict, user: dict | None = None) -> dict
 
 def differs(a: dict, b: dict) -> bool:
     """편집 가능 경로에서 두 설정이 다른가 (실제 시그널 파일 경로는 프리셋과 무관하게 유지되므로 비교에서 뺀다)."""
-    fa, fb = filter_values(a), filter_values(b)
-    for f in (fa, fb):
-        rs = (f.get("scenario") or {}).get("realsig") or {}
-        for k in ("slots", "auto_cycle", "cycle_s"):
-            rs.pop(k, None)
-    return fa != fb
+    return _drop_rs_keep(filter_values(a)) != _drop_rs_keep(filter_values(b))
 
 
 def public_list(current: dict) -> list[dict]:
