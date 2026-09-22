@@ -465,6 +465,12 @@
         <div class="gitem" id="g201-5"><h4>프로토콜 탭 <button class="small" data-goto="proto">탭 열기</button></h4>
           <figure><img src="/static/guide/proto.jpg" alt="프레임 헤더·레코드·채널 블록 구조와 채널 ID"><figcaption>프레임 헤더·레코드·채널 블록 구조와 채널 ID</figcaption></figure>
           <ol class="gsteps"><li>라우터는 이 문서와 <code>GET /api/v1</code>(디스커버리 JSON)을 기준으로 구현합니다.</li></ol></div>
+        <div class="gitem" id="g201-6"><h4>현장 재현 (디지털 트윈) <button class="small" data-goto="scn">탭 열기</button></h4>
+          <ol class="gsteps"><li><b>네트워크 장애</b> 카드: 층 스위치·무선 AP·건물 코어가 죽으면 그 아래 게이트웨이가 한꺼번에 <i>업링크 단절</i>됩니다. 패치는 붙은 채 프레임이 쌓였다가 복구 때 올라갑니다. [건물 정전]은 UPS·발전기·일반 전원 계통별로 다르게 복구됩니다.</li>
+          <li><b>병원 일과</b>: 활력징후 측정·회진·식사·면회·샤워 시간대가 움직임을 만듭니다. <b>임상 악화</b>: 몇 시간에 걸친 악화와 코드블루, 환자 정보의 NEWS2.</li>
+          <li><b>원외 MCOT</b>: 앱 강제 종료·절전 일괄 업로드·OS 업데이트·비행기 모드. <b>입퇴원</b>: 요일·시간대 재원 곡선과 대량 유입.</li>
+          <li><b>재현</b>: 설정·데이터 탭에서 시작 시각을 고정하고 1초 고정 간격을 켜면 같은 사건이 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 저장해 재생합니다.</li>
+          <li><b>정답 라벨</b>: 설정·데이터 탭에서 리듬 에피소드·신호 품질·임상·장애 구간을 CSV로 내려받아 분석 알고리즘을 채점합니다.</li></ol></div>
       </div>
 
       <div class="card gsec" data-id="gtest" data-title="시나리오 테스트 항목">
