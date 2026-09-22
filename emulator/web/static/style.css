@@ -743,3 +743,22 @@ mark.ghl{background:color-mix(in srgb,var(--warn) 45%,transparent);color:inherit
 .card.dragging{opacity:.35;outline:2px dashed var(--acc2);outline-offset:-2px}
 .card.dragging .grip{cursor:grabbing}
 .drag-ghost{position:fixed;z-index:1000;pointer-events:none;opacity:.9;box-shadow:var(--shadow);transform:rotate(1deg)}
+
+/* ---- 줄바꿈: 카드 안의 글자가 카드를 뚫고 나가지 않게 ----
+   한글은 어절 단위로 끊고(keep-all), 공백 없는 긴 토큰(MAC·IP·경로·ID·JSON)은 어디서든 끊는다(anywhere).
+   두 속성은 상속되므로 카드에 한 번만 걸면 안쪽 전부에 적용된다. */
+.card{overflow-wrap:anywhere;word-break:keep-all}
+.card h3{flex-wrap:wrap;row-gap:4px}
+.card h3 .right{min-width:0;max-width:100%}
+td{white-space:normal}
+.tbl td{white-space:nowrap}              /* 스크롤 목록 표는 한 줄 유지, 넘치면 표 안에서 가로 스크롤 */
+.tbl{overflow-x:auto}
+.row>*{min-width:min(120px,100%)}
+.kpis>*,.nums>*{min-width:0}
+.ev>span:last-child{flex:1;min-width:0}
+.mono{overflow-wrap:anywhere;word-break:break-all}
+/* ---- 송출 장애 로그 ---- */
+.ev.tx .k{color:var(--err);font-weight:600}
+.ev.lvl-error{background:color-mix(in srgb,var(--err) 10%,transparent)}
+.ev.lvl-warn .k{color:var(--warn)}
+.ev.lvl-info .k{color:var(--acc)}

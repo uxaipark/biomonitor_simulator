@@ -450,13 +450,13 @@ async function pollEvents() {
   try {
     const r = await api('/events?since=' + lastEvSeq); if (!r.events.length) return;
     evAll = evAll.concat(r.events).slice(-600); lastEvSeq = evAll[evAll.length - 1].seq;
-    const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join('');
+    const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join('');
     $('#dashEvents').innerHTML = html(evAll.slice(-40));
     if ($('[data-tab="log"]').classList.contains('on')) renderLog();
     if (r.events.some(e => e.kind === 'adt' || e.kind === 'system')) loadPatientList();
   } catch (e) { }
 }
-function renderLog() { const f = $('#logFilter').value; $('#logEvents').innerHTML = evAll.slice().reverse().filter(e => !f || e.kind === f).map(e => `<div class="ev ${e.kind}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join(''); }
+function renderLog() { const f = $('#logFilter').value; $('#logEvents').innerHTML = evAll.slice().reverse().filter(e => !f || e.kind === f).map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join(''); }
 $('#logFilter').onchange = renderLog;
 
 // ---------------------------------------------------------------- signals / live

@@ -549,6 +549,29 @@ def _chat_link_watch() -> None:
 threading.Thread(target=_chat_link_watch, daemon=True, name="chat-link-watch").start()
 
 
+def _tx_health_watch() -> None:
+    """송출 장애를 이벤트 로그(kind="tx", GUI 로그 탭·SQLite events)와 journald([tx] 접두)에 남긴다."""
+    from .runtime.txhealth import TxHealth
+    h = TxHealth()
+    while True:
+        time.sleep(5.0)
+        try:
+            e = E()
+            if e is None:
+                continue
+            for level, msg in h.update(e.stats(history=False), time.time()):
+                try:
+                    e.world.log.add("tx", msg, level=level)
+                except Exception:
+                    pass
+                print(f"[tx] {level.upper()} {msg}", flush=True)
+        except Exception:
+            pass
+
+
+threading.Thread(target=_tx_health_watch, daemon=True, name="tx-health-watch").start()
+
+
 @app.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket, since: int = -1, sender: str = "gui"):
     """Bidirectional chat.  On connect the backlog is replayed (?since=N to resume, -1 = last page).
