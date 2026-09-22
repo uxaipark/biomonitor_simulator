@@ -17,6 +17,7 @@ from .config import BASE_DIR, DEFAULT_CONFIG
 LAYER = [("scenario",), ("general", "census_mode"), ("general", "admissions_per_hour"), ("general", "discharges_per_hour"), ("transport", "fuzz"), ("transport", "storm_smoothing"), ("transport", "store_forward")]
 KEEP_IN_SCENARIO = ("devices",)                   # 기기 정책은 사용자 설정 유지 (장소는 환자 수에서 자동으로 정해짐)
 RS_KEEP = ("slots", "auto_cycle", "cycle_s")      # 실제 시그널 슬롯 파일·자동 생성·주기: 프리셋을 바꿔도 지금 값 유지, 프리셋 저장값에 넣지 않음
+RS_SAVED = {"realsig": ("auto_cycle",)}          # 예외: 12번 프리셋의 자동 생성은 그 프리셋 옵션이라 [저장]값을 쓴다
 
 _ALL_NET = {"wireless_noise": True, "wired_failure": True, "latency": True, "power_outage": True, "topology": True}
 _NO_NET = {"enabled": False}
@@ -80,7 +81,7 @@ PRESETS = [
      "desc": "병상 20 · 환자 20명, 원외 0명. 슬롯마다 에뮬레이터의 ATF/CSV 심전도 파일을 읽어 끝없이 반복 전송합니다. 파일이 없는 슬롯은 자동 생성이 켜져 있으면 여러 부정맥을 차례로 돌며 바꿉니다.",
      "patch": {"general": {"bed_capacity": 20, "active_patients": 20, "outpatient_count": 0, "admissions_per_hour": 0, "discharges_per_hour": 0},
                "scenario": {**_QUIET, "rhythm_episodes": False, "variant_hopping": False, "exam_trip_ratio": 0.0,
-                            "patch": {"battery_drain_enabled": False, "lead_off_enabled": False}, "realsig": {"enabled": True, "auto_cycle": True}}}},   # 자동 생성은 적용 때 켬 (폼에서 끄고 적용하면 그 값)
+                            "patch": {"battery_drain_enabled": False, "lead_off_enabled": False}, "realsig": {"enabled": True, "auto_cycle": True}}}},   # 자동 생성은 기본 켬 (저장값이 있으면 그 값)
 ]
 POINTS = {'default': (['아티팩트 40 % · 게이트웨이 장애 20 %', '병원 일과 · 임상 악화(1,000 환자·일당 20건) · MCOT 단말 동작 켬', '네트워크 장애 꺼짐 · 재원 수 고정'], ''), 'baseline': (['네트워크 · 게이트웨이 장애 꺼짐', '아티팩트 · 병원 일과 · 임상 악화 · 단말 동작 꺼짐', '패치 배터리 소모 · 리드 오프 꺼짐, 병실 밖 이동 0 %', '진행 중이던 장애·악화도 정리'], ''), 'ward_day': (['병원 일과 · 자연 임상 악화 켬', '요일·시간대 재원 곡선', '무선 간섭 · 지연 · 장비 장애 약하게 (15 %)', '게이트웨이 장애 10 % · 아티팩트 40 %'], ''), 'network': (['네트워크 장애 70 % (무선 · 유선 · 지연 · 장비)', '정전은 제외', '게이트웨이 장애 10 %'], '층 스위치 하나 5분 장애'), 'power': (['정전만 켬 (강도 40 %)', '개별 게이트웨이 장애 끔', 'UPS 유지 → 발전기 전환 재부팅 → 일반 전원 복전 → 층 스위치 재부팅'], '한 건물 5분 정전'), 'gateway': (['게이트웨이 장애 80 % (무응답 · 성능 저하 · 하드웨어 고장)', '교체되면 새 번호·MAC 으로 재접속, META 재전송'], '게이트웨이 1대 고장 → 교체'), 'artifacts': (['아티팩트 100 % (움직임 · 샤워 · 검사 이동 · 전동)', '가정 전파 간섭 켬 · 병실 밖 이동 15 %'], ''), 'clinical': (['임상 악화 1,000 환자·일당 300건', '부정맥 에피소드 켬 · 아티팩트 20 %', '정답 라벨(임상 CSV)로 채점'], '3명 빠른 악화 · 1명 코드블루'), 'mcot': (['장소 혼합 · 원외 환자 200명', 'MCOT 단말 동작 켬 (앱 종료 · 절전 일괄 업로드 · OS 업데이트)', '가정 전파 간섭 · 아티팩트 60 %'], '1명 앱 강제 종료 10분'), 'router_stress': (['오염 프레임 1,000개당 5개 (전 종류)', '재접속 완만화 끔 (폭주)', '네트워크 · 게이트웨이 장애 50 %'], '20초 연결 폭주')}
 POINTS.update({'realsig': (['병상 20 · 환자 20명 · 원외 0명, 입퇴원 없음', '슬롯별 ATF/CSV 파일을 표본율 맞춰 반복 재생 (HR 은 파일에서 검출)', '빈 슬롯: 자동 생성 켜면 부정맥 순환 (60초마다)', '장애 · 아티팩트 · 일과 · 에피소드 꺼짐'], ''),
@@ -131,12 +132,14 @@ def filter_values(values: dict) -> dict:
     return out
 
 
-def _drop_rs_keep(values: dict) -> dict:
-    """values 의 scenario.realsig 에서 프리셋과 무관하게 유지하는 값(RS_KEEP)을 뺀다 (제자리 수정)."""
+def _drop_rs_keep(values: dict, preset_id: str | None = None) -> dict:
+    """values 의 scenario.realsig 에서 프리셋과 무관하게 유지하는 값(RS_KEEP)을 뺀다 (제자리 수정).
+    preset_id 를 주면 그 프리셋이 저장값으로 가질 수 있는 값(RS_SAVED)은 남긴다."""
     rs = (values.get("scenario") or {}).get("realsig")
     if isinstance(rs, dict):
         for k in RS_KEEP:
-            rs.pop(k, None)
+            if k not in RS_SAVED.get(preset_id, ()):
+                rs.pop(k, None)
     return values
 
 
@@ -154,7 +157,7 @@ def save_user(preset_id: str, values: dict | None) -> None:
         if values is None:
             d.pop(preset_id, None)
         else:
-            d[preset_id] = _drop_rs_keep(filter_values(values))            # 슬롯 파일 목록은 저장하지 않는다 (적용할 때 지금 슬롯을 덮지 않게)
+            d[preset_id] = _drop_rs_keep(filter_values(values), preset_id)   # 슬롯 파일 목록은 저장하지 않는다 (적용할 때 지금 슬롯을 덮지 않게)
         USER_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = USER_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1), "utf-8")
@@ -176,7 +179,7 @@ def build_patch(preset_id: str, current: dict, user: dict | None = None) -> dict
             patch["scenario"]["realsig"][k] = copy.deepcopy(rs[k])
     _merge(patch, p["patch"])
     saved = copy.deepcopy((load_user() if user is None else user).get(preset_id) or {})
-    _drop_rs_keep(saved)                                               # 예전 버전이 저장해 둔 슬롯 목록이 있어도 지금 슬롯을 유지
+    _drop_rs_keep(saved, preset_id)                                    # 예전 버전이 저장해 둔 슬롯 목록이 있어도 지금 슬롯을 유지
     if saved:
         _merge(patch, saved)
     patch["scenario"]["preset"] = preset_id
