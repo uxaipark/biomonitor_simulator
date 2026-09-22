@@ -1047,3 +1047,20 @@ main .wgrid input[type=text], main .wgrid input[type=number], main .wgrid select
 .wg-btns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .wg-btns button{width:100%;margin:0}
 .wgen .wg-act{font-size:11.5px;font-weight:700;color:var(--muted);border-bottom:1px solid var(--line);margin:16px 0 8px;padding-bottom:2px}
+/* 테스트 페이지: 구획 제목 · 수동 제어 */
+.ft-sec{font-size:15px;margin:14px 2px 8px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ft-sec:first-of-type{margin-top:4px}
+.ft-sec span{font-size:12px;font-weight:400;color:var(--muted)}
+.ft2{grid-template-columns:minmax(0,1.9fr) minmax(320px,1.1fr)}
+.ftcol{display:flex;flex-direction:column;gap:12px;min-width:0}
+.ftcol .card{margin:0}
+.ft-manual .ftm-g{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;align-items:start;padding:8px 0;border-top:1px solid var(--line)}
+.ft-manual .ftm-g:first-of-type{border-top:0}
+.ftm-t{font-size:12.5px;font-weight:700;color:var(--muted);padding-top:8px}
+.ftm-b{display:flex;flex-wrap:wrap;gap:6px}
+.ftm-b button{min-height:34px}
+.ftm-st{grid-column:2;font-size:12px}
+.ftm-st:empty{display:none}
+@media (max-width:1200px){ .ft2{grid-template-columns:1fr} }
+@media (max-width:640px){ .ft-manual .ftm-g{grid-template-columns:1fr} .ftm-st{grid-column:1} }
+.ft-sec .ft-tx{margin-left:auto;font-weight:600;color:var(--acc)}

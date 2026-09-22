@@ -178,9 +178,9 @@ function showTab(id) {
   if (shown.has('pat')) loadPatients();
   if (shown.has('data')) { loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
   if (shown.has('struct')) loadBankFiles();
-  if (shown.has('scn') || shown.has('dash')) loadRealism();
+  if (shown.has('scn') || shown.has('dash') || shown.has('test')) loadRealism();
   if (shown.has('scn')) loadScnPresets();
-  if (shown.has('scn') || shown.has('tx')) loadScripts();
+  if (shown.has('test') || shown.has('tx')) loadScripts();
   if (shown.has('scn')) loadDevices();
   if (shown.has('log')) showLogView(logView); else { $('[data-tab="chat"]').classList.remove('on'); updateLinkPolling(); }
 }
@@ -510,7 +510,7 @@ function renderScript(st) {
 }
 $('#scriptStart').onclick = async () => { const f = $('#scriptFile').value; if (!f) return toast('스크립트 파일 없음'); try { const st = await post('/control/script', { file: f }); renderScript(st); toast('스크립트 시작'); } catch (e) { toast('실패: ' + e.message); } };
 $('#scriptStop').onclick = async () => { try { const r = await fetch('/api/v1/control/script', { method: 'DELETE' }); renderScript(await r.json()); toast('스크립트 중지'); } catch (e) { } };
-setInterval(() => { if ($('[data-tab="scn"]').classList.contains('on')) api('/control/script').then(r => renderScript(r.status)).catch(() => { }); }, 2000);
+setInterval(() => { if ($('[data-tab="test"]').classList.contains('on')) api('/control/script').then(r => renderScript(r.status)).catch(() => { }); }, 2000);
 // event-injection switches: on -> trigger, off -> cancel; state + remaining time come from the patient runtime
 const swState = { lead_off: 0, episode: 0, vfib: 0, exam: 0 };
 let tripInfo = null, tripInfoAt = 0;
@@ -2543,7 +2543,7 @@ async function loadRealism() {
   const ss = $('#surgeStatus'); if (ss) ss.textContent = d.surge ? `유입 진행: ${d.surge.count}명` : '';
   const rs = $('#recStatus'); if (rs) rs.innerHTML = d.recording ? `<span class="tag err">● 녹화 중</span> ${esc(d.recording.name)} · ${d.recording.items}단계` : '';
 }
-setInterval(() => { const scnOn = $('[data-tab="scn"]').classList.contains('on'); if (scnOn || curGroup === 'dash') loadRealism(); if (scnOn && !PW.drag) loadScnPresets(); }, 5000);
+setInterval(() => { const scnOn = $('[data-tab="scn"]').classList.contains('on'); if (scnOn || curGroup === 'dash' || curGroup === 'test') loadRealism(); if (scnOn && !PW.drag) loadScnPresets(); }, 5000);
 $('#recStart').onclick = async () => { const r = await post('/control/record', { action: 'start', name: $('#recName').value.trim() }); toast(`녹화 시작: ${r.name}`); loadRealism(); };
 $('#recStop').onclick = async () => { const r = await post('/control/record', { action: 'stop', save: true }); toast(r.saved ? `저장: scenarios/${r.saved} (${r.items}단계)` : '녹화된 조작이 없습니다'); loadRealism(); loadScripts(); };
 async function loadLabelSummary() {
