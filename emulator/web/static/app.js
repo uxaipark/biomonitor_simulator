@@ -2472,7 +2472,7 @@ function pwBuild() {
   const key = scnPresets.presets.map(p => p.id).join();
   if (PW.built === key) return;
   PW.built = key;
-  $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item" data-i="${i}" role="option"><span class="pw-no">${i === 0 ? '·' : i}</span>${esc(p.name)}</div>`).join('');
+  $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item" data-i="${i}" role="option"><span class="pw-no">${i}</span>${esc(p.name)}</div>`).join('');
 }
 // 실린더 휠: 항목을 원통 둘레에 3D 로 배치한다 (rotateX 후 반지름만큼 앞으로). 크기 변화는 원근에서 자연스럽게 생기고,
 // 가운데만 살짝(최대 ×1.08) 키운다. 한 칸 20° · 반지름은 칸 높이가 원통 둘레에 딱 맞는 값.
@@ -2511,7 +2511,7 @@ function pwGoTo(i, animate = true) {                             // 항목 i 로
 }
 function pwDescribe() {
   const i = pwIndex(), p = scnPresets.presets[i], isCur = p.id === scnPresets.current;
-  $('#pDesc').innerHTML = `<div class="pd-head"><b>${i ? i + '. ' : ''}${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
+  $('#pDesc').innerHTML = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
     `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
     `<div class="pd-text">${esc(p.desc)}</div>` +
     `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` +
