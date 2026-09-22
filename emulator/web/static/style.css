@@ -91,7 +91,7 @@ pre{background:var(--wave-bg);border:1px solid var(--line);border-radius:8px;pad
 .map{width:100%;background:var(--map-bg);border:1px solid var(--line);border-radius:8px;display:block;touch-action:pan-x pan-y}
 .progress{height:10px;background:var(--panel2);border-radius:999px;overflow:hidden}
 .progress>div{height:100%;background:var(--acc);width:0%}
-.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--panel2);box-shadow:var(--shadow);border:1px solid var(--line);padding:10px 16px;border-radius:12px;z-index:50;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--panel2);box-shadow:var(--shadow);border:1px solid var(--line);padding:10px 16px;border-radius:12px;z-index:1200;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
 .toast.on{opacity:1}
 .help{font-size:12px;color:var(--muted);margin:4px 0 8px}
 .sub{font-size:12px;color:var(--muted)}
@@ -642,7 +642,7 @@ ol.route li.upcoming{border-left-style:dashed}
 @media (max-width:900px){.vm-main{grid-template-columns:1fr}.vm-waves{border-right:0;border-bottom:2px solid var(--color-divider)}.vm-bottom{grid-template-columns:1fr}.vm-bottom>div:first-child{border-right:0;border-bottom:2px solid var(--color-divider)}}
 
 /* in-app confirm dialog */
-.cdlg{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
+.cdlg{position:fixed;inset:0;z-index:1100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}   /* 파형 선택 창(.fsdlg 1000) 위에서도 보이게 · 토스트는 그 위(1200) */
 .cdlg[hidden]{display:none}
 .cdlg-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-width:320px;max-width:min(92vw,460px);box-shadow:var(--shadow)}
 .cdlg-box h3{margin:0 0 8px;font-size:15px;color:var(--txt);text-transform:none;letter-spacing:0}
@@ -960,6 +960,11 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 .scnwarn li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pdcol{max-height:290px}
 .pdcol .pdesc{max-height:none;flex:1 1 auto;min-height:0}
+/* 세로 가운데 정렬을 justify-content:center 로 하면 넘칠 때 위쪽이 잘리고 스크롤로도 못 본다:
+   위에서부터 쌓고 첫·끝 항목의 auto 여백으로 가운데 (넘치면 여백이 0 이 되어 맨 위부터 스크롤) */
+.pdesc,.pdcol{justify-content:flex-start}
+.pdesc>:first-child,.pdcol>:first-child{margin-top:auto}
+.pdesc>:last-child,.pdcol>:last-child{margin-bottom:auto}
 
 /* 현장 테스트 */
 .ftgrid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(420px,1.6fr) minmax(320px,1.1fr);gap:12px;align-items:start}

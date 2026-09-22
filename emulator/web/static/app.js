@@ -33,6 +33,8 @@ const cdur = (sec) => {
 };
 const exact = (n) => (n === undefined || n === null || isNaN(n)) ? '' : Number(n).toLocaleString('ko-KR');
 const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2200); };
+// 주기 갱신용: 내용이 같으면 다시 그리지 않는다 (누르는 사이 버튼이 새것으로 바뀌면 그 클릭은 사라진다)
+const setHtml = (el, html) => { if (el._html !== html) { el._html = html; el.innerHTML = html; } };
 const mmss = (sec) => { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
 const hhmm = (t) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour12: false });
 
@@ -468,16 +470,19 @@ for (const [id, p] of Object.entries(B)) {
 }
 const PRESETS = { activePresets: { list: [20, 100, 200, 500, 1000, 2000, 3000, 5000], key: 'active_patients', input: 'g_active', cap: () => (SV || CFG).general.bed_capacity, capMsg: '병상 수' },
                   outPresets: { list: [10, 50, 100, 200], key: 'outpatient_count', input: 'g_out', cap: () => 500, capMsg: '최대' } };
-function renderPresets() {
+function renderPresets() {                                         // 버튼은 한 번만 만들고 상태만 갱신 (5초 갱신마다 새로 만들면 누르는 중인 클릭이 사라진다)
   for (const [id, pr] of Object.entries(PRESETS)) {
-    const box = document.getElementById(id); if (!box) continue; box.innerHTML = '';
+    const box = document.getElementById(id); if (!box) continue;
     const cap = pr.cap(), cur = (SV || CFG).general[pr.key];
-    pr.list.forEach(n => {
-      const b = document.createElement('button'); b.type = 'button'; b.textContent = n.toLocaleString(); b.className = n === cur ? 'on' : ''; b.disabled = n > cap;
-      b.title = n > cap ? `${pr.capMsg}(${cap})를 초과합니다` : '';
-      b.addEventListener('click', () => { $('#' + pr.input).value = n; $('#' + pr.input + '_o').value = n; scnEdit(['general', pr.key], n); renderPresets(); });
-      box.appendChild(b);
-    });
+    if (box.children.length !== pr.list.length) {
+      box.innerHTML = '';
+      pr.list.forEach(n => {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = n.toLocaleString();
+        b.addEventListener('click', () => { $('#' + pr.input).value = n; $('#' + pr.input + '_o').value = n; scnEdit(['general', pr.key], n); renderPresets(); });
+        box.appendChild(b);
+      });
+    }
+    pr.list.forEach((n, k) => { const b = box.children[k]; b.className = n === cur ? 'on' : ''; b.disabled = n > cap; b.title = n > cap ? `${pr.capMsg}(${cap})를 초과합니다` : ''; });
   }
 }
 function renderChips() {
@@ -630,7 +635,7 @@ function renderTxHealth(s, L, T) {
 function renderTxHealthEvents() {
   const box = $('#txHealthEvents'); if (!box) return;
   const ev = evAll.filter(e => e.kind === 'tx').slice(-6).reverse();
-  box.innerHTML = ev.length ? ev.map(e => `<div class="ev tx lvl-${e.level || ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${{ error: '오류', warn: '경고', info: '복구' }[e.level] || e.kind}</span><span>${e.msg}</span></div>`).join('')
+  box.innerHTML = ev.length ? ev.map(e => `<div class="ev tx lvl-${e.level || ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${{ error: '오류', warn: '경고', info: '복구' }[e.level] || e.kind}</span><span>${esc(e.msg)}</span></div>`).join('')
     : '<div class="sub">기록 없음 — 송출이 끊기거나 유실이 생기면 여기에 남습니다</div>';
 }
 // 값 뒤의 단위(KB/s, GB, %)는 작게 — 숫자는 크게 보이고 칸은 넘지 않게
@@ -684,7 +689,7 @@ async function pollEvents() {
   try {
     const r = await api('/events?since=' + lastEvSeq); if (!r.events.length) return;
     evAll = evAll.concat(r.events).slice(-600); lastEvSeq = evAll[evAll.length - 1].seq; renderTxHealthEvents();
-    const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${e.msg}</span></div>`).join('');
+    const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${esc(e.msg)}</span></div>`).join('');
     $('#dashEvents').innerHTML = html(evAll.slice(-40));
     if ($('[data-tab="log"]').classList.contains('on')) renderLog();
     if (r.events.some(e => e.kind === 'adt' || e.kind === 'system')) loadPatientList();
@@ -694,7 +699,7 @@ const evKindLabel = (e) => e.kind === 'tx' ? ({ error: '송출 오류', warn: '�
 const EVKIND_KO = { clinical: '임상', tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트', test: '현장 테스트' };
 function renderLog() {
   const f = $('#logFilter').value, list = evAll.slice().reverse().filter(e => !f || e.kind === f);
-  $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${e.msg}</span></div>`).join('')
+  $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${esc(e.msg)}</span></div>`).join('')
     : `<div class="sub" style="padding:10px 0">${f === 'tx' ? '송출 장애 기록이 없습니다. 송출이 끊기거나 프레임이 유실되면 여기와 시스템 저널([tx])에 남습니다.' : '표시할 이벤트가 없습니다.'}</div>`;
 }
 $('#logFilter').onchange = renderLog;
@@ -2425,7 +2430,7 @@ $('#dbRun').onclick = async () => {
 $('#dbSql').addEventListener('keydown', e => { if (e.key === 'Enter') $('#dbRun').click(); });
 
 // ---------------------------------------------------------------- protocol
-const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');   // 속성값(data-f="…", title="…") 안에도 쓰므로 따옴표까지
 const kvCard = (title, rows, extra = '') => `<div class="card"><h3>${title}</h3><div class="kv">${rows.map(([k, v]) => `<b>${esc(k)}</b><span>${v}</span>`).join('')}</div>${extra}</div>`;
 const ul = (items) => `<ul>${items.map(i => `<li>${esc(i)}</li>`).join('')}</ul>`;
 const flagList = (o) => ul(Object.entries(o).map(([k, v]) => `${k} = ${v}`));
@@ -2661,13 +2666,14 @@ function pwDescribe(fromMark) {
   }
   const g = (SV || CFG).general, n = SV ? scnPending().length + (JSON.stringify((SV.transport.fuzz || {}).kinds || []) !== JSON.stringify((CFG.transport.fuzz || {}).kinds || []) ? 1 : 0)
     + (JSON.stringify(SV.scenario.realsig || {}) !== JSON.stringify(CFG.scenario.realsig || {}) ? 1 : 0) : 0;
-  $('#pDesc').innerHTML = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
+  const html = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
     `${p.saved ? '<span class="pd-saved" title="[저장]한 기본값 사용 중 · [리셋]으로 출고값 복원">저장값</span>' : ''}` +
     `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
     `<div class="pd-text sub">병상 ${g.bed_capacity !== CFG.general.bed_capacity ? `${cnum(CFG.general.bed_capacity)} → <b>${cnum(g.bed_capacity)}</b> (적용 시 재구성)` : cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[siteOf(g)]}</div>` +
     (p.id === 'realsig' ? '' : `<div class="pd-text">${esc(p.desc)}</div>`) +
     (p.id === 'realsig' ? rsPanel() : `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`) +
     (p.actions_text ? `<div class="pd-act">적용 즉시: <b>${esc(p.actions_text)}</b></div>` : '');
+  setHtml($('#pDesc'), html);                                     // 3·5초 갱신(rsLoad · loadScnPresets): 슬롯 버튼은 내용이 바뀔 때만 새로 그림
   if (p.id === 'realsig') rsBind(); else rsStop();
   const btn = $('#pApply'), note = $('#pApplyNote');
   btn.textContent = isCur && !n ? '다시 적용' : '적용';
@@ -2728,6 +2734,10 @@ function upWave(file, onProgress) {
     x.send(file);
   });
 }
+// 받는 곳(파형 선택 창) 밖에 떨어뜨린 파일은 무시: 브라우저가 파일을 열어 GUI 와 [적용] 전 편집값을 잃지 않게
+const isFileDrag = (e) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+document.addEventListener('dragover', e => { if (!e.defaultPrevented && isFileDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
+document.addEventListener('drop', e => { if (isFileDrag(e)) e.preventDefault(); });
 async function fsPick(i) {
   const dlg = document.createElement('div'); dlg.className = 'fsdlg';
   dlg.innerHTML = `<div class="fsbox"><div class="fshead"><b>슬롯 ${i + 1} 파형 선택</b><span class="sub">ATF · CSV · TSV · TXT</span>` +
@@ -2736,7 +2746,7 @@ async function fsPick(i) {
     `<div class="fsmsg sub">파일을 누르면 이 슬롯에 넣습니다. 여러 파일을 올리면 슬롯 ${i + 1}부터 차례로 채웁니다. 이 창에 끌어다 놓아도 됩니다.</div>` +
     `<div class="fslist"></div></div>`;
   document.body.appendChild(dlg);
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const onKey = (e) => { if (e.key === 'Escape' && $('#confirmDlg').hidden) close(); };   // 삭제 확인 창이 떠 있으면 Esc 는 그 창만 닫는다
   const close = () => { dlg.remove(); document.removeEventListener('keydown', onKey); };
   document.addEventListener('keydown', onKey);
   dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
@@ -2780,10 +2790,10 @@ async function fsPick(i) {
   const inp = $('.fsfile', dlg);
   $('.fsup', dlg).onclick = () => inp.click();
   inp.onchange = () => { upload(inp.files); inp.value = ''; };
-  const box = $('.fsbox', dlg);
-  box.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('drop'); });
-  box.addEventListener('dragleave', () => box.classList.remove('drop'));
-  box.addEventListener('drop', e => { e.preventDefault(); box.classList.remove('drop'); upload(e.dataTransfer.files); });
+  const box = $('.fsbox', dlg);                                            // 어두운 바깥 영역에 놓아도 받는다 (안 받으면 브라우저가 파일을 열고 GUI 를 떠난다)
+  dlg.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('drop'); });
+  dlg.addEventListener('dragleave', e => { if (!dlg.contains(e.relatedTarget)) box.classList.remove('drop'); });
+  dlg.addEventListener('drop', e => { e.preventDefault(); box.classList.remove('drop'); upload(e.dataTransfer.files); });
   list();
 }
 async function loadScnPresets(keepPos = true) {
@@ -2879,7 +2889,8 @@ async function ftLoadGws() {
   const only = $('#ftOnlyPat').checked;
   const list = FT.gws.filter(g => !only || g.n_conn > 0 || g.idx === FT.gw);
   const sel = $('#ftGw');
-  sel.innerHTML = list.map(g => `<option value="${g.idx}">${esc(g.id)} #${g.gw_no} · ${esc(g.building)} ${g.floor}층 · 환자 ${g.n_conn} · ${GW_ST[g.status] || g.status}</option>`).join('') || '<option value="">게이트웨이 없음</option>';
+  setHtml(sel, list.map(g => `<option value="${g.idx}">${esc(g.id)} #${g.gw_no} · ${esc(g.building)} ${g.floor}층 · 환자 ${g.n_conn} · ${GW_ST[g.status] || g.status}</option>`).join('')
+    || '<option value="" disabled selected>게이트웨이 없음</option>');   // 자리표시는 못 고르게: 고르면 Number('') = 0 → 0번 게이트웨이가 대상이 된다
   if (FT.gw === null || !list.some(g => g.idx === FT.gw)) FT.gw = list.length ? list[0].idx : null;
   if (FT.gw !== null) sel.value = String(FT.gw);
   syncDropdowns(); ftGwInfo(); ftLoadPats();
@@ -2889,14 +2900,19 @@ function ftGwInfo() {
   $('#ftGwInfo').textContent = g ? `${GW_ST[g.status] || g.status} · 연결 패치 ${g.n_conn}/${g.capacity} · 게이트웨이 번호 #${g.gw_no} · IP ${g.ip} · MAC ${g.mac} · 라우터 연결 ${g.connected ? '됨' : '안 됨'}` : '';
 }
 async function ftLoadPats() {
-  if (FT.gw === null) { $('#ftPats').innerHTML = ''; return; }
+  if (FT.gw === null) { setHtml($('#ftPats'), ''); return; }
   try { FT.pats = (await api(`/emr/gateways/${FT.gw}/patients`)).patients || []; } catch (e) { FT.pats = []; }
   if (FT.pid !== null && !FT.pats.some(p => p.id === FT.pid)) FT.pid = null;
-  $('#ftPats').innerHTML = `<button class="ft-pat ${FT.pid === null ? 'on' : ''}" data-pid="">전체 <span class="sub">${FT.pats.length}명</span></button>` +
-    FT.pats.map(p => `<button class="ft-pat ${FT.pid === p.id ? 'on' : ''}" data-pid="${p.id}" title="${esc(p.disease)} · ${esc(p.rhythm_label || '')}">` +
-      `<b>${esc(p.bed)}</b> ${esc(p.name)} <span class="sub">${esc(p.rhythm_label || '')}</span></button>`).join('');
-  $$('#ftPats .ft-pat').forEach(b => b.onclick = () => { FT.pid = b.dataset.pid === '' ? null : Number(b.dataset.pid); $$('#ftPats .ft-pat').forEach(x => x.classList.toggle('on', x === b)); });
+  setHtml($('#ftPats'), `<button class="ft-pat" data-pid="">전체 <span class="sub">${FT.pats.length}명</span></button>` +
+    FT.pats.map(p => `<button class="ft-pat" data-pid="${p.id}" title="${esc(p.disease)} · ${esc(p.rhythm_label || '')}">` +
+      `<b>${esc(p.bed)}</b> ${esc(p.name)} <span class="sub">${esc(p.rhythm_label || '')}</span></button>`).join(''));
+  const on = FT.pid === null ? '' : String(FT.pid);
+  $$('#ftPats .ft-pat').forEach(b => b.classList.toggle('on', b.dataset.pid === on));
 }
+$('#ftPats').addEventListener('click', e => {                     // 위임: 목록을 새로 그려도 다시 묶을 필요 없음
+  const b = e.target.closest('.ft-pat'); if (!b) return;
+  FT.pid = b.dataset.pid === '' ? null : Number(b.dataset.pid); $$('#ftPats .ft-pat').forEach(x => x.classList.toggle('on', x === b));
+});
 function ftRenderEvents() {
   if (!FT.st) return;
   const by = { high: [], medium: [], low: [] };
@@ -2910,7 +2926,8 @@ async function ftSend(ev, btn) {
   btn.disabled = true;
   try {
     const r = await post('/fieldtest', { gw: FT.gw, event: ev, patient_id: FT.pid, duration: FT.dur });
-    if (r.ok === false) toast('보내지 못함: ' + (r.error || '')); else toast(`${new Date((r.sent_at || Date.now() / 1000) * 1000).toLocaleTimeString('ko-KR')} 전송 — ${r.message.replace('[현장 테스트] ', '')}`);
+    const sk = r.skipped || [];                                    // 대상 환자가 모두 제외되면 error 없이 skipped[].reason 으로 이유가 온다
+    if (r.ok === false) toast('보내지 못함: ' + (r.error || (sk.length ? `${sk[0].reason}${sk.length > 1 ? ` (환자 ${sk.length}명 모두 제외)` : ''}` : (r.message || '').replace('[현장 테스트] ', '')))); else toast(`${new Date((r.sent_at || Date.now() / 1000) * 1000).toLocaleTimeString('ko-KR')} 전송 — ${r.message.replace('[현장 테스트] ', '')}`);
   } catch (e) { toast('실패: ' + e.message); }
   setTimeout(() => { btn.disabled = false; }, 600);
   ftLoad(); setTimeout(ftLoadPats, 1500);
@@ -2921,14 +2938,15 @@ async function ftLoad() {
   const act = FT.st.active;
   $('#ftActN').textContent = act.length ? `${act.length}건` : '';
   const t = (s) => s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`;
-  $('#ftActive tbody').innerHTML = act.map(a => `<tr><td><span class="ft-dot ${FT_PRIO[a.prio][1]}"></span>${esc(a.label)}</td><td>${esc(a.gw_id)}${a.patient ? ' · ' + esc(a.patient) : ''}</td>` +
-    `<td class="mono">${t(a.remaining_s)}</td><td><button class="small" data-ftc="${a.id}">복귀</button></td></tr>`).join('') || '<tr><td colspan="4" class="sub">진행 중인 테스트가 없습니다</td></tr>';
-  $$('#ftActive [data-ftc]').forEach(b => b.onclick = async () => { await post('/fieldtest/clear', { id: Number(b.dataset.ftc) }); ftLoad(); });
-  $('#ftHist').innerHTML = FT.st.history.map(h => `<div class="ft-hrow"><span class="mono">${new Date(h.t_wall * 1000).toLocaleTimeString('ko-KR')}</span><span class="ft-dot ${FT_PRIO[h.prio][1]}"></span>` +
-    `<b>${esc(h.label)}</b><span class="sub one">${esc(h.gw_id)} · ${esc(h.who)} · ${h.dur}초${h.skipped ? ` · 제외 ${h.skipped}` : ''}</span></div>`).join('') || '<div class="sub">아직 보낸 이벤트가 없습니다</div>';
+  setHtml($('#ftActive tbody'), act.map(a => `<tr><td><span class="ft-dot ${FT_PRIO[a.prio][1]}"></span>${esc(a.label)}</td><td>${esc(a.gw_id)}${a.patient ? ' · ' + esc(a.patient) : ''}</td>` +
+    `<td class="mono" data-rem></td><td><button class="small" data-ftc="${a.id}">복귀</button></td></tr>`).join('') || '<tr><td colspan="4" class="sub">진행 중인 테스트가 없습니다</td></tr>');
+  $$('#ftActive [data-rem]').forEach((td, k) => { td.textContent = t(act[k].remaining_s); });   // 1초 갱신: 줄은 목록이 바뀔 때만 새로 그리고 남은 시간만 제자리에서 (줄을 갈아 끼우면 [복귀] 클릭이 사라진다)
+  setHtml($('#ftHist'), FT.st.history.map(h => `<div class="ft-hrow"><span class="mono">${new Date(h.t_wall * 1000).toLocaleTimeString('ko-KR')}</span><span class="ft-dot ${FT_PRIO[h.prio][1]}"></span>` +
+    `<b>${esc(h.label)}</b><span class="sub one">${esc(h.gw_id)} · ${esc(h.who)} · ${h.dur}초${h.skipped ? ` · 제외 ${h.skipped}` : ''}</span></div>`).join('') || '<div class="sub">아직 보낸 이벤트가 없습니다</div>');
   const run = document.querySelector('#runTxt'); $('#ftTx').textContent = run ? `· ${run.textContent}` : '';
 }
-$('#ftGw').addEventListener('change', () => { FT.gw = Number($('#ftGw').value); FT.pid = null; try { localStorage.setItem('ft:gw', FT.gw); } catch (e) { } ftGwInfo(); ftLoadPats(); });
+$('#ftActive tbody').addEventListener('click', async e => { const b = e.target.closest('[data-ftc]'); if (!b) return; await post('/fieldtest/clear', { id: Number(b.dataset.ftc) }); ftLoad(); });   // 위임
+$('#ftGw').addEventListener('change', () => { const v = $('#ftGw').value; FT.gw = v === '' ? null : Number(v); FT.pid = null; try { if (FT.gw !== null) localStorage.setItem('ft:gw', FT.gw); } catch (e) { } ftGwInfo(); ftLoadPats(); });
 $('#ftOnlyPat').onchange = ftLoadGws;
 $('#ftGwRefresh').onclick = ftLoadGws;
 $$('#ftDur button').forEach(b => { b.classList.toggle('on', Number(b.dataset.s) === FT.dur); b.onclick = () => { FT.dur = Number(b.dataset.s); try { localStorage.setItem('ft:dur', FT.dur); } catch (e) { } $$('#ftDur button').forEach(x => x.classList.toggle('on', x === b)); }; });
