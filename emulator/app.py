@@ -58,7 +58,7 @@ app.add_middleware(GZipMiddleware, minimum_size=16384)      # gateway/patient li
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
-WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
+WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/presets/apply", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
 
 
 @app.middleware("http")
@@ -336,28 +336,68 @@ def script_cancel():
 
 @app.get("/api/v1/presets")
 def presets_list():
-    """대표 테스트 시나리오 프리셋 (기본값 + 9개).  적용은 시나리오 계층을 기본값으로 되돌린 뒤 프리셋 값을 얹는다."""
+    """대표 테스트 시나리오 프리셋 (기본값 + 11개).  values 는 그 프리셋을 지금 적용하면 될 시나리오 탭 값(저장값 포함)."""
     from .presets import public_list
-    sc = cfg.get("scenario")
-    return {"presets": public_list(), "current": sc.get("preset", "default"), "modified": bool(sc.get("preset_modified"))}
+    cur = cfg.snapshot(); sc = cur.get("scenario") or {}
+    return {"presets": public_list(cur), "current": sc.get("preset", "default"), "modified": bool(sc.get("preset_modified"))}
 
 
 @app.post("/api/v1/presets/apply")
-def presets_apply(body: dict):
-    from .presets import BY_ID, build_patch
+async def presets_apply(body: dict):
+    """{id, values?}: 시나리오 계층을 기본값으로 되돌리고 프리셋(저장값 포함)을 얹은 뒤, 시나리오 탭에서 고친 values 를 얹는다.
+    병상 수 등 구조 값이 바뀌면 바로 재구성하고, 그 뒤 프리셋의 즉시 주입을 실행한다."""
+    from .presets import BY_ID, build_patch, differs, filter_values, _merge
     pid = str(body.get("id", ""))
     if pid not in BY_ID:
         raise HTTPException(404, "unknown preset")
-    res = _apply_config(build_patch(pid, cfg.snapshot()), f"preset:{pid}")
+    base = build_patch(pid, cfg.snapshot())
+    patch = json.loads(json.dumps(base))
+    vals = filter_values(body.get("values") or {})
+    _merge(patch, vals)
+    patch["scenario"]["preset_modified"] = bool(vals) and differs(_deep(cfg.snapshot(), patch), _deep(cfg.snapshot(), base))
+    res = await asyncio.to_thread(_apply_config, patch, f"preset:{pid}")
+    rebuilt = False
+    if res.get("needs_rebuild"):                                        # 병상 수 변경 등: 자동 재구성
+        E().world.log.add("script", f"프리셋 적용: {BY_ID[pid]['name']} — 구조 값이 바뀌어 재구성합니다")
+        await asyncio.to_thread(E().rebuild)
+        await asyncio.to_thread(_after_rebuild)
+        rebuilt = True
     sc = cfg.get("scenario")
     with E().world.lock:                                                # 끈 시나리오의 진행 중 사건은 정리 (깨끗한 출발점)
         E().world.real.clear_events(clinical=not sc["clinical"]["enabled"], network=not sc["network"]["enabled"])
     acts = []
-    if not res.get("needs_rebuild"):
-        for a in BY_ID[pid].get("actions", []):
-            acts.append(E().world.trigger(a["what"], a.get("target"), dict(a.get("params") or {})))
-    E().world.log.add("script", f"프리셋 적용: {BY_ID[pid]['name']}" + (f" — 즉시 주입 {len(acts)}건" if acts else ""))
-    return {"preset": pid, "name": BY_ID[pid]["name"], "needs_rebuild": res.get("needs_rebuild"), "changed": res.get("changed"), "actions": acts}
+    for a in BY_ID[pid].get("actions", []):
+        acts.append(E().world.trigger(a["what"], a.get("target"), dict(a.get("params") or {})))
+    E().world.log.add("script", f"프리셋 적용: {BY_ID[pid]['name']}" + (" (수정값 포함)" if patch["scenario"]["preset_modified"] else "") + (f" — 즉시 주입 {len(acts)}건" if acts else ""))
+    return {"preset": pid, "name": BY_ID[pid]["name"], "rebuilt": rebuilt, "needs_rebuild": False, "changed": res.get("changed"), "actions": acts,
+            "modified": patch["scenario"]["preset_modified"]}
+
+
+def _deep(a: dict, b: dict) -> dict:
+    from .presets import _merge
+    out = json.loads(json.dumps(a)); _merge(out, b); return out
+
+
+@app.post("/api/v1/presets/{pid}/save")
+def presets_save(pid: str, body: dict):
+    """{values}: 시나리오 탭의 값을 이 프리셋의 기본값으로 저장한다 (다음 적용부터 쓰임).  적용은 따로 [적용]."""
+    from .presets import BY_ID, save_user
+    if pid not in BY_ID:
+        raise HTTPException(404, "unknown preset")
+    save_user(pid, body.get("values") or {})
+    E().world.log.add("script", f"프리셋 기본값 저장: {BY_ID[pid]['name']}")
+    return {"preset": pid, "saved": True}
+
+
+@app.post("/api/v1/presets/{pid}/reset")
+def presets_reset(pid: str):
+    """저장한 기본값을 지우고 출고 정의로 되돌린다."""
+    from .presets import BY_ID, save_user
+    if pid not in BY_ID:
+        raise HTTPException(404, "unknown preset")
+    save_user(pid, None)
+    E().world.log.add("script", f"프리셋 기본값 초기화: {BY_ID[pid]['name']}")
+    return {"preset": pid, "saved": False}
 
 
 @app.get("/api/v1/realism")

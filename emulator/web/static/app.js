@@ -313,6 +313,7 @@ const B = {  // element id -> config path
   h_tpl: ['hospital', 'template'], h_maxb: ['hospital', 'max_buildings'], gw_f: ['scenario', 'gateway', 'fault_enabled'], gw_out: ['scenario', 'gateway', 'outage'], gw_deg: ['scenario', 'gateway', 'degrade'], gw_rep: ['scenario', 'gateway', 'replace'], gw_int: ['scenario', 'gateway', 'fault_intensity'], gw_cap: ['scenario', 'gateway', 'capacity'], gw_cor: ['scenario', 'gateway', 'corridor_gateways'],
   n_topo: ['scenario', 'network', 'topology'], rt_en: ['scenario', 'routine', 'enabled'], cl_en: ['scenario', 'clinical', 'enabled'],
   cl_rate: ['scenario', 'clinical', 'per_1000_patient_days'], md_en: ['scenario', 'mcot_device', 'enabled'], g_census: ['general', 'census_mode'],
+  rf_en: ['scenario', 'rf_noise', 'enabled'], rf_lvl: ['scenario', 'rf_noise', 'level'],
   g_fstart: ['general', 'fixed_start'], g_fstep: ['general', 'fixed_step'],
   t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
   t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
@@ -322,19 +323,54 @@ const B = {  // element id -> config path
 };
 const getPath = (o, p) => p.reduce((a, k) => (a == null ? undefined : a[k]), o);
 const setPath = (o, p, v) => { let c = o; for (let i = 0; i < p.length - 1; i++) { c[p[i]] = c[p[i]] || {}; c = c[p[i]]; } c[p[p.length - 1]] = v; return o; };
-function fillForm() {
-  const li = $('#layoutImported'); if (li) li.hidden = !(CFG.hospital && CFG.hospital.layout_file);
-  for (const [id, p] of Object.entries(B)) {
-    const el = document.getElementById(id); if (!el) continue;
-    const v = getPath(CFG, p);
+// 시나리오 탭은 '미리보기': 휠로 고른 프리셋 값 + 손으로 고친 값(SCN_DRAFT)을 폼에만 보이고, [적용]을 눌러야 서버로 간다.
+const SCN_IDS = new Set([...Object.keys(B), 'fz_kinds'].filter(id => { const el = document.getElementById(id); return el && el.closest('section[data-tab="scn"]'); }));
+let SV = null, SCN_DRAFT = {};
+const clone = (o) => JSON.parse(JSON.stringify(o));
+function deepMerge(d, s) { for (const [k, v] of Object.entries(s || {})) { if (v && typeof v === 'object' && !Array.isArray(v) && d[k] && typeof d[k] === 'object' && !Array.isArray(d[k])) deepMerge(d[k], v); else d[k] = clone(v); } return d; }
+function scnSelected() { return scnPresets ? scnPresets.presets[pwIndex()] : null; }
+function scnCompute() {                                          // SV = (지금 설정 또는 고른 프리셋 값) + 손으로 고친 값
+  const p = scnSelected(), base = clone(CFG);
+  if (p && p.id !== scnPresets.current) deepMerge(base, p.values);
+  SV = deepMerge(base, SCN_DRAFT);
+}
+function scnPending() {                                          // 지금 설정과 다른 시나리오 탭 필드
+  return [...SCN_IDS].filter(id => B[id] && JSON.stringify(getPath(SV, B[id])) !== JSON.stringify(getPath(CFG, B[id])));
+}
+function scnMark() {
+  const pend = new Set(scnPending());
+  if (SV && JSON.stringify((SV.transport.fuzz || {}).kinds || []) !== JSON.stringify((CFG.transport.fuzz || {}).kinds || [])) pend.add('fz_kinds');
+  SCN_IDS.forEach(id => { const el = document.getElementById(id); const box = el && (el.closest('.field, label.chk') || el); if (box) box.classList.toggle('pend', pend.has(id)); });
+  if (scnPresets) pwDescribe(true);
+  return pend.size;
+}
+function scnFill() {
+  for (const id of SCN_IDS) {
+    const el = document.getElementById(id); if (!el || !B[id]) continue;
+    const v = getPath(SV, B[id]);
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
     const o = document.getElementById(id + '_o'); if (o) o.value = v;
   }
-  $('#g_active').max = CFG.general.bed_capacity;
-  const fk = $('#fz_kinds'); if (fk) fk.value = ((CFG.transport.fuzz || {}).kinds || []).join(',');
-  renderChips(); renderPresets(); syncDropdowns(); mixNote();
+  const fk = $('#fz_kinds'); if (fk) fk.value = ((SV.transport.fuzz || {}).kinds || []).join(',');
+  $('#g_active').max = SV.general.bed_capacity;
+  renderPresets(); syncDropdowns(); mixNote(); scnMark();
 }
-$('#fz_kinds').addEventListener('change', () => { const kinds = $('#fz_kinds').value.split(',').map(x => x.trim()).filter(Boolean); queue(['transport', 'fuzz', 'kinds'], kinds); });
+function scnRefresh() { if (!CFG) return; scnCompute(); scnFill(); }
+function scnEdit(p, v) { setPath(SCN_DRAFT, p, v); setPath(SV, p, v); scnMark(); }
+function fillForm() {
+  const li = $('#layoutImported'); if (li) li.hidden = !(CFG.hospital && CFG.hospital.layout_file);
+  scnCompute();
+  for (const [id, p] of Object.entries(B)) {
+    const el = document.getElementById(id); if (!el) continue;
+    const v = getPath(SCN_IDS.has(id) ? SV : CFG, p);
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+    const o = document.getElementById(id + '_o'); if (o) o.value = v;
+  }
+  $('#g_active').max = SV.general.bed_capacity;
+  const fk = $('#fz_kinds'); if (fk) fk.value = ((SV.transport.fuzz || {}).kinds || []).join(',');
+  renderChips(); renderPresets(); syncDropdowns(); mixNote(); scnMark();
+}
+$('#fz_kinds').addEventListener('change', () => { const kinds = $('#fz_kinds').value.split(',').map(x => x.trim()).filter(Boolean); scnEdit(['transport', 'fuzz', 'kinds'], kinds); });
 $('#capClear').onclick = async () => { const r = await post('/capture', { clear: true }); toast('캡처 파일 삭제'); renderCapture(r); };
 function renderCapture(r) { const el = $('#capInfo'); if (!el || !r) return; const mb = r.files.reduce((a, f) => a + f.bytes, 0) / 1e6; el.textContent = `${r.enabled ? '기록 중 · ' : ''}${r.files.length}개 파일 · ${mb.toFixed(1)} MB`; }
 let pending = {}, pendT = null;
@@ -354,21 +390,26 @@ for (const [id, p] of Object.entries(B)) {
     let v = el.type === 'checkbox' ? el.checked : el.value;
     if (el.type === 'number' || el.type === 'range' || id === 'selEcgFs') v = Number(v);
     const o = document.getElementById(id + '_o'); if (o) o.value = v;
-    if (id === 'g_active' || id === 'g_out') { CFG.general[B[id][1]] = v; renderPresets(); }
+    if (SCN_IDS.has(id)) {                            // 시나리오 탭: 폼에만 반영, [적용]에서 한꺼번에
+      scnEdit(p, v);
+      if (id === 'g_beds') $('#g_active').max = v;
+      if (id === 'g_active' || id === 'g_out' || id === 'g_beds') renderPresets();
+      return;
+    }
     if (getPath(CFG, p) === v) return;                 // unchanged (e.g. re-selecting the same dropdown item)
     queue(p, v);
   });
 }
-const PRESETS = { activePresets: { list: [50, 100, 200, 500, 1000, 1500, 2000, 3000, 5000], key: 'active_patients', input: 'g_active', cap: () => CFG.general.bed_capacity, capMsg: '병상 수' },
+const PRESETS = { activePresets: { list: [50, 100, 200, 500, 1000, 1500, 2000, 3000, 5000], key: 'active_patients', input: 'g_active', cap: () => (SV || CFG).general.bed_capacity, capMsg: '병상 수' },
                   outPresets: { list: [10, 50, 100, 200], key: 'outpatient_count', input: 'g_out', cap: () => 500, capMsg: '최대' } };
 function renderPresets() {
   for (const [id, pr] of Object.entries(PRESETS)) {
     const box = document.getElementById(id); if (!box) continue; box.innerHTML = '';
-    const cap = pr.cap(), cur = CFG.general[pr.key];
+    const cap = pr.cap(), cur = (SV || CFG).general[pr.key];
     pr.list.forEach(n => {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = n.toLocaleString(); b.className = n === cur ? 'on' : ''; b.disabled = n > cap;
       b.title = n > cap ? `${pr.capMsg}(${cap})를 초과합니다` : '';
-      b.addEventListener('click', () => { $('#' + pr.input).value = n; $('#' + pr.input + '_o').value = n; CFG.general[pr.key] = n; renderPresets(); queue(['general', pr.key], n); });
+      b.addEventListener('click', () => { $('#' + pr.input).value = n; $('#' + pr.input + '_o').value = n; scnEdit(['general', pr.key], n); renderPresets(); });
       box.appendChild(b);
     });
   }
@@ -2113,11 +2154,11 @@ async function loadWards() { const r = await api('/emr/wards'); wardSummary(r.wa
 // ---------------------------------------------------------------- devices
 let DEV = null;
 function mixNote() {
-  const m = (CFG.scenario.devices || {}).spo2_mix || {}; const t = (m.fingertip || 0) + (m.ring || 0) + (m.wrist_ptt || 0) || 1;
+  const m = ((SV || CFG).scenario.devices || {}).spo2_mix || {}; const t = (m.fingertip || 0) + (m.ring || 0) + (m.wrist_ptt || 0) || 1;
   const pct = k => Math.round((m[k] || 0) / t * 100);
   $('#d_mixNote').textContent = `병원 내: 손끝 ${pct('fingertip')}% · 반지형 ${pct('ring')}% · 손목 ${pct('wrist_ptt')}%  |  원외: 반지형 ${Math.round(((m.ring || 0) + (m.fingertip || 0)) / t * 100)}% · 손목 ${pct('wrist_ptt')}%`;
 }
-['d_mf', 'd_mr', 'd_mw'].forEach(id => document.getElementById(id).addEventListener('input', () => { const m = CFG.scenario.devices.spo2_mix; m[{ d_mf: 'fingertip', d_mr: 'ring', d_mw: 'wrist_ptt' }[id]] = Number(document.getElementById(id).value); mixNote(); }));
+['d_mf', 'd_mr', 'd_mw'].forEach(id => document.getElementById(id).addEventListener('input', () => { const m = (SV || CFG).scenario.devices.spo2_mix; m[{ d_mf: 'fingertip', d_mr: 'ring', d_mw: 'wrist_ptt' }[id]] = Number(document.getElementById(id).value); mixNote(); }));
 async function loadDevices() {
   try { DEV = await api('/emr/devices'); } catch (e) { return; }
   const st = DEV.stats; const n = st.patients || 1;
@@ -2470,9 +2511,9 @@ const pwMod = (x) => ((x % pwN()) + pwN()) % pwN();
 function pwIndex() { return pwMod(Math.round(PW.target)); }
 function pwBuild() {
   const key = scnPresets.presets.map(p => p.id).join();
-  if (PW.built === key) return;
+  if (PW.built === key) { $$('#pwTrack .pw-item').forEach((el, i) => el.classList.toggle('saved', !!scnPresets.presets[i].saved)); return; }
   PW.built = key;
-  $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item" data-i="${i}" role="option"><span class="pw-no">${i}</span>${esc(p.name)}</div>`).join('');
+  $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item${p.saved ? ' saved' : ''}" data-i="${i}" role="option"><span class="pw-no">${i}</span>${esc(p.name)}</div>`).join('');
 }
 // 실린더 휠: 항목을 원통 둘레에 3D 로 배치한다 (rotateX 후 반지름만큼 앞으로). 크기 변화는 원근에서 자연스럽게 생기고,
 // 가운데만 살짝(최대 ×1.08) 키운다. 한 칸 20° · 반지름은 칸 높이가 원통 둘레에 딱 맞는 값.
@@ -2509,23 +2550,33 @@ function pwGoTo(i, animate = true) {                             // 항목 i 로
   const n = pwN(); let d = (i - PW.target) % n; if (d < -n / 2) d += n; if (d > n / 2) d -= n;
   pwGo(Math.round(PW.target) + Math.round(d), animate);
 }
-function pwDescribe() {
+function pwDescribe(fromMark) {
   const i = pwIndex(), p = scnPresets.presets[i], isCur = p.id === scnPresets.current;
+  if (!fromMark && PW.shown !== p.id) {                          // 다른 프리셋을 고름 → 그 값을 폼에 미리 채움 (손으로 고친 값은 버림)
+    const had = Object.keys(SCN_DRAFT).length; PW.shown = p.id; SCN_DRAFT = {};
+    if (had && PW.shownOnce) toast('고친 값은 버리고 고른 시나리오 값으로 채웠습니다');
+    PW.shownOnce = true; scnRefresh(); return;
+  }
+  const g = (SV || CFG).general, n = SV ? scnPending().length + (JSON.stringify((SV.transport.fuzz || {}).kinds || []) !== JSON.stringify((CFG.transport.fuzz || {}).kinds || []) ? 1 : 0) : 0;
   $('#pDesc').innerHTML = `<div class="pd-head"><b>${i}. ${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
+    `${p.saved ? '<span class="pd-saved" title="[저장]한 기본값 사용 중 · [리셋]으로 출고값 복원">저장값</span>' : ''}` +
     `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
+    `<div class="pd-text sub">병상 ${cnum(g.bed_capacity)} · 패치(입원) ${cnum(g.active_patients)} · 원외 MCOT ${cnum(g.outpatient_count)} · 장소 ${({ hospital: '병원 내', mcot: '원외', mixed: '혼합' })[(SV || CFG).scenario.site] || '-'}</div>` +
     `<div class="pd-text">${esc(p.desc)}</div>` +
     `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` +
     (p.actions_text ? `<div class="pd-act">적용 즉시: <b>${esc(p.actions_text)}</b></div>` : '');
-  const btn = $('#pApply');
-  btn.textContent = isCur && !scnPresets.modified ? '다시 적용' : '적용';
-  $('#pApplyNote').textContent = isCur ? (scnPresets.modified ? '적용 뒤 값을 바꿨습니다' : '현재 적용된 시나리오') : '누르면 아래 설정이 바뀝니다';
+  const btn = $('#pApply'), note = $('#pApplyNote');
+  btn.textContent = isCur && !n ? '다시 적용' : '적용';
+  note.textContent = n ? `변경 ${n}개 대기 · [적용]을 눌러야 반영` : (isCur ? '현재 적용된 시나리오' : '아래 옵션은 미리보기입니다');
+  note.classList.toggle('pnote-pend', n > 0);
+  $('#pReset').disabled = !p.saved;
 }
 async function loadScnPresets(keepPos = true) {
   try { scnPresets = await api('/presets'); } catch (e) { return; }
   pwBuild();
   const cur = scnPresets.presets.find(p => p.id === scnPresets.current) || scnPresets.presets[0];
   $('#presetState').innerHTML = `현재: <b>${esc(cur.name)}</b>${scnPresets.modified ? ' <span class="tag warn">수정됨</span>' : ''}`;
-  if (!keepPos || PW.initd !== true) { PW.initd = true; pwGoTo(scnPresets.presets.indexOf(cur), false); } else { pwRender(); pwDescribe(); }
+  if (!keepPos || PW.initd !== true) { PW.initd = true; pwGoTo(scnPresets.presets.indexOf(cur), false); } else { pwRender(); scnRefresh(); }
 }
 (() => {
   const wh = $('#pWheel');
@@ -2570,10 +2621,37 @@ async function loadScnPresets(keepPos = true) {
   $('#pApply').onclick = async () => {
     if (!scnPresets) return;
     const p = scnPresets.presets[pwIndex()];
-    if (p.actions.length && !(await askConfirm(p.name, `${p.desc}\n\n적용하면 시나리오 설정이 바뀌고 즉시 ${p.actions_text} 이(가) 실행됩니다.`, '적용'))) return;
-    const r = await post('/presets/apply', { id: p.id });
-    toast(r.needs_rebuild ? `${r.name}: 재구성이 필요한 값이 바뀌었습니다` : `${r.name} 적용${r.actions.length ? ` · 즉시 주입 ${r.actions.length}건` : ''}`);
+    if (!SV) scnCompute();
+    const rebuild = SV.general.bed_capacity !== CFG.general.bed_capacity;
+    const warn = [p.actions.length ? `즉시 ${p.actions_text} 이(가) 실행됩니다.` : '', rebuild ? `병상 수가 ${cnum(CFG.general.bed_capacity)} → ${cnum(SV.general.bed_capacity)}로 바뀌어 병원을 다시 짓습니다(재원·패치 상태 초기화, 전송 잠시 멈춤).` : ''].filter(Boolean);
+    if (warn.length && !(await askConfirm(p.name, `${p.desc}\n\n${warn.join('\n')}`, '적용'))) return;
+    const btn = $('#pApply'); btn.disabled = true; if (rebuild) btn.textContent = '재구성 중…';
+    try {
+      const r = await post('/presets/apply', { id: p.id, values: SV });
+      toast(`${r.name} 적용${r.rebuilt ? ' · 재구성 완료' : ''}${r.actions.length ? ` · 즉시 주입 ${r.actions.length}건` : ''}`);
+      SCN_DRAFT = {};
+    } catch (e) { toast('적용 실패: ' + e.message); }
+    btn.disabled = false;
     await loadConfig(); await loadScnPresets(); loadRealism();
+  };
+  $('#pSave').onclick = async () => {
+    if (!scnPresets) return;
+    const p = scnPresets.presets[pwIndex()]; if (!SV) scnCompute();
+    if (!(await askConfirm(`${p.name} 기본값 저장`, `아래 옵션 값(병상 ${cnum(SV.general.bed_capacity)} · 패치 ${cnum(SV.general.active_patients)} · MCOT ${cnum(SV.general.outpatient_count)} 등)을 이 시나리오의 기본값으로 저장합니다.\n다음에 이 시나리오를 [적용]하면 이 값이 쓰입니다. 지금 에뮬레이터에는 반영되지 않습니다.`, '저장'))) return;
+    try { await post(`/presets/${p.id}/save`, { values: SV }); toast(`${p.name}: 기본값 저장됨`); } catch (e) { toast('저장 실패: ' + e.message); return; }
+    SCN_DRAFT = {}; PW.shown = p.id;
+    await loadScnPresets();
+    if (p.id !== scnPresets.current) scnRefresh();
+    else { SCN_DRAFT = {}; scnRefresh(); }
+  };
+  $('#pReset').onclick = async () => {
+    if (!scnPresets) return;
+    const p = scnPresets.presets[pwIndex()];
+    if (!(await askConfirm(`${p.name} 리셋`, '저장한 기본값을 지우고 출고 기본값으로 되돌립니다. 지금 에뮬레이터에는 반영되지 않습니다 — 반영하려면 [적용]을 누르세요.', '리셋'))) return;
+    try { await post(`/presets/${p.id}/reset`, {}); toast(`${p.name}: 출고 기본값으로 되돌림`); } catch (e) { toast('리셋 실패: ' + e.message); return; }
+    SCN_DRAFT = {};
+    await loadScnPresets();
+    if (p.id === scnPresets.current) { const f = scnPresets.presets.find(x => x.id === p.id); SCN_DRAFT = {}; scnCompute(); deepMerge(SV, f.values); SCN_DRAFT = clone(f.values); scnFill(); }
   };
 })();
 // ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다
@@ -2588,7 +2666,7 @@ $$('.help').forEach(hp => {
                     artifact: 'now', transit: 'now', patch: 'now', gateway: 'now', drill: 'now' };
   Object.entries(BY_CARD).forEach(([k, v]) => { const el = document.querySelector(`.card[data-card="${k}"]`); if (el) el.dataset.apply = v; });
   const bank = document.querySelector('[data-fold="bankBody"]'); if (bank) bank.closest('.card').dataset.apply = 'bank';
-  const LABEL = { now: '즉시 반영', rebuild: '재구성 필요', bank: '파형 재생성 필요' };
+  const LABEL = { now: '적용 시 반영', rebuild: '적용 시 재구성', bank: '파형 재생성 필요' };
   $$('.card[data-apply]').forEach(cd => {
     const h3 = cd.querySelector('h3'); if (!h3 || h3.querySelector('.apply')) return;
     const b = document.createElement('span'); b.className = 'apply ' + cd.dataset.apply; b.textContent = LABEL[cd.dataset.apply] || '';

@@ -626,11 +626,47 @@ class Realism:
             self.w.log.add("script", f"녹화 종료: {r['name']} ({len(r['items'])}단계, {self.w.sim_time - r['t0']:.0f}초)")
         return r
 
+    # ======================================================================= 8. 전파 방해 (2.4 GHz 혼잡)
+    def _step_rf(self, dt_s: float) -> None:
+        w, now = self.w, self.w.sim_time
+        rf = w.cfg.get("scenario", "rf_noise", default={}) or {}
+        lvl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") else 0.0
+        G = w.st.gw.arr
+        if not lvl:
+            if getattr(self, "_rf_gws", None):                            # 끌 때 무선 GW 손실·지연 원복
+                for gw in self._rf_gws:
+                    if G["status"][gw] == 0:
+                        G["loss"][gw] = 0.0; G["latency_ms"][gw] = w.gw_state[gw]["base_lat"]; G["jitter_ms"][gw] = w.gw_state[gw]["base_jit"]
+                self._rf_gws = set()
+            return
+        p = 12.0 * lvl / 3600.0 * dt_s                                   # 환자당 시간당 최대 12번의 짧은 BLE 끊김
+        for rec in w.admitted.values():
+            if rec["outpatient"] or rec.get("rf_drop_until", 0) > now or rec["gw"] < 0:
+                continue
+            if self.rng.random() < p:
+                rec["rf_drop_until"] = now + float(self.rng.uniform(3, 25))
+                w._relink(rec)
+        if now - getattr(self, "_rf_t", 0.0) >= 30.0:                    # 30초마다 무선 AP 경유 GW 의 손실·지연을 흔든다
+            self._rf_t = now
+            self._rf_gws = getattr(self, "_rf_gws", set())
+            for gw, u in self.gw_up.items():
+                if u["uplink"] == "wifi" and G["status"][gw] == 0:
+                    G["loss"][gw] = float(self.rng.uniform(0.0, 0.06) * lvl)
+                    G["latency_ms"][gw] = float(self.rng.uniform(5, 60) * lvl)
+                    G["jitter_ms"][gw] = float(self.rng.uniform(5, 40) * lvl)
+                    self._rf_gws.add(gw)
+        if now - getattr(self, "_rf_log_t", now) >= 60.0 or not hasattr(self, "_rf_log_t"):
+            n = w.counters.get("rf_drops", 0) - getattr(self, "_rf_log_n", 0)
+            if hasattr(self, "_rf_log_t") and n:
+                w.log.add("link", f"전파 방해: 최근 1분 BLE 끊김 {n}건 (2.4 GHz 혼잡, 강도 {int(lvl * 100)} %)")
+            self._rf_log_t, self._rf_log_n = now, w.counters.get("rf_drops", 0)
+
     # ======================================================================= 매 스텝
     def step(self, dt_s: float) -> None:
         now = self.w.sim_time
         self._step_topology_faults(dt_s)
         self._apply_net_power(now, dt_s)
+        self._step_rf(dt_s)
         if now - self._last10 >= 10.0:                                    # 임상 진행은 10초 단위로 충분
             self._step_clinical(now - self._last10 if self._last10 else 10.0)
             self._last10 = now

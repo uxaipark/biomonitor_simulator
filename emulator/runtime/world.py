@@ -620,11 +620,15 @@ class World:
         else:
             new = -1
             rssi = -100
-            if rec["location"] >= 0 and not rec["shadow"]:
+            rf = self.cfg.get("scenario", "rf_noise", default={}) or {}
+            rfl = float(rf.get("level", 0)) / 100.0 if rf.get("enabled") else 0.0
+            if rec["location"] >= 0 and not rec["shadow"] and not (rec.get("rf_drop_until", 0) > self.sim_time):   # 전파 방해로 BLE 가 잠깐 끊긴 동안은 미연결
                 cands = h.candidate_gateways(rec["location"])
                 for gw in cands[:6]:
                     gw = int(gw)
                     r = h.rssi_from(rec["location"], gw, self.rng)
+                    if rfl:                                        # 2.4 GHz 혼잡: 평균 감쇠 + 큰 흔들림 → 경계의 패치가 자주 떨어진다
+                        r += -10.0 * rfl + self.rng.normal(0, 6.0 * rfl)
                     if r < -92:
                         break
                     if G["status"][gw] == 2:
@@ -645,11 +649,17 @@ class World:
             if not force and old != new:
                 p = self.by_id[rec["id"]]
                 if new < 0:
-                    self.log.add("link", f"{p['name']} 패치 연결 끊김 ({h.gateways[old]['id'] if old >= 0 else '-'}) - 음영/게이트웨이 장애", patient_id=p["id"])
                     self.counters["link_lost"] += 1
+                    if rec.get("rf_drop_until", 0) > self.sim_time:       # 전파 방해 끊김은 건건이 남기지 않고 1분 요약 (로그가 묻히지 않게)
+                        rec["_rf_quiet"] = True
+                        self.counters["rf_drops"] = self.counters.get("rf_drops", 0) + 1
+                    else:
+                        self.log.add("link", f"{p['name']} 패치 연결 끊김 ({h.gateways[old]['id'] if old >= 0 else '-'}) - 음영/게이트웨이 장애", patient_id=p["id"])
                 elif old >= 0:
                     self.log.add("link", f"{p['name']} 게이트웨이 이동 {h.gateways[old]['id']} → {h.gateways[new]['id']}", patient_id=p["id"])
                     self.counters["gw_handover"] += 1
+                elif rec.pop("_rf_quiet", False):
+                    pass
                 else:
                     self.log.add("link", f"{p['name']} 패치 재연결 → {h.gateways[new]['id']}", patient_id=p["id"])
         self.st.patch["rssi"][row] = int(np.clip(rssi, -120, 0))

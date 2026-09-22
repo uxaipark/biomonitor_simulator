@@ -888,6 +888,12 @@ button.preset:hover{border-color:var(--acc2)}
 .papply{display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:6px;min-width:130px}
 .papply button{min-height:52px;font-size:15px;padding:0 22px}
 .papply .sub{text-align:center}
+.psave{display:flex;gap:6px;margin-top:14px}
+.psave button{flex:1;min-height:26px;font-size:12px;padding:0 8px}
+.pd-saved{font-size:11px;color:var(--acc2);border:1px solid currentColor;border-radius:999px;padding:0 6px;margin-left:6px}
+.pw-item.saved .pw-no::after{content:'•';color:var(--acc2);margin-left:2px}
+#scnGrid .pend{outline:1.5px dashed var(--warn);outline-offset:2px;border-radius:4px}
+.pnote-pend{color:var(--warn)!important;font-weight:600}
 @media (max-width:900px){ .pwrap{grid-template-columns:1fr} .pwheel{height:180px} }
 .pw-item.front .pw-no{color:var(--acc);opacity:1}
 

@@ -126,6 +126,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "routine": {"enabled": True},  # 병원 일과: 활력징후 측정·회진·식사·면회·저녁 샤워 시간대가 환자 움직임을 만든다
         "clinical": {"enabled": True, "per_1000_patient_days": 20},   # 자연 발생 임상 악화 (일부는 코드블루로 진행)
         "mcot_device": {"enabled": True},   # MCOT 단말: 앱 강제 종료·절전 모드·OS 업데이트·비행기 모드·지역별 커버리지
+        "rf_noise": {"enabled": False, "level": 60},   # 2.4 GHz 대역 혼잡: BLE RSSI 감쇠·흔들림, 짧은 BLE 끊김, 무선 AP 경유 GW 손실·지연
         "exam_trip_ratio": 5.0,        # % of inpatients out of bed on a trip at any moment (exam rooms, clinic, dialysis, cafe, lounge...); independent of the artifact scenario
         "artifacts": {
             "enabled": True,

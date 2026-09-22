@@ -173,24 +173,25 @@
 
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
-  <div class="card presetbar" id="presetBar"><h3>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">휠을 굴리거나 끌어서 고르고 [적용] · 환자 수와 장소는 프리셋이 정할 때만 바뀜</span></h3>
+  <div class="card presetbar" id="presetBar"><h3>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">휠로 고르면 아래 옵션에 미리 채워짐 · [적용]을 눌러야 에뮬레이터에 반영</span></h3>
     <div class="pwrap">
       <div class="pwheel" id="pWheel" tabindex="0" role="listbox" aria-label="테스트 시나리오 선택 휠 (마우스 휠·드래그·화살표 키)"><div class="pw-lens"></div><div class="pw-track" id="pwTrack"></div></div>
       <div class="pdesc" id="pDesc"></div>
-      <div class="papply"><button class="primary" id="pApply">적용</button><div class="sub" id="pApplyNote"></div></div>
+      <div class="papply"><button class="primary" id="pApply">적용</button><div class="sub" id="pApplyNote"></div>
+        <div class="psave"><button class="small" id="pSave" title="아래 옵션 값을 이 시나리오의 기본값으로 저장합니다 (적용은 따로 [적용])">저장</button><button class="small" id="pReset" title="저장한 기본값을 지우고 출고 기본값으로 되돌립니다">리셋</button></div></div>
     </div>
   </div>
   <div class="grid scn" id="scnGrid">
     <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>
       <div class="field"><span>모니터링 환자 수 (입원)</span><div class="rv"><input type="range" id="g_active" min="0" max="5000" step="1"><output id="g_active_o"></output></div></div>
       <div class="presets" id="activePresets"></div>
-      <div class="help">병상 수 이하에서 재생성 없이 즉시 반영됩니다. 장소 시나리오가 <b>원외 MCOT</b>면 입원 환자는 0명이 됩니다. 시드 등 그 외 구조 설정은 [설정·데이터] 탭의 구조 설정에서 재구성합니다.</div>
+      <div class="help">[적용]을 누르면 반영됩니다(병상 수 이하). 장소 시나리오가 <b>원외 MCOT</b>면 입원 환자는 0명이 됩니다. 시드 등 그 외 구조 설정은 [설정·데이터] 탭의 구조 설정에서 재구성합니다.</div>
     </div>
     <div class="card" data-card="beds"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병상 수 / 병원 도면</h3>
       <div class="row"><div class="field"><span>병상 수 (bed_capacity · 병원을 이 크기로 지음, 환자 수 상한)</span><input type="number" id="g_beds" min="1" max="5000"></div></div>
       <div class="row tight jsonrow"><span class="sub">병원 도면</span><button class="small primary" id="btnRebuild2" title="병상 수·구조 설정을 반영해 병원과 환자를 새로 구성합니다">재구성</button><button class="small" id="btnLayoutExport">내보내기</button><button class="small" id="btnLayoutImport">가져오기</button><input type="file" id="layoutFile" accept="application/json" hidden></div>
       <div class="sub" id="layoutImported" hidden>가져온 도면 사용 중 · <button class="small" id="btnLayoutReset">템플릿으로 되돌리기</button></div>
-      <div class="help">병상 수를 바꾼 뒤 <b>재구성</b>을 눌러야 병원이 그 크기로 지어집니다. 재원 환자와 패치 상태는 초기화되고 전송은 잠시 멈춥니다.</div>
+      <div class="help">병상 수를 바꾸고 위의 <b>[적용]</b>을 누르면 자동으로 재구성해 병원을 그 크기로 짓습니다(최대 약 4,850병상). 재원 환자와 패치 상태는 초기화되고 전송은 잠시 멈춥니다. [재구성]은 지금 적용된 값으로 다시 짓습니다.</div>
     </div>
     <div class="card" data-card="site"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>장소 시나리오</h3>
       <div class="field"><select id="s_site"><option value="hospital">병원 내 연속 모니터링 (BLE 패치 + 게이트웨이)</option><option value="mcot">원외 MCOT (모바일 게이트웨이)</option><option value="mixed">혼합 (병원 + 원외)</option></select></div>
@@ -243,6 +244,8 @@
       <label class="chk"><input type="checkbox" id="n_lat"> 네트워크 지연</label>
       <label class="chk"><input type="checkbox" id="n_pw"> 건물 정전 (발전기 전환 · UPS 유지 · 일반 전원 차단)</label>
       <label class="chk"><input type="checkbox" id="n_topo"> 네트워크 장비 장애 (건물 코어 · 층 스위치 · 무선 AP)</label>
+      <label class="chk"><input type="checkbox" id="rf_en"> 전파 방해 (2.4 GHz 혼잡: BLE 잦은 끊김 · 무선 AP 경유 손실)</label>
+      <div class="field"><span>전파 방해 강도 (%)</span><div class="rv"><input type="range" id="rf_lvl" min="0" max="100" step="5"><output id="rf_lvl_o"></output></div></div>
       <div class="row tight"><button class="small" data-trig="network_event">네트워크 이벤트 1회</button><button class="small" data-trig="switch_fault">층 스위치 장애</button><button class="small" data-trig="ap_fault">무선 AP 장애</button><button class="small" data-trig="power_outage">건물 정전</button></div>
       <div class="sub" id="netDevStatus"></div>
       <div class="help">게이트웨이는 건물 코어 → 층 스위치 → (무선이면) AP 아래에 붙어 있습니다. 장비가 죽으면 그 아래 게이트웨이의 업링크가 한꺼번에 끊기고, 게이트웨이는 살아 있어 패치가 그대로 붙은 채 프레임을 쌓았다가 복구 때 올립니다. 정전 때는 UPS 계통(응급실·간호사실)은 유지, 비상 계통은 발전기 전환(8~15초) 뒤 재부팅, 일반 계통은 한전 복전까지 꺼지고, UPS 없는 층 스위치는 재부팅하는 동안 그 층 유선 게이트웨이를 끊습니다.</div>
