@@ -762,3 +762,8 @@ td{white-space:normal}
 .ev.lvl-error{background:color-mix(in srgb,var(--err) 10%,transparent)}
 .ev.lvl-warn .k{color:var(--warn)}
 .ev.lvl-info .k{color:var(--acc)}
+
+/* 큰 숫자: 단위 축약(cnum) 뒤에도 넘치면 말줄임, 원래 값은 카드 title 툴팁 */
+.kpi{min-width:0}
+.kpi .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.kpi[title]{cursor:help}

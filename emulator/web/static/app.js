@@ -10,6 +10,28 @@ const api = async (path, opt = {}) => {
 const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
 const patch = (body) => api('/config', { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Source': 'gui' }, body: JSON.stringify(body) });   // tagged in the config history
 const fmt = (n, d = 0) => (n === undefined || n === null || isNaN(n)) ? '-' : Number(n).toLocaleString('ko-KR', { maximumFractionDigits: d, minimumFractionDigits: d });
+// 큰 수는 K/M/G 로 줄여 카드·표 칸을 넘지 않게 한다 (1만 미만은 그대로, 그 이상은 유효숫자 3자리). 원래 값은 title 로 남긴다.
+const cnum = (n) => {
+  if (n === undefined || n === null || n === '' || isNaN(n)) return '-';
+  const v = Number(n), a = Math.abs(v);
+  if (a < 10000) return v.toLocaleString('ko-KR', { maximumFractionDigits: a < 100 && v % 1 ? 1 : 0 });
+  const [u, d] = [['T', 1e12], ['G', 1e9], ['M', 1e6], ['K', 1e3]].find(([, d]) => a >= d);
+  const x = v / d, ax = Math.abs(x);
+  return (ax >= 100 ? x.toFixed(0) : ax >= 10 ? x.toFixed(1) : x.toFixed(2)) + u;
+};
+// 바이트는 네트워크 표기와 같이 1000 단위 (라우터 보고값과 같은 기준)
+const cbytes = (b) => {
+  if (b === undefined || b === null || isNaN(b)) return '-';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let v = Number(b), i = 0;
+  while (Math.abs(v) >= 1000 && i < u.length - 1) { v /= 1000; i++; }
+  const av = Math.abs(v);
+  return (i === 0 || av >= 100 ? v.toFixed(0) : av >= 10 ? v.toFixed(1) : v.toFixed(2)) + ' ' + u[i];
+};
+const cdur = (sec) => {
+  const t = Math.max(0, Math.floor(Number(sec) || 0)), d = Math.floor(t / 86400), h = Math.floor(t % 86400 / 3600), m = Math.floor(t % 3600 / 60);
+  return d ? `${d}일 ${h}시간` : h ? `${h}시간 ${m}분` : m ? `${m}분 ${t % 60}초` : `${t}초`;
+};
+const exact = (n) => (n === undefined || n === null || isNaN(n)) ? '' : Number(n).toLocaleString('ko-KR');
 const toast = (m) => { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2200); };
 const mmss = (sec) => { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; };
 const hhmm = (t) => new Date(t * 1000).toLocaleTimeString('en-GB', { hour12: false });
@@ -184,13 +206,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // 채팅 탭의 송수신 로그 스트립: 양쪽 누적 카운터를 받아 차분으로 초당 값을 만든다.
 // 라우터는 /api/v1/router/status 로 5초마다 같은 요약을 보내므로 .209 를 직접 부르지 않는다.
 let linkPrev = null, linkTimer = null;
-const nfmt = (n) => (n === null || n === undefined || n === '') ? '-' : Number(n).toLocaleString();
-const bfmt = (b) => {
-  if (b === null || b === undefined) return '-';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0, v = Number(b);
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return v.toFixed(v < 10 && i ? 1 : 0) + ' ' + u[i];
-};
+const nfmt = cnum;
+const bfmt = cbytes;
 function linkCell(side, title, pairs) {
   const el = $(`#chatLink .lk[data-side="${side}"]`); if (!el) return;
   el.innerHTML = `<b>${title}</b><div class="v">` +
@@ -402,7 +419,7 @@ function drawSpark(cv, data, color) {
   data.forEach((v, i) => { const x = i / (data.length - 1) * w, y = h - 3 - v / mx * (h - 8); i ? g.lineTo(x, y) : g.moveTo(x, y); });
   g.stroke(); g.fillStyle = TH().muted; g.font = '11px sans-serif'; g.fillText(fmt(mx, 0), 4, 12);
 }
-function kpi(l, v, cls = '') { return `<div class="kpi ${cls}"><div class="v">${v}</div><div class="l">${l}</div></div>`; }
+function kpi(l, v, cls = '', full = '') { return `<div class="kpi ${cls}"${full ? ` title="${full}"` : ''}><div class="v">${v}</div><div class="l">${l}</div></div>`; }
 async function refresh() {
   try { STATS = await api('/status'); } catch (e) { $('#runPill').className = 'pill err'; $('#runTxt').textContent = '서버 연결 실패'; return; }
   const s = STATS, L = s.last || {}, T = L.total || {};
@@ -411,7 +428,7 @@ async function refresh() {
   $('#btnStart').classList.toggle('live', s.running); $('#btnStop').classList.toggle('live', !s.running);
   $('#btnStart').textContent = s.running ? '● 실행 중' : '▶ 시작'; $('#runTxt').textContent = s.running ? (s.generate_only ? '실행 중 (생성만, 전송 없음)' : `전송 중 → ${s.target.ip}:${s.target.port} · TCP ${fmt(T.connected)}/${fmt(s.gateways)}`) : '정지';
   $('#pillPat').textContent = `환자 ${s.admitted} / 패치 연결 ${L.active_patches ?? 0}`;
-  $('#pillRate').textContent = `${fmt(L.pkts_ps).padStart(6, ' ')} pkt/s · ${fmt((L.bytes_ps || 0) / 1024, 0).padStart(5, ' ')} KB/s`;
+  $('#pillRate').textContent = `${cnum(L.pkts_ps)} pkt/s · ${cbytes(L.bytes_ps)}/s`;
   if (CFG) {
     const net = CFG.scenario.network.enabled, art = CFG.scenario.artifacts.enabled;
     $('#pillNet').className = 'pill' + (net ? ' on' : ''); $('#pillNet').lastChild.textContent = net ? `NET 장애 ON ${CFG.scenario.network.intensity}%` : 'NET 장애 OFF';
@@ -423,7 +440,7 @@ async function refresh() {
   const noconn = s.running && !s.generate_only && (T.connected || 0) === 0;
   $('#pillNoConn').hidden = !(noconn || (L.drop_noconn_ps || 0) > 0);
   $('#pillNoConn').className = 'pill' + (noconn ? ' bad' : ' on');
-  $('#pillNoConn').textContent = noconn ? `라우터 미연결 · 드롭 ${fmt(T.drop_noconn)}` : `미연결 드롭 ${fmt(T.drop_noconn)}`;
+  $('#pillNoConn').textContent = noconn ? `라우터 미연결 · 드롭 ${cnum(T.drop_noconn)}` : `미연결 드롭 ${cnum(T.drop_noconn)}`;
   const errGw = (L.gw_down || 0) + (L.gw_degraded || 0);
   $('#pillErrPkt').className = 'pill' + (errPkt ? ' bad' : ''); $('#pillErrPkt').textContent = `오류 pkt ${fmt(errPkt)}`;
   $('#pillErrGw').className = 'pill' + (errGw ? ' bad' : ''); $('#pillErrGw').textContent = `오류 GW ${fmt(errGw)}`;
@@ -431,17 +448,17 @@ async function refresh() {
   const w = L.workers || []; const build = Math.max(0, ...w.map(x => x.build_us)), send = Math.max(0, ...w.map(x => x.send_us));
   const bundleUs = (CFG ? CFG.transport.bundle_ms : 200) * 1000; const load = (build + send) / bundleUs * 100;
   $('#kpis').innerHTML = kpi('입원 환자', fmt(s.inpatients)) + kpi('MCOT 환자', fmt(s.outpatients)) + kpi('패치 스트리밍', fmt(L.active_patches), 'ok') + kpi('연결 끊김 패치', fmt(L.unlinked_patches), L.unlinked_patches ? 'warn' : '') +
-    kpi('게이트웨이', `${fmt(s.gateways)}`) + kpi('GW 장애 / 저하', `${fmt(L.gw_down)} / ${fmt(L.gw_degraded)}`, L.gw_down ? 'err' : '') + kpi('pkt/s', fmt(L.pkts_ps), 'ok') + kpi('KB/s', fmt((L.bytes_ps || 0) / 1024)) +
-    kpi('총 패킷', fmt(T.pkts)) + kpi('총 MB', fmt((T.bytes || 0) / 1e6, 1)) + kpi('에뮬 손실 pkt', fmt(T.drop_emul)) + kpi('백로그 드롭', fmt(T.drop_backlog), T.drop_backlog ? 'err' : '') +
-    kpi('TCP 연결 GW', fmt(T.connected)) + kpi('틱 오버런', fmt(T.overruns), T.overruns ? 'warn' : '') + kpi('워커 부하', fmt(load, 0) + '%', load > 70 ? 'err' : load > 40 ? 'warn' : 'ok') + kpi('bank 변형', fmt(s.bank.variants));
+    kpi('게이트웨이', `${fmt(s.gateways)}`) + kpi('GW 장애 / 저하', `${fmt(L.gw_down)} / ${fmt(L.gw_degraded)}`, L.gw_down ? 'err' : '') + kpi('pkt/s', cnum(L.pkts_ps), 'ok', exact(L.pkts_ps)) + kpi('전송률', cbytes(L.bytes_ps) + '/s') +
+    kpi('총 패킷', cnum(T.pkts), '', exact(T.pkts)) + kpi('총 전송량', cbytes(T.bytes), '', exact(T.bytes) + ' B') + kpi('에뮬 손실 pkt', cnum(T.drop_emul), '', exact(T.drop_emul)) + kpi('백로그 드롭', cnum(T.drop_backlog), T.drop_backlog ? 'err' : '', exact(T.drop_backlog)) +
+    kpi('TCP 연결 GW', cnum(T.connected)) + kpi('틱 오버런', cnum(T.overruns), T.overruns ? 'warn' : '', exact(T.overruns)) + kpi('워커 부하', fmt(load, 0) + '%', load > 70 ? 'err' : load > 40 ? 'warn' : 'ok') + kpi('bank 변형', fmt(s.bank.variants));
   sparkP.push(L.pkts_ps || 0); sparkB.push((L.bytes_ps || 0) / 1024); if (sparkP.length > 120) { sparkP.shift(); sparkB.shift(); }
   drawSpark($('#sparkPkts'), sparkP, TH().acc); drawSpark($('#sparkBytes'), sparkB, TH().acc2);
   const b = s.bank, p = b.progress;
   $('#bankInfo2').textContent = `${b.loaded ? '로드됨' : '미생성'} · 변형 ${b.variants} · ${b.size_mb} MB · ${p.state}${p.state === 'running' ? ` ${p.done}/${p.total} (${p.message}, ETA ${fmt(p.eta_s)}s)` : ''}`;
   $('#bankBar2').style.width = (p.total ? p.done / p.total * 100 : (b.loaded ? 100 : 0)) + '%';
-  $('#txKpis').innerHTML = kpi('저장후전송 버퍼', `${fmt((T.saf_bytes || 0) / 1024)} KB · ${fmt(T.saf_gateways)} GW`, T.saf_bytes ? 'warn' : '') + kpi('재전송 프레임', fmt(T.saf_replayed)) + kpi('버퍼 초과 폐기', fmt(T.drop_saf), T.drop_saf ? 'err' : '') + kpi('오염 주입', fmt(T.fuzz), T.fuzz ? 'warn' : '') +
-    kpi('pkt/s', fmt(L.pkts_ps)) + kpi('KB/s', fmt((L.bytes_ps || 0) / 1024)) + kpi('총 패킷', fmt(T.pkts)) + kpi('총 MB', fmt((T.bytes || 0) / 1e6, 1)) + kpi('에뮬 손실', fmt(T.drop_emul)) + kpi('백로그 드롭', fmt(T.drop_backlog), T.drop_backlog ? 'err' : '') + kpi('미연결 드롭 / 전송오류', `${fmt(T.drop_noconn)} / ${fmt(T.send_err)}`) + kpi('TCP 연결', fmt(T.connected)) + kpi('오버런', fmt(T.overruns)) + kpi('가동 시간', fmt(s.uptime_s) + 's') + kpi('워커', fmt(s.n_workers));
-  $('#wTable tbody').innerHTML = w.map(x => `<tr><td>${x.id}</td><td>${x.alive ? '<span class="tag ok">on</span>' : '<span class="tag err">off</span>'}</td><td>${x.n_patches}</td><td>${x.n_gw}</td><td>${fmt(x.ticks)}</td><td>${x.overruns}</td><td>${fmt(x.build_us)}</td><td>${fmt(x.send_us)}</td></tr>`).join('');
+  $('#txKpis').innerHTML = kpi('저장후전송 버퍼', `${cbytes(T.saf_bytes)} · ${cnum(T.saf_gateways)} GW`, T.saf_bytes ? 'warn' : '') + kpi('재전송 프레임', cnum(T.saf_replayed), '', exact(T.saf_replayed)) + kpi('버퍼 초과 폐기', cnum(T.drop_saf), T.drop_saf ? 'err' : '', exact(T.drop_saf)) + kpi('오염 주입', cnum(T.fuzz), T.fuzz ? 'warn' : '', exact(T.fuzz)) +
+    kpi('pkt/s', cnum(L.pkts_ps), '', exact(L.pkts_ps)) + kpi('전송률', cbytes(L.bytes_ps) + '/s') + kpi('총 패킷', cnum(T.pkts), '', exact(T.pkts)) + kpi('총 전송량', cbytes(T.bytes), '', exact(T.bytes) + ' B') + kpi('에뮬 손실', cnum(T.drop_emul), '', exact(T.drop_emul)) + kpi('백로그 드롭', cnum(T.drop_backlog), T.drop_backlog ? 'err' : '', exact(T.drop_backlog)) + kpi('미연결 드롭 / 전송오류', `${cnum(T.drop_noconn)} / ${cnum(T.send_err)}`, (T.drop_noconn || T.send_err) ? 'warn' : '', `${exact(T.drop_noconn)} / ${exact(T.send_err)}`) + kpi('TCP 연결', cnum(T.connected)) + kpi('오버런', cnum(T.overruns), T.overruns ? 'warn' : '', exact(T.overruns)) + kpi('가동 시간', cdur(s.uptime_s), '', exact(Math.round(s.uptime_s)) + '초') + kpi('워커', fmt(s.n_workers));
+  $('#wTable tbody').innerHTML = w.map(x => `<tr><td>${x.id}</td><td>${x.alive ? '<span class="tag ok">on</span>' : '<span class="tag err">off</span>'}</td><td>${x.n_patches}</td><td>${x.n_gw}</td><td title="${exact(x.ticks)}">${cnum(x.ticks)}</td><td>${x.overruns}</td><td>${fmt(x.build_us)}</td><td>${fmt(x.send_us)}</td></tr>`).join('');
   const at = s.autotune; $('#atInfo').innerHTML = at ? `진행 중: 현재 ${at.current}명, 안정 최대 ${at.best}명, step ${at.step}<br>` + (at.history || []).slice(-6).map(h => `${h.n}명 ${h.ok ? '✅' : '❌'} build ${fmt(h.build_us)}µs send ${fmt(h.send_us)}µs overrun ${h.overruns} drop ${h.backlog_drops}`).join('<br>') : '';
   if (CFG && CFG.general.active_patients !== Number($('#g_active').value) && at) { $('#g_active').value = at.current; $('#g_active_o').value = at.current; }
   pollEvents();
@@ -2104,7 +2121,7 @@ async function loadConfigHistory() {
   try {
     const [h, r] = await Promise.all([api('/config/history?limit=300&path=' + encodeURIComponent(q)), api('/runs?limit=50')]);
     const sm = $('#cfgHistSummary'); if (sm) sm.textContent = `변경 ${h.total}건 · 실행 ${r.runs.length}회${r.current ? ' · 현재 실행 #' + r.current : ''}`;
-    $('#runsTable tbody').innerHTML = r.runs.map(x => `<tr class="${x.id === r.current ? 'sel' : ''}"><td>${x.id}</td><td>${tsK(x.started_at)}</td><td>${x.stopped_at ? tsK(x.stopped_at) : '<span class="tag ok">진행 중</span>'}</td><td class="mono">${esc(x.target || '-')}</td><td>${x.workers ?? '-'}</td><td>${x.patients ?? '-'}</td><td>${x.gateways ?? '-'}</td><td>${fmt(x.pkts)}</td><td>${fmt(x.drops)}</td><td>${x.has_config ? `<button class="small" data-restore-run="${x.id}">이 설정으로 복원</button> <button class="small" data-show-run="${x.id}">보기</button>` : '<span class="sub">스냅샷 없음</span>'}</td></tr>`).join('') || '<tr><td colspan="10" class="sub">실행 기록 없음</td></tr>';
+    $('#runsTable tbody').innerHTML = r.runs.map(x => `<tr class="${x.id === r.current ? 'sel' : ''}"><td>${x.id}</td><td>${tsK(x.started_at)}</td><td>${x.stopped_at ? tsK(x.stopped_at) : '<span class="tag ok">진행 중</span>'}</td><td class="mono">${esc(x.target || '-')}</td><td>${x.workers ?? '-'}</td><td>${x.patients ?? '-'}</td><td>${x.gateways ?? '-'}</td><td title="${exact(x.pkts)}">${cnum(x.pkts)}</td><td title="${exact(x.drops)}">${cnum(x.drops)}</td><td>${x.has_config ? `<button class="small" data-restore-run="${x.id}">이 설정으로 복원</button> <button class="small" data-show-run="${x.id}">보기</button>` : '<span class="sub">스냅샷 없음</span>'}</td></tr>`).join('') || '<tr><td colspan="10" class="sub">실행 기록 없음</td></tr>';
     $('#cfgHistTable tbody').innerHTML = h.items.map(x => `<tr><td>${tsK(x.t)}</td><td><span class="tag">${esc(x.source)}</span></td><td>${x.run_id ?? '-'}</td><td class="mono">${esc(x.path)}</td><td class="mono sub">${esc(jshort(x.old))}</td><td class="mono">${esc(jshort(x.new))}</td><td><button class="small" data-restore-h="${x.id}" title="이 항목을 이전값 ${esc(jshort(x.old))} 으로">되돌리기</button></td></tr>`).join('') || '<tr><td colspan="7" class="sub">변경 이력 없음</td></tr>';
   } catch (e) { }
 }
@@ -2145,7 +2162,7 @@ $('#regNext').onclick = () => { regOff += 60; loadRegistry(); };
 
 // ---------------------------------------------------------------- SQLite console (data tab)
 async function loadDb() {
-  try { const d = await api('/db/stats'); $('#dbPath').textContent = `${d.path} · ${d.size_mb} MB`; $('#dbKpis').innerHTML = Object.entries(d.tables).map(([k, v]) => kpi(k, fmt(v))).join(''); } catch (e) { }
+  try { const d = await api('/db/stats'); $('#dbPath').textContent = `${d.path} · ${d.size_mb} MB`; $('#dbKpis').innerHTML = Object.entries(d.tables).map(([k, v]) => kpi(k, cnum(v), '', exact(v))).join(''); } catch (e) { }
 }
 let dbRes = null, dbSort = { key: '', dir: 1 };
 function renderDb() {
