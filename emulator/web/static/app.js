@@ -400,7 +400,7 @@ for (const [id, p] of Object.entries(B)) {
     queue(p, v);
   });
 }
-const PRESETS = { activePresets: { list: [50, 100, 200, 500, 1000, 1500, 2000, 3000, 5000], key: 'active_patients', input: 'g_active', cap: () => (SV || CFG).general.bed_capacity, capMsg: '병상 수' },
+const PRESETS = { activePresets: { list: [100, 200, 500, 1000, 1500, 2000, 3000, 5000], key: 'active_patients', input: 'g_active', cap: () => (SV || CFG).general.bed_capacity, capMsg: '병상 수' },
                   outPresets: { list: [10, 50, 100, 200], key: 'outpatient_count', input: 'g_out', cap: () => 500, capMsg: '최대' } };
 function renderPresets() {
   for (const [id, pr] of Object.entries(PRESETS)) {
