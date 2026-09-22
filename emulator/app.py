@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import threading
 import time
@@ -58,7 +59,7 @@ app.add_middleware(GZipMiddleware, minimum_size=16384)      # gateway/patient li
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
-WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/presets/apply", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
+WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/presets/apply", "/api/v1/waveforms", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
 
 
 @app.middleware("http")
@@ -437,14 +438,61 @@ def realsig_status():
         return w.rsig.status()
 
 
-@app.get("/api/v1/fs/browse")
-def fs_browse(path: str = ""):
-    """에뮬레이터 로컬 디렉토리 탐색 (ATF·CSV·TSV·TXT 파일만 표시).  허용 루트: /home /media /mnt /srv /data 와 데이터 디렉토리."""
-    from .runtime.realsig import browse
+@app.get("/api/v1/waveforms")
+def waveforms_list():
+    """파형 전용 폴더(데이터 디렉토리/waveforms)의 ATF·CSV·TSV·TXT 파일과, 그 파일을 쓰는 슬롯 번호(1부터)."""
+    from .runtime.realsig import list_waves, WAVE_DIR
+    slots = list((cfg.get("scenario", "realsig", default={}) or {}).get("slots") or [])
+    files = list_waves()
+    for f in files:
+        f["slots"] = [i + 1 for i, v in enumerate(slots) if v and os.path.basename(str(v)) == f["name"]]
+    return {"folder": str(WAVE_DIR), "files": files}
+
+
+@app.post("/api/v1/waveforms/upload")
+async def waveforms_upload(request: Request, name: str = Query(...)):
+    """본문 = 파일 바이트 그대로 (application/octet-stream), ?name=파일이름.  읽어 보고 파형이 아니면 지우고 이유를 돌려준다.
+    같은 이름이 있으면 덮어쓴다."""
+    from .runtime.realsig import WAVE_DIR, MAX_BYTES, parse_file, safe_name
     try:
-        return browse(path)
-    except PermissionError as e:
-        raise HTTPException(403, str(e))
+        fname = safe_name(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    WAVE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = WAVE_DIR / f".upload-{fname}"
+    n = 0
+    with open(tmp, "wb") as f:
+        async for chunk in request.stream():
+            n += len(chunk)
+            if n > MAX_BYTES:
+                f.close(); tmp.unlink(missing_ok=True)
+                raise HTTPException(413, f"파일이 너무 큽니다 (최대 {MAX_BYTES // 1_000_000} MB)")
+            f.write(chunk)
+    fs = int(cfg.get("signals", "ecg_fs", default=250) or 250)
+    try:
+        _, _, info = await asyncio.to_thread(parse_file, str(tmp), fs)     # 확장자 검사는 원래 이름으로
+    except Exception as e:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(422, f"파형으로 읽지 못했습니다: {str(e)[:200]}")
+    os.replace(tmp, WAVE_DIR / fname)
+    E().world.log.add("script", f"파형 업로드: {fname} — {info['seconds']} 초, 입력 {info['fs_in']} Hz, 평균 HR {info['hr_mean']}")
+    return {"name": fname, "bytes": n, "info": info}
+
+
+@app.delete("/api/v1/waveforms/{name}")
+def waveforms_delete(name: str):
+    """파형 파일 삭제.  쓰는 슬롯이 있으면 409."""
+    from .runtime.realsig import resolve
+    p = resolve(name)
+    if p is None or not p.is_file():
+        raise HTTPException(404, "파일 없음")
+    slots = list((cfg.get("scenario", "realsig", default={}) or {}).get("slots") or [])
+    used = [i + 1 for i, v in enumerate(slots) if v and os.path.basename(str(v)) == p.name]
+    if used:
+        raise HTTPException(409, f"슬롯 {', '.join(map(str, used))} 에서 쓰는 중입니다 — 슬롯에서 먼저 빼고 [적용]하세요")
+    p.unlink()
+    E().world.log.add("script", f"파형 삭제: {p.name}")
+    return {"deleted": p.name}
 
 
 @app.get("/api/v1/realism")

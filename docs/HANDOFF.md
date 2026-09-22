@@ -116,3 +116,4 @@
 - [2026-09-22 16:56 RP5-1] 파일 선택 대화상자 배경 투명 수정(정의 안 된 CSS 변수 --card/--bad/--ok → --panel/--err/--acc), 아이콘을 기호로, Esc 닫기 — app.js/style.css 만 운영 static 에 복사, 재시작 없음. 12번 프리셋 자동 생성 기본 켬(presets.py)은 다음 배포 때 반영.
 - [2026-09-22 16:57 RP5-1] 파일 선택 대화상자: 권한 없는 폴더(예: /home/master, 서비스 계정 biosim 접근 불가)에서 최상위로 튕기던 것을 제자리 유지 + 사유 표시로 — app.js/style.css 만 운영 static 에 복사, 재시작 없음.
 - [2026-09-22 16:59 RP5-1] ECG 파일 폴더 /home/master/ecg 생성, ACL: biosim 은 /home/master 통과(--x)만, ~/ecg 는 읽기(r-x, 기본 ACL 포함). 예시 파일 2개(sample_72bpm.atf, tachy_360hz.csv) 넣음. 파일 선택 대화상자에 경로 입력 칸 추가 — app.js/style.css 만 운영 static 에 복사. /home/*/ecg 를 탐색 최상위에 올리는 서버 변경은 다음 배포 때.
+- [2026-09-22 17:06 RP5-1] 실제 시그널 파형 전용 폴더 /var/lib/biosim/waveforms 생성(biosim 소유, master rwx ACL), 예시 파일 2개 이동. ~/ecg 와 /home/master ACL 은 되돌림(drwx------ 원상). 폴더 탐색(/api/v1/fs/browse)을 없애고 파형 목록·업로드·삭제(/api/v1/waveforms) 로 바꿈 — 서버 변경이라 다음 배포 때 반영.

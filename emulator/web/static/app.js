@@ -2646,45 +2646,76 @@ async function rsLoad() {
   try { RS = await api('/realsig'); } catch (e) { return; }
   const p = scnSelected(); if (p && p.id === 'realsig' && !document.querySelector('.fsdlg')) { const y = $('#pDesc').scrollTop; pwDescribe(true); $('#pDesc').scrollTop = y; }
 }
-let fsLast = '';
-try { fsLast = localStorage.getItem('rs:dir') || ''; } catch (e) { }
+// 파형 파일 고르기: 에뮬레이터의 파형 전용 폴더 목록에서 고르거나 올린다 (폴더 탐색 없음)
+function upWave(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/api/v1/waveforms/upload?name=' + encodeURIComponent(file.name));
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch (e) { }
+      if (x.status >= 200 && x.status < 300) resolve(d); else reject(new Error(d.detail || x.statusText || ('HTTP ' + x.status))); };
+    x.onerror = () => reject(new Error('네트워크 오류'));
+    x.send(file);
+  });
+}
 async function fsPick(i) {
   const dlg = document.createElement('div'); dlg.className = 'fsdlg';
-  dlg.innerHTML = `<div class="fsbox"><div class="fshead"><b>슬롯 ${i + 1} 파일 선택</b> <span class="sub">에뮬레이터 로컬 · ATF / CSV / TSV / TXT</span><button class="small fsx">닫기</button></div>` +
-    `<div class="fsgo"><input class="fsin mono" placeholder="경로 입력 후 Enter (예: /home/master/ecg)" spellcheck="false"><button class="small fsbtn">이동</button></div>` +
-    `<div class="fspath mono"></div><div class="fslist"></div></div>`;
+  dlg.innerHTML = `<div class="fsbox"><div class="fshead"><b>슬롯 ${i + 1} 파형 선택</b><span class="sub">ATF · CSV · TSV · TXT</span>` +
+    `<button class="small primary fsup">업로드…</button><button class="small fsx">닫기</button></div>` +
+    `<input type="file" class="fsfile" accept=".atf,.csv,.tsv,.txt" multiple hidden>` +
+    `<div class="fsmsg sub">파일을 누르면 이 슬롯에 넣습니다. 여러 파일을 올리면 슬롯 ${i + 1}부터 차례로 채웁니다. 이 창에 끌어다 놓아도 됩니다.</div>` +
+    `<div class="fslist"></div></div>`;
   document.body.appendChild(dlg);
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   const close = () => { dlg.remove(); document.removeEventListener('keydown', onKey); };
   document.addEventListener('keydown', onKey);
   dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
   $('.fsx', dlg).onclick = close;
-  const goInput = () => { const v = $('.fsin', dlg).value.trim(); if (v) go(v); };
-  $('.fsin', dlg).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); goInput(); } });
-  $('.fsbtn', dlg).onclick = goInput;
-  const go = async (path) => {
-    let d;
-    try { d = await api('/fs/browse?path=' + encodeURIComponent(path)); }
-    catch (e) {
-      const denied = /denied|허용|403/i.test(e.message);
-      const msg = denied ? `${path} — 에뮬레이터 서비스(biosim 계정)가 목록을 볼 수 없는 폴더입니다. 허용된 하위 폴더는 위 경로 칸에 직접 입력하세요 (예: /home/master/ecg)` : `${path} — 열 수 없습니다 (${e.message})`;
-      if (!$('.fslist .fsrow', dlg)) { if (path) return go(''); }                  // 처음 열 때 실패하면 최상위로
-      const w = $('.fswarn', dlg) || $('.fspath', dlg).insertAdjacentElement('afterend', Object.assign(document.createElement('div'), { className: 'fswarn' }));
-      w.textContent = msg; return;
-    }
-    const w0 = $('.fswarn', dlg); if (w0) w0.remove();
-    fsLast = d.path; try { localStorage.setItem('rs:dir', d.path); } catch (e) { }
-    $('.fspath', dlg).textContent = d.path || '위치 선택';
-    $('.fsin', dlg).value = d.path || '';
-    const kb = (b) => cbytes ? cbytes(b) : b;
-    $('.fslist', dlg).innerHTML = (d.parent !== null ? `<div class="fsrow dir" data-p="${esc(d.parent)}"><span class="fs-ic">↑</span>상위 폴더</div>` : '') +
-      d.dirs.map(x => `<div class="fsrow dir" data-p="${esc(x.path)}"><span class="fs-ic">▸</span>${esc(x.name)}</div>`).join('') +
-      d.files.map(x => `<div class="fsrow file" data-f="${esc(x.path)}"><span class="fs-ic">≡</span>${esc(x.name)} <span class="sub">${kb(x.bytes)}</span></div>`).join('') +
-      (!d.dirs.length && !d.files.length ? '<div class="sub" style="padding:10px">ATF/CSV 파일이 없습니다</div>' : '');
-    $$('.fsrow.dir', dlg).forEach(r => r.onclick = () => go(r.dataset.p));
-    $$('.fsrow.file', dlg).forEach(r => r.onclick = () => { rsSet(c => { c.slots[i] = r.dataset.f; }); close(); toast(`슬롯 ${i + 1}: ${r.dataset.f.split('/').pop()} — [적용]을 눌러야 반영`); });
+  const msg = (t, err) => { const m = $('.fsmsg', dlg); m.textContent = t; m.classList.toggle('fserr', !!err); };
+  const pick = (names) => { rsSet(c => { names.forEach((n, k) => { if (i + k < 20) c.slots[i + k] = n; }); }); };
+  const list = async () => {
+    let d; try { d = await api('/waveforms'); } catch (e) { msg('목록을 읽지 못했습니다: ' + e.message, true); return; }
+    const inDraft = (rsCfg().slots || []);
+    $('.fslist', dlg).innerHTML = d.files.map(f => {
+      const used = [...new Set([...f.slots, ...inDraft.map((v, k) => v && v.split('/').pop() === f.name ? k + 1 : 0).filter(Boolean)])].sort((a, b) => a - b);
+      return `<div class="fsrow file" data-f="${esc(f.name)}"><span class="fs-ic">≡</span><span class="fsname">${esc(f.name)}</span>` +
+        `<span class="sub">${cbytes(f.bytes)} · ${new Date(f.mtime * 1000).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}</span>` +
+        (used.length ? `<span class="fsused">슬롯 ${used.join(', ')}</span>` : '') +
+        `<button class="fsdel" data-del="${esc(f.name)}" title="삭제">×</button></div>`;
+    }).join('') || '<div class="sub" style="padding:14px">아직 파형 파일이 없습니다. [업로드…]로 올리세요.</div>';
+    $$('.fsrow.file', dlg).forEach(r => r.onclick = (e) => { if (e.target.closest('.fsdel')) return; pick([r.dataset.f]); close(); toast(`슬롯 ${i + 1}: ${r.dataset.f} — [적용]을 눌러야 반영`); });
+    $$('.fsdel', dlg).forEach(b => b.onclick = async (e) => {
+      e.stopPropagation();
+      if (!(await askConfirm('파형 삭제', `${b.dataset.del} 파일을 파형 폴더에서 지웁니다.`, '삭제'))) return;
+      try { await api('/waveforms/' + encodeURIComponent(b.dataset.del), { method: 'DELETE' }); msg(`${b.dataset.del} 삭제함`); }
+      catch (err) { let t = err.message; try { t = JSON.parse(t).detail; } catch (x) { } msg(t, true); }
+      list();
+    });
   };
-  go(fsLast);
+  const upload = async (files) => {
+    files = [...files]; if (!files.length) return;
+    const ok = [];
+    for (let k = 0; k < files.length; k++) {
+      const f = files[k];
+      try { const d = await upWave(f, p => msg(p < 1 ? `올리는 중 ${k + 1}/${files.length}: ${f.name} ${Math.round(p * 100)} %` : `${f.name} 읽어 보는 중…`)); ok.push(d.name || f.name); }
+      catch (e) { msg(`${f.name}: ${e.message}`, true); await new Promise(r => setTimeout(r, 1500)); }
+    }
+    if (ok.length) pick(ok);                                               // 서버가 저장한 이름을 슬롯에 먼저 넣고 목록 갱신
+    await list();
+    if (ok.length) {
+      msg(`${ok.length}개 올림 · 슬롯 ${i + 1}${ok.length > 1 ? `~${Math.min(20, i + ok.length)}` : ''}에 넣었습니다 — [적용]을 눌러야 반영`);
+      toast(`파형 ${ok.length}개 업로드 · 슬롯 ${i + 1}${ok.length > 1 ? `~${Math.min(20, i + ok.length)}` : ''} 설정`);
+    }
+  };
+  const inp = $('.fsfile', dlg);
+  $('.fsup', dlg).onclick = () => inp.click();
+  inp.onchange = () => { upload(inp.files); inp.value = ''; };
+  const box = $('.fsbox', dlg);
+  box.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('drop'); });
+  box.addEventListener('dragleave', () => box.classList.remove('drop'));
+  box.addEventListener('drop', e => { e.preventDefault(); box.classList.remove('drop'); upload(e.dataTransfer.files); });
+  list();
 }
 async function loadScnPresets(keepPos = true) {
   try { scnPresets = await api('/presets'); } catch (e) { return; }

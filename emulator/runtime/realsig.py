@@ -30,8 +30,8 @@ MAX_BYTES = 512 * 1024 * 1024
 # 자동 생성 순환: 페이싱 리듬은 뺀다 (슬롯 환자는 페이싱 스파이크를 끈다)
 CYCLE = ["nsr", "afib", "pvc_bigeminy", "avb2_m1", "sinus_brady", "vt", "aflutter", "pvc", "avb3", "svt", "sinus_tachy", "nsvt",
          "lbbb", "afib_rvr", "stemi", "pac", "avb2_m2", "sinus_pause", "rbbb", "ischemia", "avb1", "vfib"]
-# 파일 탐색 허용 루트 (에뮬레이터 로컬 디렉토리)
-BROWSE_ROOTS = ["/home", "/media", "/mnt", "/srv", "/data", str(BASE_DIR)]
+# 파형 전용 폴더: 에뮬레이터(서비스 계정)가 읽고 쓰는 곳.  업로드도 여기로, 슬롯에는 파일 이름만 저장한다.
+WAVE_DIR = BASE_DIR / "waveforms"
 
 
 # ============================================================================ 파일 읽기
@@ -107,6 +107,8 @@ def _read_table(path: Path) -> tuple[list[str], np.ndarray, dict]:
             titles = [f"{t} ({u})" if u else t for t, u in zip(titles or [f"col{i}" for i in range(len(units))], units)]
             body = body[1:]
     arr = np.genfromtxt(io.StringIO("\n".join(body)), delimiter=delim, dtype=np.float64, invalid_raise=False)
+    if arr.ndim == 0 or arr.size == 0:
+        raise ValueError("숫자 데이터가 없습니다 (심전도 값 열이 있는 ATF/CSV 인지 확인하세요)")
     if arr.ndim == 1:
         arr = arr[:, None]
     arr = arr[~np.all(np.isnan(arr), axis=1)]
@@ -202,37 +204,40 @@ def _hr_series(x: np.ndarray, fs: int) -> np.ndarray:
     return hr
 
 
-# ============================================================================ 파일 탐색 (에뮬레이터 로컬)
-def browse(path: str) -> dict:
-    import glob
-    home_ecg = [p for p in sorted(glob.glob("/home/*/ecg")) if os.access(p, os.R_OK | os.X_OK)]   # 홈은 막혀 있어도 ~/ecg 는 바로 보이게
-    roots = home_ecg + [r for r in BROWSE_ROOTS if os.path.isdir(r)]
-    if not path:
-        return {"path": "", "parent": None, "dirs": [{"name": r, "path": r} for r in roots], "files": [], "roots": roots}
-    rp = os.path.realpath(path)
-    if not any(rp == r or rp.startswith(r.rstrip("/") + "/") for r in map(os.path.realpath, roots)):
-        raise PermissionError("허용된 위치가 아닙니다")
-    if os.path.isfile(rp):
-        rp = os.path.dirname(rp)
-    dirs, files = [], []
+# ============================================================================ 파형 전용 폴더
+_NAME_OK = re.compile(r"[^\w.\- ()\[\]가-힣]")
+
+
+def safe_name(name: str) -> str:
+    """업로드 파일 이름: 경로 성분 제거, 허용 문자만, 확장자 검사."""
+    n = os.path.basename((name or "").replace("\\", "/")).strip()
+    n = _NAME_OK.sub("_", n)[:120].lstrip(".")
+    if not n or os.path.splitext(n)[1].lower() not in EXTS:
+        raise ValueError(f"지원하지 않는 형식입니다 (ATF · CSV · TSV · TXT): {name}")
+    return n
+
+
+def resolve(name: str) -> Path | None:
+    """슬롯 값(파일 이름, 또는 예전 설정의 전체 경로) → 파형 폴더 안의 실제 경로.  폴더 밖이면 None."""
+    if not name:
+        return None
+    p = Path(name) if os.path.isabs(name) else WAVE_DIR / name
     try:
-        with os.scandir(rp) as it:
-            for e in sorted(it, key=lambda e: e.name.lower()):
-                if e.name.startswith("."):
-                    continue
-                try:
-                    if e.is_dir():
-                        dirs.append({"name": e.name, "path": os.path.join(rp, e.name)})
-                    elif e.name.lower().endswith(EXTS):
-                        st = e.stat()
-                        files.append({"name": e.name, "path": os.path.join(rp, e.name), "bytes": st.st_size, "mtime": st.st_mtime})
-                except OSError:
-                    pass
-    except OSError as ex:
-        raise PermissionError(str(ex))
-    parent = os.path.dirname(rp)
-    at_root = any(rp == os.path.realpath(r) for r in roots)
-    return {"path": rp, "parent": "" if at_root else parent, "dirs": dirs, "files": files, "roots": roots}
+        rp = p.resolve()
+        rp.relative_to(WAVE_DIR.resolve())
+    except (ValueError, OSError):
+        return None
+    return rp
+
+
+def list_waves() -> list[dict]:
+    WAVE_DIR.mkdir(parents=True, exist_ok=True)
+    out = []
+    for e in sorted(os.scandir(WAVE_DIR), key=lambda e: e.name.lower()):
+        if e.is_file() and e.name.lower().endswith(EXTS) and not e.name.startswith("."):
+            st = e.stat()
+            out.append({"name": e.name, "bytes": st.st_size, "mtime": st.st_mtime})
+    return out
 
 
 # ============================================================================ 월드 쪽 관리
@@ -275,9 +280,13 @@ class RealSignal:
         finally:
             self.busy.discard(key)
 
-    def slot_state(self, path: str, fs: int) -> dict:
-        if not path:
+    def slot_state(self, name: str, fs: int) -> dict:
+        if not name:
             return {"state": "empty"}
+        rp = resolve(name)
+        if rp is None:
+            return {"state": "error", "error": "파형 폴더 밖의 파일입니다 — 파형 폴더에 올려서 고르세요"}
+        path = str(rp)
         key = self._key(path, fs)
         if key is None:
             return {"state": "error", "error": "파일이 없습니다"}
@@ -410,4 +419,5 @@ class RealSignal:
             out.append({"slot": i, "path": path, "name": os.path.basename(path) if path else "", "state": s["state"], "error": s.get("error"),
                         "info": s.get("info"), "patient_id": pid, "patient": prof["name"] if prof else None,
                         "cycling": (RHYTHMS.get(cy["rhythm"], {}).get("label", cy["rhythm"]) if cy and cy["rhythm"] else None)})
-        return {"enabled": bool(c.get("enabled")), "auto_cycle": bool(c.get("auto_cycle", True)), "cycle_s": c.get("cycle_s", 60), "slots": out}
+        return {"enabled": bool(c.get("enabled")), "auto_cycle": bool(c.get("auto_cycle", True)), "cycle_s": c.get("cycle_s", 60), "slots": out,
+                "folder": str(WAVE_DIR)}

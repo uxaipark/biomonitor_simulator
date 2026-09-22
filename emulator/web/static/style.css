@@ -998,3 +998,13 @@ label.chk.sub-opt{padding-left:26px}
 .fswarn{padding:8px 14px;font-size:12.5px;color:var(--err);border-bottom:1px solid var(--line);background:color-mix(in srgb, var(--err) 8%, transparent)}
 .fsgo{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--line)}
 .fsgo .fsin{flex:1;min-width:0;min-height:34px;padding:4px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg);font-size:12.5px}
+.fshead .fsup{margin-left:auto}
+.fshead .fsx{margin-left:0}
+.fsmsg{padding:8px 14px;border-bottom:1px solid var(--line);font-size:12.5px}
+.fsmsg.fserr{color:var(--err)}
+.fsrow.file{display:flex;align-items:center;gap:8px}
+.fsrow .fsname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.fsused{font-size:11px;color:var(--acc);border:1px solid currentColor;border-radius:999px;padding:0 6px;flex:none}
+.fsdel{flex:none;width:24px;height:24px;min-height:0;padding:0;border:none;background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+.fsdel:hover{color:var(--err)}
+.fsbox.drop{outline:2px dashed var(--acc);outline-offset:-6px}
