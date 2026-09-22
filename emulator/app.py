@@ -157,6 +157,9 @@ def _apply_config(patch: dict, source: str) -> dict:
     old = cfg.snapshot()
     new = cfg.update(patch, source=source)
     changed = set(_changed_paths(old, new))
+    if not source.startswith("preset") and any(c[0] == "scenario" or c in {("general", "census_mode"), ("transport", "storm_smoothing")} or c[:2] in {("transport", "fuzz"), ("transport", "store_forward")}
+                                               for c in changed if c[-1] not in ("preset", "preset_modified")) and not new["scenario"].get("preset_modified"):
+        new = cfg.update({"scenario": {"preset_modified": True}}, source=source)      # 프리셋 이후 손으로 바꿈 → '(수정됨)' 표시
     needs_rebuild = bool(changed & STRUCTURAL) or (("general", "outpatient_count") in changed and new["general"]["outpatient_count"] > e.world.mobile_pool)
     if ("general", "active_patients") in changed and (new.get("hospital") or {}).get("size_by_patients", True) and not (new.get("hospital") or {}).get("layout_file"):
         planned = e.world.planned_beds(); have = e.world.hospital.bed_capacity
@@ -329,6 +332,32 @@ def script_start(body: dict):
 @app.delete("/api/v1/control/script")
 def script_cancel():
     return E().world.cancel_script()
+
+
+@app.get("/api/v1/presets")
+def presets_list():
+    """대표 테스트 시나리오 프리셋 (기본값 + 9개).  적용은 시나리오 계층을 기본값으로 되돌린 뒤 프리셋 값을 얹는다."""
+    from .presets import public_list
+    sc = cfg.get("scenario")
+    return {"presets": public_list(), "current": sc.get("preset", "default"), "modified": bool(sc.get("preset_modified"))}
+
+
+@app.post("/api/v1/presets/apply")
+def presets_apply(body: dict):
+    from .presets import BY_ID, build_patch
+    pid = str(body.get("id", ""))
+    if pid not in BY_ID:
+        raise HTTPException(404, "unknown preset")
+    res = _apply_config(build_patch(pid, cfg.snapshot()), f"preset:{pid}")
+    sc = cfg.get("scenario")
+    with E().world.lock:                                                # 끈 시나리오의 진행 중 사건은 정리 (깨끗한 출발점)
+        E().world.real.clear_events(clinical=not sc["clinical"]["enabled"], network=not sc["network"]["enabled"])
+    acts = []
+    if not res.get("needs_rebuild"):
+        for a in BY_ID[pid].get("actions", []):
+            acts.append(E().world.trigger(a["what"], a.get("target"), dict(a.get("params") or {})))
+    E().world.log.add("script", f"프리셋 적용: {BY_ID[pid]['name']}" + (f" — 즉시 주입 {len(acts)}건" if acts else ""))
+    return {"preset": pid, "name": BY_ID[pid]["name"], "needs_rebuild": res.get("needs_rebuild"), "changed": res.get("changed"), "actions": acts}
 
 
 @app.get("/api/v1/realism")

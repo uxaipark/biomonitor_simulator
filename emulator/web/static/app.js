@@ -167,6 +167,7 @@ function showTab(id) {
   if (shown.has('pat')) loadPatients();
   if (shown.has('data')) { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
   if (shown.has('scn') || shown.has('dash')) loadRealism();
+  if (shown.has('scn')) loadScnPresets();
   if (shown.has('scn') || shown.has('tx')) loadScripts();
   if (shown.has('scn')) loadDevices();
   if (shown.has('log')) showLogView(logView); else { $('[data-tab="chat"]').classList.remove('on'); updateLinkPolling(); }
@@ -546,16 +547,17 @@ async function pollEvents() {
   try {
     const r = await api('/events?since=' + lastEvSeq); if (!r.events.length) return;
     evAll = evAll.concat(r.events).slice(-600); lastEvSeq = evAll[evAll.length - 1].seq; renderTxHealthEvents();
-    const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind}</span><span>${e.msg}</span></div>`).join('');
+    const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${e.msg}</span></div>`).join('');
     $('#dashEvents').innerHTML = html(evAll.slice(-40));
     if ($('[data-tab="log"]').classList.contains('on')) renderLog();
     if (r.events.some(e => e.kind === 'adt' || e.kind === 'system')) loadPatientList();
   } catch (e) { }
 }
-const EVKIND_KO = { tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트' };
+const evKindLabel = (e) => e.kind === 'tx' ? ({ error: '송출 오류', warn: '송출 경고', info: '송출 복구' }[e.level] || '송출') : (EVKIND_KO[e.kind] || e.kind);   // 로그 종류 한글 (함수 선언이 아니라 아래 상수를 쓰므로 호출 시점에만 참조)
+const EVKIND_KO = { clinical: '임상', tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트' };
 function renderLog() {
   const f = $('#logFilter').value, list = evAll.slice().reverse().filter(e => !f || e.kind === f);
-  $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind === 'tx' ? ({ error: '송출 오류', warn: '송출 경고', info: '송출 복구' }[e.level] || '송출') : (EVKIND_KO[e.kind] || e.kind)}</span><span>${e.msg}</span></div>`).join('')
+  $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${e.msg}</span></div>`).join('')
     : `<div class="sub" style="padding:10px 0">${f === 'tx' ? '송출 장애 기록이 없습니다. 송출이 끊기거나 프레임이 유실되면 여기와 시스템 저널([tx])에 남습니다.' : '표시할 이벤트가 없습니다.'}</div>`;
 }
 $('#logFilter').onchange = renderLog;
@@ -2445,7 +2447,7 @@ async function loadRealism() {
   const ss = $('#surgeStatus'); if (ss) ss.textContent = d.surge ? `유입 진행: ${d.surge.count}명` : '';
   const rs = $('#recStatus'); if (rs) rs.innerHTML = d.recording ? `<span class="tag err">● 녹화 중</span> ${esc(d.recording.name)} · ${d.recording.items}단계` : '';
 }
-setInterval(() => { if (curGroup === 'scn' || curGroup === 'dash') loadRealism(); }, 5000);
+setInterval(() => { if (curGroup === 'scn' || curGroup === 'dash') loadRealism(); if (curGroup === 'scn') loadScnPresets(); }, 5000);
 $('#recStart').onclick = async () => { const r = await post('/control/record', { action: 'start', name: $('#recName').value.trim() }); toast(`녹화 시작: ${r.name}`); loadRealism(); };
 $('#recStop').onclick = async () => { const r = await post('/control/record', { action: 'stop', save: true }); toast(r.saved ? `저장: scenarios/${r.saved} (${r.items}단계)` : '녹화된 조작이 없습니다'); loadRealism(); loadScripts(); };
 async function loadLabelSummary() {
@@ -2458,6 +2460,24 @@ async function loadLabelSummary() {
     `<td><a class="btnlink" href="/api/v1/labels?format=csv&kind=${k}" download>CSV</a></td></tr>`).join('') || '<tr><td colspan="6" class="sub">아직 라벨이 없습니다</td></tr>';
   $('#lblSummaryHead').textContent = `${cnum(rows.reduce((a, [, v]) => a + v.n + (v.open || 0), 0))}개 구간`;
 }
+// ---------------- 대표 테스트 시나리오 프리셋 (기본값 + 9개): 누르면 시나리오 계층을 기본값으로 되돌리고 프리셋을 얹는다
+let scnPresets = null;
+async function loadScnPresets() {
+  try { scnPresets = await api('/presets'); } catch (e) { return; }
+  const cur = scnPresets.presets.find(p => p.id === scnPresets.current) || scnPresets.presets[0];
+  $('#presetList').innerHTML = scnPresets.presets.map((p, i) => `<button class="preset ${p.id === scnPresets.current ? 'on' : ''}" data-pid="${p.id}" title="${esc(p.desc)}">` +
+    `<b>${i === 0 ? '' : i + '. '}${esc(p.name)}</b><small>${esc(p.purpose)}</small>${p.actions.length ? `<i>즉시 주입 ${p.actions.length}</i>` : ''}</button>`).join('');
+  $('#presetState').innerHTML = `현재: <b>${esc(cur.name)}</b>${scnPresets.modified ? ' <span class="tag warn">수정됨</span>' : ''}`;
+  $('#presetDesc').textContent = cur.desc;
+}
+$('#presetList').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-pid]'); if (!b || !scnPresets) return;
+  const p = scnPresets.presets.find(x => x.id === b.dataset.pid);
+  if (p.actions.length && !(await askConfirm(p.name, `${p.desc}\n\n적용하면 시나리오 설정이 바뀌고 즉시 주입 ${p.actions.length}건(${p.actions.join(', ')})이 실행됩니다.`, '적용'))) return;
+  const r = await post('/presets/apply', { id: p.id });
+  toast(r.needs_rebuild ? `${r.name}: 재구성이 필요한 값이 바뀌었습니다` : `${r.name} 적용${r.actions.length ? ` · 즉시 주입 ${r.actions.length}건` : ''}`);
+  await loadConfig(); loadScnPresets(); loadRealism();
+});
 // ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다
 $$('.help').forEach(hp => {
   if ((hp.textContent || '').trim().length < 90) return;

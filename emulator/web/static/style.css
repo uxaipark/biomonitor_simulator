@@ -823,3 +823,45 @@ a.btnlink:hover{border-color:var(--acc)}
 .news{display:inline-block;min-width:26px;text-align:center;padding:1px 6px;border-radius:8px;font-variant-numeric:tabular-nums}
 .news0{background:var(--panel2)} .news1{background:color-mix(in srgb,var(--acc) 25%,transparent)}
 .news2{background:color-mix(in srgb,var(--warn) 35%,transparent)} .news3{background:color-mix(in srgb,var(--err) 40%,transparent);color:#fff}
+
+/* ================= 공간 활용 ================= */
+main{max-width:2400px}
+/* 헤더: 제목 · 메뉴 · 버튼 한 줄 */
+header nav.tabs{flex:1 1 auto;min-width:0;padding:0 4px;background:transparent;border:0;margin:0 6px}
+header nav.tabs button{min-height:36px;padding:5px 13px}
+header .spacer{flex:0 0 0}
+/* 운영 현황: 송출 상태(전체) / 상태 | 추세 / 최근 이벤트(전체) */
+.dashgrid>.card{grid-column:1/-1}
+@media (min-width:1200px){
+  .dashgrid{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+  .dashgrid>.dash-state{grid-column:1}
+  .dashgrid>.dash-trend{grid-column:2}
+}
+/* 송출: 왼쪽 설정 · 오른쪽 통계 */
+.txgrid>.card{grid-column:1/-1}
+@media (min-width:1100px){
+  .txgrid{grid-template-columns:minmax(300px,1fr) minmax(0,2.6fr);align-items:start}
+  .txgrid>.tx-target{grid-column:1;grid-row:2}
+  .txgrid>.tx-perf{grid-column:1;grid-row:3}
+  .txgrid>.tx-stats{grid-column:2;grid-row:2 / span 2}
+}
+.tx-stats .kpis{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+/* 설정·데이터: 두 열 */
+.datagrid{display:grid;gap:10px;grid-template-columns:1fr;align-items:start}
+.dcol{display:flex;flex-direction:column;gap:10px;min-width:0}
+@media (min-width:1500px){ .datagrid{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)} }
+/* 병원: 이동 중 환자 일정은 현재 + 다음 두 단계만 (행을 누르면 전체) */
+#tripTable .tt span.done{display:none}
+#tripTable .tt span.cur ~ span ~ span ~ span{display:none}
+#tripTable tr.sel .tt span{display:inline-flex}
+
+/* 대표 테스트 시나리오 프리셋 */
+.presetlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:6px}
+button.preset{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;min-height:0;padding:8px 10px;border-radius:10px;position:relative}
+button.preset b{font-size:13px}
+button.preset small{font-size:11px;color:var(--muted);line-height:1.3}
+button.preset i{font-style:normal;font-size:10.5px;color:var(--warn);margin-top:1px}
+button.preset.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 14%,var(--panel2))}
+button.preset:hover{border-color:var(--acc2)}
+.ev .k{flex-basis:72px}
+.ev.clinical .k{color:var(--err)}

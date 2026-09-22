@@ -107,6 +107,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_buildings": 3,
     },
     "scenario": {
+        "preset": "default",           # 마지막으로 적용한 대표 시나리오 프리셋 (presets.py)
+        "preset_modified": False,      # 프리셋 적용 뒤 시나리오 설정을 손으로 바꿨는지
         "site": "hospital",            # hospital | mcot | mixed
         "rhythm_episodes": True,       # spontaneous arrhythmia episodes (paroxysms) on top of the base rhythm
         "variant_hopping": True,       # rotate among same-rhythm loop variants every 8-25 min so no hour repeats

@@ -589,6 +589,26 @@ class Realism:
                 out.append({**base, "kind": "mcot_device", "gw": rec.get("mobile_gw"), "value": ph["state"], "t_start_ms": int(ph["label_t0"] * 1000), "meta": None})
         return out
 
+    def clear_events(self, clinical: bool = False, network: bool = False) -> dict:
+        """프리셋이 해당 시나리오를 끌 때 진행 중인 사건도 정리한다 (깨끗한 기준선).  코드블루는 소생 성공으로 끝낸다."""
+        w, n = self.w, {"clinical": 0, "network": 0}
+        if clinical:
+            for pid, rec in list(w.admitted.items()):
+                if rec.get("code_blue"):
+                    rec["code_blue"]["rosc"] = True
+                    self._end_code_blue(pid, rec, w.by_id[pid]); n["clinical"] += 1
+                d = rec.get("deter")
+                if d:
+                    self._label_add("deterioration", DETER[d["kind"]]["label"], patient_id=pid, patch_id=self._patch_id(rec), t0=d["label_t0"], t1=time.time(),
+                                    meta={"kind": d["kind"], "ended": "preset"})
+                    rec["deter"] = None; n["clinical"] += 1
+        if network and self.win:
+            n["network"] = len(self.win)
+            self.win.clear()                                              # 다음 스텝에서 표시해 둔 게이트웨이가 정상으로 돌아온다
+        if n["clinical"] or n["network"]:
+            w.log.add("script", f"프리셋 전환: 진행 중이던 임상 사건 {n['clinical']}건 · 망/전원 장애 {n['network']}건 정리")
+        return n
+
     # ======================================================================= 재현: 녹화
     def record_start(self, name: str) -> dict:
         self.recording = {"name": name, "t0": self.w.sim_time, "items": [], "started": time.time()}
