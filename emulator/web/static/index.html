@@ -323,19 +323,25 @@
           <li><b>재현 실행</b>이면 시작 시각 고정과 1초 고정 간격을 켠 뒤 [재구성]합니다. 같은 시드·시각이면 같은 사건이 같은 순서로 다시 일어납니다.</li>
         </ol>
       </div>
-      <div class="card" data-apply="rebuild"><h3>바이오 월드 생성</h3>
-      <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
-      <div class="row"><div class="field" style="flex:2"><span>재현 실행: 시뮬 시작 시각 고정 (비우면 현재 시각)</span><input type="text" id="g_fstart" placeholder="2026-09-22T09:00"></div><div class="field"><span>&nbsp;</span><label class="chk" style="margin:0"><input type="checkbox" id="g_fstep"> 1초 고정 간격 진행</label></div></div>
-      <div class="help">시드·시작 시각·고정 간격이 같으면 같은 입퇴원·이동·에피소드·장애가 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 남겨 재생하세요.</div>
-      <div class="row"><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
-      <div class="row"><div class="field"><span>시드</span><input type="number" id="g_seed"></div><div class="field"><span>GW 최대 BLE 연결</span><input type="number" id="gw_cap" min="1" max="64"></div></div>
-      <div class="row"><div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div><div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div></div>
-      <div class="row"><div class="field"><span>리듬별 루프 변형 수</span><input type="number" id="s_vpr" min="1" max="200"></div><div class="field"><span>페이스메이커 비율(심장환자)</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div></div>
-      <div class="field"><span>병원 건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
-      
-      <div class="row"><div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div></div>
-      <div class="sub" id="hSizeInfo"></div>
-      <label class="chk"><input type="checkbox" id="gw_cor"> 복도/엘리베이터/계단 게이트웨이 설치</label>
+      <div class="card wgen" data-apply="rebuild"><h3>바이오 월드 생성</h3>
+      <div class="help">병원 규모·환자 프로필·게이트웨이 구성과 파형을 정하는 값입니다. 바꾼 뒤 [재구성]해야 반영되며, 재구성하면 전송이 잠시 멈추고 입원 환자가 새로 배정됩니다. 시드·시작 시각·고정 간격이 같으면 같은 사건이 같은 순서로 다시 일어납니다(수동 조작은 시나리오 스크립트 [녹화]로).</div>
+      <div class="wgrid">
+        <div class="wg-h">병원 · 게이트웨이</div>
+        <div class="field span2"><span>건축 템플릿</span><select id="h_tpl"><option value="auto">자동 (환자 수에 맞춰 규모·템플릿 선택)</option></select></div>
+        <div class="field"><span>최대 건물 수</span><input type="number" id="h_maxb" min="1" max="8"></div>
+        <div class="field"><span title="게이트웨이 1대가 동시에 붙일 수 있는 BLE 패치 수">GW 최대 연결</span><input type="number" id="gw_cap" min="1" max="64"></div>
+        <div class="span4 wg-line"><label class="chk"><input type="checkbox" id="gw_cor"> 복도 · 엘리베이터 · 계단 게이트웨이 설치</label><span class="sub" id="hSizeInfo"></span></div>
+        <div class="wg-h">환자</div>
+        <div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div>
+        <div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div>
+        <div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div>
+        <div class="field"><span title="심장질환 환자 중 페이스메이커 비율">페이스메이커 비율</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div>
+        <div class="wg-h">파형 · 재현</div>
+        <div class="field"><span>시드</span><input type="number" id="g_seed"></div>
+        <div class="field"><span title="리듬마다 만들어 두는 1시간 루프 변형 수 (바꾸면 루프 은행 재생성)">리듬별 루프 변형</span><input type="number" id="s_vpr" min="1" max="200"></div>
+        <div class="field"><span title="비우면 현재 시각에서 시작">시작 시각 고정</span><input type="text" id="g_fstart" placeholder="비우면 현재"></div>
+        <label class="chk wg-cell" title="1초 고정 간격으로 진행 (재현 실행)"><input type="checkbox" id="g_fstep"> 1초 고정 간격</label>
+      </div>
       <div class="row tight"><button id="btnRebuild" class="small primary">재구성</button><button id="btnGen2" class="small">루프 은행 재생성</button><button id="btnReset" class="small">기본값 복원</button></div>
     </div>
     </div>
