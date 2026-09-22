@@ -2651,6 +2651,7 @@ try { fsLast = localStorage.getItem('rs:dir') || ''; } catch (e) { }
 async function fsPick(i) {
   const dlg = document.createElement('div'); dlg.className = 'fsdlg';
   dlg.innerHTML = `<div class="fsbox"><div class="fshead"><b>슬롯 ${i + 1} 파일 선택</b> <span class="sub">에뮬레이터 로컬 · ATF / CSV / TSV / TXT</span><button class="small fsx">닫기</button></div>` +
+    `<div class="fsgo"><input class="fsin mono" placeholder="경로 입력 후 Enter (예: /home/master/ecg)" spellcheck="false"><button class="small fsbtn">이동</button></div>` +
     `<div class="fspath mono"></div><div class="fslist"></div></div>`;
   document.body.appendChild(dlg);
   const onKey = (e) => { if (e.key === 'Escape') close(); };
@@ -2658,12 +2659,15 @@ async function fsPick(i) {
   document.addEventListener('keydown', onKey);
   dlg.addEventListener('click', e => { if (e.target === dlg) close(); });
   $('.fsx', dlg).onclick = close;
+  const goInput = () => { const v = $('.fsin', dlg).value.trim(); if (v) go(v); };
+  $('.fsin', dlg).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); goInput(); } });
+  $('.fsbtn', dlg).onclick = goInput;
   const go = async (path) => {
     let d;
     try { d = await api('/fs/browse?path=' + encodeURIComponent(path)); }
     catch (e) {
       const denied = /denied|허용|403/i.test(e.message);
-      const msg = denied ? `${path} — 에뮬레이터 서비스(biosim 계정)에 읽기 권한이 없는 폴더입니다` : `${path} — 열 수 없습니다 (${e.message})`;
+      const msg = denied ? `${path} — 에뮬레이터 서비스(biosim 계정)가 목록을 볼 수 없는 폴더입니다. 허용된 하위 폴더는 위 경로 칸에 직접 입력하세요 (예: /home/master/ecg)` : `${path} — 열 수 없습니다 (${e.message})`;
       if (!$('.fslist .fsrow', dlg)) { if (path) return go(''); }                  // 처음 열 때 실패하면 최상위로
       const w = $('.fswarn', dlg) || $('.fspath', dlg).insertAdjacentElement('afterend', Object.assign(document.createElement('div'), { className: 'fswarn' }));
       w.textContent = msg; return;
@@ -2671,6 +2675,7 @@ async function fsPick(i) {
     const w0 = $('.fswarn', dlg); if (w0) w0.remove();
     fsLast = d.path; try { localStorage.setItem('rs:dir', d.path); } catch (e) { }
     $('.fspath', dlg).textContent = d.path || '위치 선택';
+    $('.fsin', dlg).value = d.path || '';
     const kb = (b) => cbytes ? cbytes(b) : b;
     $('.fslist', dlg).innerHTML = (d.parent !== null ? `<div class="fsrow dir" data-p="${esc(d.parent)}"><span class="fs-ic">↑</span>상위 폴더</div>` : '') +
       d.dirs.map(x => `<div class="fsrow dir" data-p="${esc(x.path)}"><span class="fs-ic">▸</span>${esc(x.name)}</div>`).join('') +

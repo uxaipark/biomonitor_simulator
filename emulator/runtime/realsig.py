@@ -204,7 +204,9 @@ def _hr_series(x: np.ndarray, fs: int) -> np.ndarray:
 
 # ============================================================================ 파일 탐색 (에뮬레이터 로컬)
 def browse(path: str) -> dict:
-    roots = [r for r in BROWSE_ROOTS if os.path.isdir(r)]
+    import glob
+    home_ecg = [p for p in sorted(glob.glob("/home/*/ecg")) if os.access(p, os.R_OK | os.X_OK)]   # 홈은 막혀 있어도 ~/ecg 는 바로 보이게
+    roots = home_ecg + [r for r in BROWSE_ROOTS if os.path.isdir(r)]
     if not path:
         return {"path": "", "parent": None, "dirs": [{"name": r, "path": r} for r in roots], "files": [], "roots": roots}
     rp = os.path.realpath(path)
