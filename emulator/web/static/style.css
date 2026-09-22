@@ -816,3 +816,10 @@ section[data-tab="tx"] .grid{align-items:start}
 main[data-grp="mon"] #patCard{height:auto;overflow:visible}
 main[data-grp="mon"] #patInfo{flex:none}
 .ev.tx .k{flex-basis:70px}
+
+/* 현실감 조작부 */
+a.btnlink{display:inline-flex;align-items:center;min-height:32px;padding:5px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);color:var(--txt);text-decoration:none;font-size:12.5px}
+a.btnlink:hover{border-color:var(--acc)}
+.news{display:inline-block;min-width:26px;text-align:center;padding:1px 6px;border-radius:8px;font-variant-numeric:tabular-nums}
+.news0{background:var(--panel2)} .news1{background:color-mix(in srgb,var(--acc) 25%,transparent)}
+.news2{background:color-mix(in srgb,var(--warn) 35%,transparent)} .news3{background:color-mix(in srgb,var(--err) 40%,transparent);color:#fff}

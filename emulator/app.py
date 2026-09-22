@@ -138,7 +138,8 @@ def get_config():
 
 
 STRUCTURAL = {("general", "seed"), ("general", "bed_capacity"), ("general", "profile_count"), ("general", "heart_disease_ratio"), ("hospital", "template"), ("hospital", "layout_file"),
-              ("general", "korean_ratio"), ("signals", "pacemaker_ratio"), ("scenario", "gateway", "capacity"), ("scenario", "gateway", "corridor_gateways")}
+              ("general", "korean_ratio"), ("signals", "pacemaker_ratio"), ("scenario", "gateway", "capacity"), ("scenario", "gateway", "corridor_gateways"),
+              ("general", "fixed_start")}
 BANK_KEYS = {("signals", "ecg_fs"), ("signals", "ppg_fs"), ("signals", "resp_fs"), ("signals", "accel_fs"), ("signals", "variants_per_rhythm"), ("signals", "loop_seconds"), ("general", "seed")}
 
 
@@ -161,6 +162,10 @@ def _apply_config(patch: dict, source: str) -> dict:
         if planned > have or planned < 0.6 * have:                    # the scenario outgrew (or shrank far below) the generated hospital
             needs_rebuild = True
     needs_bank = bool(changed & BANK_KEYS)
+    rw = getattr(e.world, "real", None)
+    if rw and rw.recording is not None and not (changed & STRUCTURAL):
+        with e.world.lock:
+            rw.record("config", None, patch)                             # 녹화 중: 재생 때 같은 시각에 같은 설정 변경
     if not needs_rebuild:
         with e.world.lock:
             e.world.apply_config()
@@ -323,6 +328,82 @@ def script_start(body: dict):
 @app.delete("/api/v1/control/script")
 def script_cancel():
     return E().world.cancel_script()
+
+
+@app.get("/api/v1/realism")
+def realism_status():
+    """병원 일과 구간, 임상 악화·코드블루 환자, 망 장비 장애·전원 구간, MCOT 단말 상태, 대량 유입, 녹화 상태."""
+    w = E().world
+    with w.lock:
+        return w.real.status()
+
+
+@app.get("/api/v1/labels")
+def labels(kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(5000, le=200000), offset: int = 0,
+           format: str = "json", include_open: bool = True):
+    """정답 라벨: 구간 [t_start_ms, t_end_ms] (epoch ms, 프레임 ts_ms 와 같은 시계).  리듬 에피소드는 프레임 단위(번들 주기)로
+    정확하고, 나머지는 월드 주기(1 s) 해상도.  kind: rhythm_episode, lead_off, patch_off, no_link, trip, deterioration, code_blue,
+    gateway, net_device, power, mcot_device, surge (쉼표로 여러 개).  format=csv 는 내려받기용."""
+    w = E().world
+    rows = w.db.labels(kind, patient_id, since_ms, until_ms, limit, offset)
+    if include_open:
+        with w.lock:
+            op = w.real.labels_open_view()
+        ks = set(k for k in kind.split(",") if k)
+        op = [o for o in op if (not ks or o["kind"] in ks) and (patient_id is None or o["patient_id"] == patient_id) and (not until_ms or o["t_start_ms"] <= until_ms)]
+        rows = rows + op
+    if format == "csv":
+        import csv, io
+        buf = io.StringIO(); wr = csv.writer(buf)
+        wr.writerow(["kind", "value", "patient_id", "patch_id", "gw", "t_start_ms", "t_end_ms", "t_start", "t_end", "meta"])
+        iso = lambda ms: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ms / 1000)) + f".{int(ms % 1000):03d}" if ms else ""
+        for r in rows:
+            wr.writerow([r["kind"], r["value"], r["patient_id"], r["patch_id"], r["gw"], r["t_start_ms"], r["t_end_ms"], iso(r["t_start_ms"]), iso(r["t_end_ms"]),
+                         json.dumps(r["meta"], ensure_ascii=False) if r["meta"] else ""])
+        name = f"labels-{time.strftime('%Y%m%d-%H%M%S')}.csv"
+        return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    return _json({"labels": rows, "count": len(rows)})
+
+
+@app.get("/api/v1/labels/summary")
+def labels_summary():
+    w = E().world
+    with w.lock:
+        op = w.real.labels_open_view()
+    c = w.db.label_counts()
+    for o in op:
+        c.setdefault(o["kind"], {"n": 0, "t0": o["t_start_ms"], "t1": o["t_start_ms"]})
+        c[o["kind"]]["open"] = c[o["kind"]].get("open", 0) + 1
+    return {"kinds": c}
+
+
+@app.post("/api/v1/control/record")
+def control_record(body: dict):
+    """{"action": "start", "name": "..."} 로 녹화 시작, {"action": "stop", "save": true} 로 끝내고 scenarios/<name>.json 에 저장.
+    녹화 파일은 시나리오 스크립트와 같은 형식이라 [시나리오 스크립트]에서 그대로 재생된다."""
+    w = E().world
+    act = str(body.get("action", ""))
+    with w.lock:
+        if act == "start":
+            name = "".join(ch for ch in str(body.get("name") or time.strftime("rec-%Y%m%d-%H%M")) if ch.isalnum() or ch in "-_") or "recording"
+            return w.real.record_start(name)
+        if act == "stop":
+            r = w.real.record_stop()
+    if act != "stop":
+        raise HTTPException(400, "action: start | stop")
+    if not r:
+        return {"recording": False, "saved": None}
+    doc = {"name": r["name"], "description": f"녹화 {time.strftime('%Y-%m-%d %H:%M', time.localtime(r['started']))} · {len(r['items'])}단계",
+           "recorded": {"seed": cfg.get("general", "seed"), "fixed_start": cfg.get("general", "fixed_start"), "fixed_step": cfg.get("general", "fixed_step")},
+           "items": r["items"]}
+    saved = None
+    if body.get("save", True) and r["items"]:
+        SCENARIO_DIR.mkdir(parents=True, exist_ok=True)
+        path = SCENARIO_DIR / f"{r['name']}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(doc, f, ensure_ascii=False, indent=1)
+        saved = path.name
+    return {"recording": False, "saved": saved, "items": len(r["items"]), "script": doc}
 
 
 @app.get("/api/v1/capture")
@@ -813,11 +894,43 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: 
     return {"total": len(items), "patients": out}
 
 
+def _news2(num: dict, arrest: bool) -> dict:
+    """NEWS2 (RCP 2017) from the live numerics.  Blood pressure is not streamed, so it is left out (noted in parts)."""
+    def band(v, table):
+        for lo, hi, pts in table:
+            if (lo is None or v >= lo) and (hi is None or v <= hi):
+                return pts
+        return 0
+    parts = {}
+    rr, sp, t, hr = num.get("resp"), num.get("spo2"), num.get("temp"), num.get("hr")
+    if rr is not None:
+        parts["호흡수"] = 3 if arrest else band(rr, [(None, 8, 3), (9, 11, 1), (12, 20, 0), (21, 24, 2), (25, None, 3)])
+    if sp:
+        parts["SpO2"] = band(sp, [(None, 91, 3), (92, 93, 2), (94, 95, 1), (96, None, 0)])
+    if t:
+        parts["체온"] = band(t, [(None, 35.0, 3), (35.05, 36.0, 1), (36.05, 38.0, 0), (38.05, 39.0, 1), (39.05, None, 2)])
+    if hr:
+        parts["심박"] = band(hr, [(None, 40, 3), (41, 50, 1), (51, 90, 0), (91, 110, 1), (111, 130, 2), (131, None, 3)])
+    parts["의식"] = 3 if arrest else 0
+    score = sum(parts.values())
+    risk = "높음" if score >= 7 else "중간" if score >= 5 else "낮음-중간 (단일 항목 3점)" if 3 in parts.values() else "낮음"
+    return {"score": score, "risk": risk, "parts": parts, "note": "혈압은 전송 채널이 없어 제외, 산소 투여는 실내 공기로 가정"}
+
+
 @app.get("/api/v1/emr/patients/{pid}")
 def emr_patient(pid: int):
     v = E().world.patient_view(pid)
     if v is None:
         raise HTTPException(404, "patient not found")
+    r = v.get("runtime")
+    if r and r.get("row") is not None:
+        try:
+            p = E().preview(int(r["row"]), None, True)
+            num = (p or {}).get("num") or {}
+            if num:
+                v["news2"] = _news2(num, bool(r.get("clinical") and r["clinical"].get("kind") == "code_blue"))
+        except Exception:
+            pass
     return v
 
 

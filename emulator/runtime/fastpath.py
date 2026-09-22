@@ -453,7 +453,7 @@ class FrameBuilder:
         # keepalive for active gateways without patches
         for gw in self.gw_rows:
             gw = int(gw)
-            if gw in gw_with_patches or G["active"][gw] == 0 or G["status"][gw] == 2:
+            if gw in gw_with_patches or G["active"][gw] == 0 or G["status"][gw] >= 2:
                 continue
             if (tick + gw) % ticks_per_sec == 0:
                 out[gw] = self._wrap(gw, tick, ts_ms, 0, b"", meta_every, gwstat_every, G, keepalive=True)
@@ -464,8 +464,9 @@ class FrameBuilder:
         pre = b""
         if (tick + gw) % gwstat_every == 0:
             flags |= F_GWSTAT
+            stv = int(G["status"][gw])
             pre += gwstat_block(int(G["cpu"][gw]), int(G["mem"][gw]), int(G["net"][gw]), int(G["wan_rssi"][gw]), int(G["n_conn"][gw]),
-                                int(G["status"][gw]), int(G["uptime_s"][gw]), int(G["temp_c"][gw]))
+                                0 if stv == 3 else stv, int(G["uptime_s"][gw]), int(G["temp_c"][gw]))   # 3(업링크 단절)은 게이트웨이 자체는 정상: 프로토콜 값 0..2 유지
         if self.force_meta[gw] or (tick + gw * 7) % meta_every == 0:
             mb = self._meta(gw, tick)
             if mb is not None:
@@ -745,7 +746,7 @@ class Sender:
                 self.saf_bytes.pop(gw, None)
                 S["saf_bytes"][gw] = 0
                 continue
-            if G["status"][gw] == 2 or G["silent"][gw]:
+            if G["status"][gw] >= 2 or G["silent"][gw]:          # 2 장애 · 3 업링크 단절: 복구될 때까지 재전송 보류
                 continue
             key = self._key(gw)
             sock = self._connect(key, now)
@@ -771,6 +772,14 @@ class Sender:
         max_backlog = int(st.ctl[CTL["max_backlog"]])
         self._storm_check(now)
         self.connect_budget = self.max_connects_per_cycle
+        # 장애(2)·업링크 단절(3) 게이트웨이는 보낼 프레임이 없어도(환자 없는 GW) 연결을 끊는다: 라우터에서 보면 회선이 사라져야 현실과 같다
+        rows = self.__dict__.get("_rows_np")
+        if rows is None:
+            rows = self._rows_np = np.asarray(self.gw_rows, dtype=np.int64)
+        for gw in rows[G["status"][rows] >= 2] if rows.size else ():
+            key = self._key(int(gw))
+            if key >= 0 and self.socks.get(key) is not None:
+                self._drop_conn(key, [int(gw)])
         tap = st.ctl[CTL["tap"]] > 0
         if not tap and self.cap_file is not None:
             self._tap_close()
@@ -912,7 +921,7 @@ class Sender:
     def _enqueue(self, gw: int, data: bytes, now: float, max_backlog: int, resend: bool = False):
         S = self.st.stat.arr
         saf_on = self.st.ctl[CTL["saf_enabled"]] > 0
-        if self.st.gw["status"][gw] == 2:          # gateway down: connection dropped; frames go to the local buffer
+        if self.st.gw["status"][gw] >= 2:          # gateway down (2) or uplink lost (3): connection dropped; frames go to the local buffer
             key = self._key(gw)
             if key >= 0:
                 self._drop_conn(key, [gw])

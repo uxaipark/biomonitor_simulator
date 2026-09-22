@@ -103,6 +103,8 @@
           <label class="sw" data-trig="exam" data-off="exam_off"><input type="checkbox"><span class="track"></span><span class="txt">MRI 검사 이동 <small>이동 중 핸드오버·음영, 촬영 중 패치 분리, 종료 후 새 패치</small></span><span class="rem"></span></label>
           <button class="sw act" data-trig="replace_patch"><span class="ico">⟳</span><span class="txt">패치 교체 <small>새 시리얼·배터리 100%</small></span></button>
           <button class="sw act" data-trig="discharge"><span class="ico">⏏</span><span class="txt">퇴원 <small>패치 반납·전원 OFF</small></span></button>
+          <button class="sw act" data-trig="deteriorate" data-params='{"fast":true}'><span class="ico">↗</span><span class="txt">임상 악화 <small>질환에 맞는 악화, 빠르게 진행</small></span></button>
+          <button class="sw act" data-trig="code_blue"><span class="ico">✚</span><span class="txt">코드블루 <small>심실세동·소생술</small></span></button>
         </div>
         <div class="help">스위치는 지속시간이 끝나면 자동으로 풀립니다. 시뮬 속도가 1이 아니면 실제 시간은 그 배율만큼 달라집니다.</div>
       </div>
@@ -191,15 +193,31 @@
       <div class="field"><span>원외 MCOT 환자 수 (모바일 게이트웨이 1대당 1명)</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
       <div class="presets" id="outPresets"></div>
       <div class="help">장소 시나리오가 <b>원외 MCOT</b> 또는 <b>혼합</b>일 때만 반영됩니다.</div>
+      <label class="chk"><input type="checkbox" id="md_en"> 단말 동작 (앱 강제 종료 · 절전 모드 일괄 업로드 · 야간 OS 업데이트 · 비행기 모드 · 지방 커버리지)</label>
+      <div class="row tight"><button class="small" data-trig="phone" data-params='{"state":"killed","minutes":10}'>임의 MCOT 앱 종료 10분</button><button class="small" data-trig="phone" data-params='{"state":"saver","minutes":10}'>임의 MCOT 절전 모드 10분</button></div>
+      <div class="sub" id="phoneStatus"></div>
     </div>
     <div class="card" data-card="turnover"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입퇴원 회전 / 시뮬 속도</h3>
       <div class="row"><div class="field"><span>시간당 신규 입원 (명/h)</span><input type="number" id="g_adm" min="0" max="500"></div><div class="field"><span>시간당 퇴원 (명/h)</span><input type="number" id="g_dis" min="0" max="500"></div><div class="field"><span>시뮬 속도 ×</span><input type="number" id="g_speed" min="0.1" max="1000" step="0.1"></div></div>
       <div class="help">입원/퇴원 회전율: 시뮬레이션 1시간당 무작위(포아송)로 발생하는 신규 입원·퇴원 건수입니다. 총 인원은 위의 목표치 ±5명 안에서 유지되며, 퇴원한 환자의 패치는 전원 OFF·반납되고 신규 입원자는 대기 프로필에서 새 패치를 받습니다. 시뮬 속도를 올리면 배터리 소모·입퇴원·검사 일정이 같은 배율로 빨라집니다.</div>
+      <div class="row"><div class="field"><span>재원 수 변동</span><select id="g_census"><option value="fixed">고정 (목표 인원 유지)</option><option value="weekly">요일·시간대 곡선 (주말 감소 · 오전 퇴원 · 오후 입원)</option></select></div></div>
+      <div class="row tight"><button class="small" data-trig="surge" data-params='{"over_min":60}'>대량 환자 유입 (병상 5 % · 60분)</button><span class="sub" id="surgeStatus"></span></div>
     </div>
     <div class="card" data-card="episode"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>부정맥 에피소드</h3>
       <label class="chk"><input type="checkbox" id="s_ep"> 자연 발생 부정맥 에피소드 (기저 리듬 위 발작성 리듬 전환)</label>
       <label class="chk"><input type="checkbox" id="s_hop"> 루프 변형 순환 (8~25분마다 같은 리듬의 다른 변형으로 전환해 1시간 반복 방지)</label>
       <div class="row tight"><button class="small" data-trig="episode">임의 환자 부정맥 에피소드</button></div>
+    </div>
+    <div class="card" data-card="routine"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>병원 일과 <span class="right sub" id="routineNow"></span></h3>
+      <label class="chk"><input type="checkbox" id="rt_en"> 병원 일과 반영</label>
+      <div class="help">06·10·14·18·22시 활력징후 측정, 08~10시 병동별 회진(패치 확인·재부착), 식사 시간 착석, 14~18시 면회, 19~21시 저녁 샤워, 22시 소등. 사람이 움직이면 신호가 흔들리므로 아티팩트 시나리오를 꺼도 일과는 적용되고, 아티팩트 강도는 흔들림의 세기만 바꿉니다.</div>
+    </div>
+    <div class="card" data-card="clinical"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>임상 악화</h3>
+      <label class="chk"><input type="checkbox" id="cl_en"> 자연 발생 (패혈증 · 심부전 악화 · 호흡부전 · 저혈당 · 출혈성 쇼크)</label>
+      <div class="field"><span>발생 빈도 (1,000 환자·일당 건수)</span><input type="number" id="cl_rate" min="0" max="500" step="1"></div>
+      <div class="row tight"><button class="small" data-trig="deteriorate" data-params='{"fast":true}'>임의 환자 악화 (빠르게)</button><button class="small danger" data-trig="code_blue">임의 환자 코드블루</button></div>
+      <div class="sub" id="deterList"></div>
+      <div class="help">몇 시간에 걸쳐 심박·호흡수·체온이 오르고 SpO2가 떨어졌다가 회복합니다. 일부는 최고조에서 코드블루(심실세동·흉부압박 아티팩트·호흡/SpO2 소실)로 진행하고, 5~20분 소생술 뒤 자발순환 회복 또는 사망(퇴원 처리)으로 끝납니다. 환자 정보에 NEWS2 점수가 표시됩니다.</div>
     </div>
     <div class="card" data-card="devices"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>기기 세트 (환자별 채널)</h3>
       <div class="field"><span>배정 정책</span><select id="s_devpol"><option value="auto">증상 맞춤 (질환·병동·재원 형태별 자동)</option><option value="all">전체 장착 (ECG+체온+SpO2+CGM)</option><option value="minimal">ECG 패치만</option></select></div>
@@ -216,8 +234,11 @@
       <label class="chk"><input type="checkbox" id="n_wl"> 무선 노이즈 → 신호 저하/손실</label>
       <label class="chk"><input type="checkbox" id="n_wd"> 유선 네트워크 장애 (층 단위)</label>
       <label class="chk"><input type="checkbox" id="n_lat"> 네트워크 지연</label>
-      <label class="chk"><input type="checkbox" id="n_pw"> 순간 정전 (게이트웨이 리부팅)</label>
-      <button class="small" data-trig="network_event">지금 네트워크 이벤트 주입</button>
+      <label class="chk"><input type="checkbox" id="n_pw"> 건물 정전 (발전기 전환 · UPS 유지 · 일반 전원 차단)</label>
+      <label class="chk"><input type="checkbox" id="n_topo"> 네트워크 장비 장애 (건물 코어 · 층 스위치 · 무선 AP)</label>
+      <div class="row tight"><button class="small" data-trig="network_event">네트워크 이벤트 1회</button><button class="small" data-trig="switch_fault">층 스위치 장애</button><button class="small" data-trig="ap_fault">무선 AP 장애</button><button class="small" data-trig="power_outage">건물 정전</button></div>
+      <div class="sub" id="netDevStatus"></div>
+      <div class="help">게이트웨이는 건물 코어 → 층 스위치 → (무선이면) AP 아래에 붙어 있습니다. 장비가 죽으면 그 아래 게이트웨이의 업링크가 한꺼번에 끊기고, 게이트웨이는 살아 있어 패치가 그대로 붙은 채 프레임을 쌓았다가 복구 때 올립니다. 정전 때는 UPS 계통(응급실·간호사실)은 유지, 비상 계통은 발전기 전환(8~15초) 뒤 재부팅, 일반 계통은 한전 복전까지 꺼지고, UPS 없는 층 스위치는 재부팅하는 동안 그 층 유선 게이트웨이를 끊습니다.</div>
     </div>
     <div class="card" data-card="artifact"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>아티팩트 / 환자 활동</h3>
       <label class="chk"><input type="checkbox" id="a_en"> 시나리오 사용</label>
@@ -264,6 +285,7 @@
     </div>
     <div class="card" data-card="script"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>시나리오 스크립트</h3>
       <div class="row"><div class="field" style="flex:2"><span>스크립트 파일 (scenarios/*.json)</span><select id="scriptFile"></select></div><div class="field"><span>&nbsp;</span><div class="row tight"><button class="small" id="scriptStart">시작</button><button class="small" id="scriptStop">중지</button></div></div></div>
+      <div class="row tight"><input type="text" id="recName" placeholder="녹화 이름 (예: 정전-훈련)" style="max-width:220px"><button class="small" id="recStart">● 녹화 시작</button><button class="small" id="recStop">■ 녹화 종료·저장</button><span class="sub" id="recStatus"></span></div>
       <div class="sub" id="scriptStatus">스크립트 없음</div>
       <div class="sub mono" id="scriptLog" style="font-size:11px;max-height:120px;overflow:auto"></div>
     </div>
@@ -323,6 +345,11 @@
     <div class="tbl" style="max-height:40vh"><table id="dbTable"><thead></thead><tbody></tbody></table></div></div>
   </div>
   <div class="grid">
+    <div class="card" style="grid-column:1/-1"><h3><button class="fold" data-fold="lblBody" aria-expanded="true">▾</button>정답 라벨 <span class="right sub" id="lblSummaryHead"></span></h3><div id="lblBody">
+      <div class="help">분석 알고리즘 채점용 정답입니다. 구간 [시작, 끝]은 프레임 ts_ms 와 같은 시계(epoch ms)이고, 리듬 에피소드는 프레임 단위, 나머지는 1초 해상도입니다.</div>
+      <div class="tbl" style="max-height:30vh"><table id="lblTable"><thead><tr><th>종류</th><th>닫힌 구간</th><th>진행 중</th><th>처음</th><th>마지막</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="row tight" style="margin-top:8px"><a class="btnlink" href="/api/v1/labels?format=csv" download>전체 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=rhythm_episode" download>리듬 에피소드 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=lead_off,patch_off,no_link,trip" download>신호 품질 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=deterioration,code_blue" download>임상 CSV</a><a class="btnlink" href="/api/v1/labels?format=csv&kind=gateway,net_device,power,mcot_device,surge" download>장애·운영 CSV</a></div>
+    </div></div>
     <div class="card"><h3><button class="fold" data-fold="bankBody" aria-expanded="true">▾</button>루프 파일 은행 (1시간 파형 데이터)</h3><div id="bankBody">
       <div id="bankInfo2" class="sub"></div>
       <div class="progress" style="margin:8px 0"><div id="bankBar2"></div></div>
@@ -331,6 +358,8 @@
     </div></div>
     <div class="card" data-apply="rebuild"><h3>구조 설정</h3>
       <div class="help">병원 규모·환자 프로필·게이트웨이 구성을 결정하는 값입니다. 바꾼 뒤 [재구성]을 눌러야 반영되며, 재구성 시 전송이 정지되고 입원 환자가 새로 배정됩니다.</div>
+      <div class="row"><div class="field" style="flex:2"><span>재현 실행: 시뮬 시작 시각 고정 (비우면 현재 시각)</span><input type="text" id="g_fstart" placeholder="2026-09-22T09:00"></div><div class="field"><span>&nbsp;</span><label class="chk" style="margin:0"><input type="checkbox" id="g_fstep"> 1초 고정 간격 진행</label></div></div>
+      <div class="help">시드·시작 시각·고정 간격이 같으면 같은 입퇴원·이동·에피소드·장애가 같은 순서로 다시 일어납니다. 수동 조작은 시나리오 스크립트의 [녹화]로 남겨 재생하세요.</div>
       <div class="row"><div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div></div>
       <div class="row"><div class="field"><span>시드</span><input type="number" id="g_seed"></div><div class="field"><span>GW 최대 BLE 연결</span><input type="number" id="gw_cap" min="1" max="64"></div></div>
       <div class="row"><div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div><div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div></div>

@@ -109,7 +109,7 @@ const battIcon = (pct, charging = false) => {
 };
 let pmOpen = false;   // keep the pacemaker details toggle state across the 5 s card refresh
 document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('pmd')) pmOpen = e.target.open; }, true);
-let curPaced = '', CFG = null, META = null, STATS = null, curRow = -1, curPid = null, ws = null, floors = [], lastEvSeq = 0, evAll = [];
+let curRt = null, curPaced = '', CFG = null, META = null, STATS = null, curRow = -1, curPid = null, ws = null, floors = [], lastEvSeq = 0, evAll = [];
 
 // ---------------------------------------------------------------- tabs
 const tabs = $$('section.tab');
@@ -165,7 +165,8 @@ function showTab(id) {
   if (shown.has('hosp')) { loadFloor(); drawElevation(); }
   if (shown.has('proto')) loadProto();
   if (shown.has('pat')) loadPatients();
-  if (shown.has('data')) { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); }
+  if (shown.has('data')) { loadBankFiles(); loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
+  if (shown.has('scn') || shown.has('dash')) loadRealism();
   if (shown.has('scn') || shown.has('tx')) loadScripts();
   if (shown.has('scn')) loadDevices();
   if (shown.has('log')) showLogView(logView); else { $('[data-tab="chat"]').classList.remove('on'); updateLinkPolling(); }
@@ -309,6 +310,9 @@ const B = {  // element id -> config path
   x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_re: ['scenario', 'artifacts', 'patch_reattach'], a_tr: ['scenario', 'artifacts', 'transfer'], a_rp: ['scenario', 'artifacts', 'patch_replace'], a_hm: ['scenario', 'artifacts', 'home_interference'],
   p_days: ['scenario', 'patch', 'battery_days'], p_rep: ['scenario', 'patch', 'replace_below_pct'], p_dr: ['scenario', 'patch', 'battery_drain_enabled'], p_lo: ['scenario', 'patch', 'lead_off_enabled'],
   h_tpl: ['hospital', 'template'], h_maxb: ['hospital', 'max_buildings'], gw_f: ['scenario', 'gateway', 'fault_enabled'], gw_out: ['scenario', 'gateway', 'outage'], gw_deg: ['scenario', 'gateway', 'degrade'], gw_rep: ['scenario', 'gateway', 'replace'], gw_int: ['scenario', 'gateway', 'fault_intensity'], gw_cap: ['scenario', 'gateway', 'capacity'], gw_cor: ['scenario', 'gateway', 'corridor_gateways'],
+  n_topo: ['scenario', 'network', 'topology'], rt_en: ['scenario', 'routine', 'enabled'], cl_en: ['scenario', 'clinical', 'enabled'],
+  cl_rate: ['scenario', 'clinical', 'per_1000_patient_days'], md_en: ['scenario', 'mcot_device', 'enabled'], g_census: ['general', 'census_mode'],
+  g_fstart: ['general', 'fixed_start'], g_fstep: ['general', 'fixed_step'],
   t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
   t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
   sf_en: ['transport', 'store_forward', 'enabled'], sf_max: ['transport', 'store_forward', 'max_bytes_per_gw'], sf_burst: ['transport', 'store_forward', 'burst_frames_per_cycle'],
@@ -676,7 +680,8 @@ function connectWs() {
     if (d.resp_wave) feedWave(waves.wResp, d.resp_wave, 0.001);
     if (d.accel) feedWave(waves.wAcc, d.accel, 0.001);
     const n = d.num || {};
-    $('#nHr').textContent = n.hr || '--'; $('#vHr').textContent = n.hr ? n.hr + ' bpm' : 'LEAD OFF';
+    // 심박 0 의 뜻을 구분한다: 전극 분리(LEAD OFF) / 심정지(코드블루·심실세동) / 그 외 측정 불가
+    $('#nHr').textContent = n.hr || '--'; $('#vHr').textContent = n.hr ? n.hr + ' bpm' : (curRt && curRt.lead_off) ? 'LEAD OFF' : (curRt && curRt.clinical && curRt.clinical.kind === 'code_blue') ? '심정지 (VF)' : '--';
     $('#ecgLbl').textContent = 'ECG (mV)' + curPaced;
     $('#nSpo2').textContent = n.spo2 || '--'; $('#vSpo2').textContent = n.spo2 ? n.spo2 + ' %' : '--';
     $('#nResp').textContent = n.resp || '--'; $('#vResp').textContent = n.resp ? n.resp + ' /min' : '--';
@@ -719,13 +724,16 @@ async function selectRow(row, fromDetail = false) {
 async function loadPatCard() {
   if (!curPid) return;
   try {
-    const p = await api('/emr/patients/' + curPid); const r = p.runtime || {}; const a = p.admission || {};
+    const p = await api('/emr/patients/' + curPid); const r = p.runtime || {}; const a = p.admission || {}; curRt = r;
     applySwitches(r);
     const chs = new Set(r.channels || []); if (r.channels) { $('#boxPpg').style.display = chs.has('ppg') ? '' : 'none'; $('#boxResp').style.display = chs.has('resp_wave') ? '' : 'none'; $('#boxAcc').style.display = chs.has('accel') ? '' : 'none'; }
     $('#patInfo').innerHTML = `<div class="patbody"><div class="patient"><img src="/api/v1/emr/patients/${p.id}/avatar.svg" alt=""><div class="info"><b>${p.name}</b> <span class="sub">${p.sex === 'M' ? '남' : '여'} ${p.age}세 · ${p.nationality_label} · ${p.weight_kg}kg</span>
       <div>${p.disease} (${p.icd10})</div><div>환자번호 #${r.patient_no ?? '-'} · ${p.mrn} · ${a.ward_name || ''} ${a.bed || ''}</div><div class="sub">거주지 ${p.address ? p.address.label : '-'}</div></div></div>
       <table class="info" style="margin-top:8px"><tr><td>현재 리듬</td><td>${r.rhythm_now || '-'} ${r.episode ? '<span class="tag warn">에피소드</span>' : ''}</td></tr>
       <tr><td>기저 리듬</td><td>${META && META.rhythms[p.rhythm] ? META.rhythms[p.rhythm].label : p.rhythm}</td></tr>
+      ${r.clinical ? `<tr><td>임상 상태</td><td><span class="tag ${r.clinical.kind === 'code_blue' ? 'err' : 'warn'}">${esc(r.clinical.label)}</span> ${esc(r.clinical.stage)} · ${r.clinical.elapsed_min}분 경과</td></tr>` : ''}
+      ${p.news2 ? `<tr><td>NEWS2</td><td><b class="news news${p.news2.score >= 7 ? 3 : p.news2.score >= 5 ? 2 : p.news2.score > 0 ? 1 : 0}">${p.news2.score}</b> ${esc(p.news2.risk)} <span class="sub">${Object.entries(p.news2.parts).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(' · ') || '모든 항목 0'}</span></td></tr>` : ''}
+      ${r.phone ? `<tr><td>MCOT 단말</td><td>${{ ok: '정상', killed: '앱 강제 종료', saver: '절전 모드 (일괄 업로드)', update: 'OS 업데이트', airplane: '비행기 모드' }[r.phone] || r.phone}</td></tr>` : ''}
       <tr><td>페이스메이커</td><td>${pmSummary(p.pacemaker_info)}</td></tr>
       <tr><td>기기 세트</td><td>${devChips(p, r)}</td></tr>
       <tr><td>전송 채널</td><td class="mono" style="font-size:11px">${(r.channels || []).join(', ') || '-'}</td></tr>
@@ -857,8 +865,8 @@ async function drawElevation() {
     const [wr, gr] = await Promise.all([api('/emr/wards'), api('/emr/gateways')]);
     elevStats = {};
     wr.wards.forEach(w => { const k = `${w.building_idx}:${w.floor}`; const e = elevStats[k] = elevStats[k] || { beds: 0, occ: 0, down: 0 }; e.beds += w.n_beds; e.occ += w.occupied; });
-    gr.gateways.forEach(g => { if (g.status === 2 && g.type !== 'mobile') { const k = `${g.building_idx !== undefined ? g.building_idx : ''}:${g.floor}`; } });
-    gr.gateways.forEach(g => { if (g.status === 2 && g.type !== 'mobile') { const b = floors.find(f => f.building === g.building && f.floor === g.floor); if (b) { const k = `${b.building_idx}:${b.floor}`; (elevStats[k] = elevStats[k] || { beds: 0, occ: 0, down: 0 }).down++; } } });
+    gr.gateways.forEach(g => { if (g.status >= 2 && g.type !== 'mobile') { const k = `${g.building_idx !== undefined ? g.building_idx : ''}:${g.floor}`; } });
+    gr.gateways.forEach(g => { if (g.status >= 2 && g.type !== 'mobile') { const b = floors.find(f => f.building === g.building && f.floor === g.floor); if (b) { const k = `${b.building_idx}:${b.floor}`; (elevStats[k] = elevStats[k] || { beds: 0, occ: 0, down: 0 }).down++; } } });
   } catch (e) { }
   const sel = Number($('#selFloor').value);
   const byB = {}; floors.forEach((f, i) => { (byB[f.building_idx] = byB[f.building_idx] || { name: f.building, floors: [] }).floors.push({ ...f, i }); });
@@ -1179,7 +1187,7 @@ async function loadFloor() {
       const col = gcol[g.status] || '#888';
       covCtx.gws[g.idx] = { x: gx, y: gy };
       gwFinal.push({ x: gx, y: gy });                                   // final marker position: patient markers keep clear of it
-      gwOut += `<g class="gw ${g.status === 2 ? 'down' : ''}" data-gwidx="${g.idx}" style="cursor:pointer"><circle cx="${gx}" cy="${gy}" r="0.3" fill="${load > 0 ? '#e9eef3' : col}" stroke="${col}" stroke-width="0.06"><title>${g.id} #${g.gw_no} · ${g.type} · 연결 ${g.n_conn}/${g.capacity} · CPU ${g.cpu}%${g.connected ? ' · TCP' : ''}</title></circle>
+      gwOut += `<g class="gw ${g.status >= 2 ? 'down' : ''}" data-gwidx="${g.idx}" style="cursor:pointer"><circle cx="${gx}" cy="${gy}" r="0.3" fill="${load > 0 ? '#e9eef3' : col}" stroke="${col}" stroke-width="0.06"><title>${g.id} #${g.gw_no} · ${g.type} · 연결 ${g.n_conn}/${g.capacity} · CPU ${g.cpu}%${g.connected ? ' · TCP' : ''}</title></circle>
         ${[0.62, 0.92].map(rr => { const k = rr * 0.5, kx = rr * 0.866; return `<path d="M${(gx - kx).toFixed(3)},${(gy + k).toFixed(3)} A${rr},${rr} 0 0 1 ${(gx - kx).toFixed(3)},${(gy - k).toFixed(3)}" fill="none" stroke="${th.acc2}" stroke-width="0.11" stroke-linecap="round" opacity="0.95"/>`; }).join('')}
         ${load > 0 ? (() => { const R = 0.3, a = Math.min(0.9999, load) * 2 * Math.PI, ex = gx + R * Math.sin(a), ey = gy - R * Math.cos(a); return `<path d="M${gx},${gy} L${gx},${(gy - R).toFixed(3)} A${R},${R} 0 ${a > Math.PI ? 1 : 0} 1 ${ex.toFixed(3)},${ey.toFixed(3)} Z" fill="${col}"/>`; })() : ''}
         <text class="gwlbl" x="${gx}" y="${gy + 0.95}">#${g.gw_no}</text></g>`;
@@ -1484,8 +1492,8 @@ async function loadGateways() {
   const cmp = (a, b) => { const x = kf(a), y = kf(b); const r_ = typeof x === 'number' && typeof y === 'number' ? x - y : String(x ?? '').localeCompare(String(y ?? ''), 'ko'); return (r_ || a.idx - b.idx) * gwSort.dir; };
   $$('#gwTable th[data-key]').forEach(th => { th.classList.toggle('asc', th.dataset.key === gwSort.key && gwSort.dir === 1); th.classList.toggle('desc', th.dataset.key === gwSort.key && gwSort.dir === -1); });
   gwSummary(r.gateways);
-  const list = r.gateways.filter(g => f === 'all' || (f === 'down' && g.status === 2) || (f === 'degraded' && g.status === 1) || (f === 'busy' && g.n_conn > 0) || (f === 'mobile' && g.type === 'mobile')).sort(cmp).slice(0, 400);
-  $('#gwTable tbody').innerHTML = list.map(g => `<tr data-gwrow="${g.idx}"><td><span class="gwlink" data-gwopen="${g.idx}" title="중앙 모니터 열기">${g.id} <span class="sub">#${g.gw_no}</span></span></td><td>${g.type}</td><td>${g.building} ${g.floor}F ${g.room}</td><td><span class="tag ${['ok', 'warn', 'err'][g.status]}">${['정상', '저하', '장애'][g.status]}</span> ${g.reason || ''}</td><td>${g.n_conn}/${g.capacity}</td><td>${g.cpu}%</td><td>${g.mem}%</td><td>${g.net}%</td><td>${g.wan_rssi}</td><td>${(g.loss * 100).toFixed(0)}%</td><td>${g.latency_ms.toFixed(0)}ms</td><td>${fmt(g.pkts)}</td><td>${g.connected ? '<span class="tag ok">on</span>' : '-'}</td><td><button class="small" data-gw="${g.idx}">장애</button> <button class="small" data-gwrep="${g.idx}">교체</button></td></tr>`).join('');
+  const list = r.gateways.filter(g => f === 'all' || (f === 'down' && g.status >= 2) || (f === 'degraded' && g.status === 1) || (f === 'busy' && g.n_conn > 0) || (f === 'mobile' && g.type === 'mobile')).sort(cmp).slice(0, 400);
+  $('#gwTable tbody').innerHTML = list.map(g => `<tr data-gwrow="${g.idx}"><td><span class="gwlink" data-gwopen="${g.idx}" title="중앙 모니터 열기">${g.id} <span class="sub">#${g.gw_no}</span></span></td><td>${g.type}</td><td>${g.building} ${g.floor}F ${g.room}</td><td><span class="tag ${['ok', 'warn', 'err', 'warn'][g.status]}">${['정상', '저하', '장애', '업링크 단절'][g.status]}</span> ${g.reason || ''}</td><td>${g.n_conn}/${g.capacity}</td><td>${g.cpu}%</td><td>${g.mem}%</td><td>${g.net}%</td><td>${g.wan_rssi}</td><td>${(g.loss * 100).toFixed(0)}%</td><td>${g.latency_ms.toFixed(0)}ms</td><td>${fmt(g.pkts)}</td><td>${g.connected ? '<span class="tag ok">on</span>' : '-'}</td><td><button class="small" data-gw="${g.idx}">장애</button> <button class="small" data-gwrep="${g.idx}">교체</button></td></tr>`).join('');
 }
 $('#gwTable').addEventListener('click', async e => { const o = e.target.closest('[data-gwopen]'); if (o) { openGatewayMonitor(Number(o.dataset.gwopen)); return; } const b = e.target.closest('button[data-gw]'), c = e.target.closest('button[data-gwrep]'); if (b) { const r = await post('/control/trigger', { what: 'gateway_fault', target: Number(b.dataset.gw) }); toast(r.result); } else if (c) { const r = await post('/control/trigger', { what: 'gateway_replace', target: Number(c.dataset.gwrep) }); toast(r.result); } });
 // ---- map search (patients by name, gateways by number/id) with highlight on the plan
@@ -2426,6 +2434,30 @@ async function loadConfig() { META = await api('/config'); CFG = META.config; lo
   grid.addEventListener('pointerup', end); grid.addEventListener('pointercancel', end);
 })();
 
+// ---------------- 현실감 상태 (일과·임상 악화·망 장비·단말·유입·녹화)
+async function loadRealism() {
+  let d; try { d = await api('/realism'); } catch (e) { return; }
+  const rn = $('#routineNow'); if (rn) rn.textContent = `지금: ${d.routine.label}`;
+  const nd = $('#netDevStatus'); if (nd) { const n = d.network; nd.innerHTML = `장비 코어 ${n.devices.core} · 층 스위치 ${n.devices.switch} (UPS 없음 ${n.switch_no_ups}) · 무선 AP ${n.devices.ap}` +
+    (n.down.length ? ` · <span class="tag err">장애 ${n.down.length}</span> ${n.down.map(x => esc(x.id) + (x.state === 'boot' ? ' 재부팅' : '')).join(', ')}` : '') + (n.power_windows ? ` · <span class="tag warn">전원 차단·재부팅 GW ${n.power_windows}</span>` : ''); }
+  const ph = $('#phoneStatus'); if (ph) { const P = d.phones || {}, bad = Object.entries(P).filter(([k]) => k !== 'ok'); ph.textContent = Object.keys(P).length ? `단말 정상 ${P.ok || 0}` + bad.map(([k, v]) => ` · ${{ killed: '앱 종료', saver: '절전', update: 'OS 업데이트', airplane: '비행기 모드' }[k] || k} ${v}`).join('') : ''; }
+  const dl = $('#deterList'); if (dl) dl.innerHTML = d.deteriorating.length ? d.deteriorating.map(x => `<span class="tag ${x.stage === '코드블루' ? 'err' : 'warn'}">${esc(x.kind)} · ${esc(x.stage)}</span> ${esc(x.name)} (${x.elapsed_min}분)`).join('<br>') : '악화 중인 환자 없음';
+  const ss = $('#surgeStatus'); if (ss) ss.textContent = d.surge ? `유입 진행: ${d.surge.count}명` : '';
+  const rs = $('#recStatus'); if (rs) rs.innerHTML = d.recording ? `<span class="tag err">● 녹화 중</span> ${esc(d.recording.name)} · ${d.recording.items}단계` : '';
+}
+setInterval(() => { if (curGroup === 'scn' || curGroup === 'dash') loadRealism(); }, 5000);
+$('#recStart').onclick = async () => { const r = await post('/control/record', { action: 'start', name: $('#recName').value.trim() }); toast(`녹화 시작: ${r.name}`); loadRealism(); };
+$('#recStop').onclick = async () => { const r = await post('/control/record', { action: 'stop', save: true }); toast(r.saved ? `저장: scenarios/${r.saved} (${r.items}단계)` : '녹화된 조작이 없습니다'); loadRealism(); loadScripts(); };
+async function loadLabelSummary() {
+  let d; try { d = await api('/labels/summary'); } catch (e) { return; }
+  const K = { rhythm_episode: '리듬 에피소드', lead_off: '리드 오프', patch_off: '패치 분리', no_link: '게이트웨이 미연결', trip: '병실 밖 이동', deterioration: '임상 악화',
+              code_blue: '코드블루', gateway: '게이트웨이 장애', net_device: '망 장비 장애', power: '정전', mcot_device: 'MCOT 단말', surge: '대량 유입' };
+  const rows = Object.entries(d.kinds).sort((a, b) => b[1].n - a[1].n);
+  const t = (ms) => ms ? new Date(ms).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-';
+  $('#lblTable tbody').innerHTML = rows.map(([k, v]) => `<tr><td>${K[k] || k} <span class="sub mono">${k}</span></td><td>${cnum(v.n)}</td><td>${cnum(v.open || 0)}</td><td>${t(v.t0)}</td><td>${t(v.t1)}</td>` +
+    `<td><a class="btnlink" href="/api/v1/labels?format=csv&kind=${k}" download>CSV</a></td></tr>`).join('') || '<tr><td colspan="6" class="sub">아직 라벨이 없습니다</td></tr>';
+  $('#lblSummaryHead').textContent = `${cnum(rows.reduce((a, [, v]) => a + v.n + (v.open || 0), 0))}개 구간`;
+}
 // ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다
 $$('.help').forEach(hp => {
   if ((hp.textContent || '').trim().length < 90) return;
@@ -2434,7 +2466,7 @@ $$('.help').forEach(hp => {
 });
 // ---------------- 반영 방식 배지: 카드 단위로 "즉시 / 재구성 필요 / 파형 재생성 필요"
 (() => {
-  const BY_CARD = { scale: 'now', beds: 'rebuild', site: 'now', mcot: 'now', turnover: 'now', episode: 'now', devices: 'now', network: 'now',
+  const BY_CARD = { scale: 'now', beds: 'rebuild', site: 'now', mcot: 'now', turnover: 'now', episode: 'now', devices: 'now', network: 'now', routine: 'now', clinical: 'now',
                     artifact: 'now', transit: 'now', patch: 'now', gateway: 'now', drill: 'now' };
   Object.entries(BY_CARD).forEach(([k, v]) => { const el = document.querySelector(`.card[data-card="${k}"]`); if (el) el.dataset.apply = v; });
   const bank = document.querySelector('[data-fold="bankBody"]'); if (bank) bank.closest('.card').dataset.apply = 'bank';

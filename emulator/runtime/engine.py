@@ -265,7 +265,7 @@ class Engine:
                               "build_us": float(W["build_us"][i]), "send_us": float(W["send_us"][i]), "n_patches": int(W["n_patches"][i]),
                               "n_gw": int(W["n_gw"][i])} for i in range(int(st.ctl[CTL["n_workers"]]))] if self.running else [],
                  "active_patches": int(((P["active"] > 0) & (P["gw"] >= 0)).sum()), "unlinked_patches": int(((P["active"] > 0) & (P["gw"] < 0)).sum()),
-                 "gw_down": int((st.gw["status"] == 2).sum()), "gw_degraded": int((st.gw["status"] == 1).sum())}
+                 "gw_down": int((st.gw["status"] >= 2).sum()), "gw_degraded": int((st.gw["status"] == 1).sum()), "gw_uplink_lost": int((st.gw["status"] == 3).sum())}
         self._stats_hist.append(entry)
         if len(self._stats_hist) > 300:
             self._stats_hist = self._stats_hist[-300:]

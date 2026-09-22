@@ -31,6 +31,7 @@ from ..signals.rhythms import RHYTHMS
 from ..signals.accel import ACTIVITIES
 from ..signals.slow import TEMP_PROFILES, GLUCOSE_PROFILES
 from ..signals import trend as trend_model
+from .realism import Realism
 from .state import SharedState, CTL, FUZZ_KINDS, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED, FLAG_NEW_PATCH, FLAG_CHARGING
 
 ACT_ID = {a: i for i, a in enumerate(ACTIVITIES)}
@@ -248,7 +249,17 @@ class World:
                                       "base_lat": 0.0, "base_jit": 0.0})                   # MCOT uplink baseline (0 for LAN gateways)
             self.rhythm_variants = dict(self.bank.rhythm_variants) if self.bank.loaded else {}
             self.apply_config()
-            self.sim_time = time.time()
+            fs = str(self.cfg.get("general").get("fixed_start") or "").strip()      # (g 는 위에서 게이트웨이 루프 변수로 재사용됨)
+            try:
+                self.sim_time = dt.datetime.fromisoformat(fs).timestamp() if fs else time.time()     # 재현 실행: 같은 시각에서 시작
+            except ValueError:
+                self.sim_time = time.time()
+            self.real = Realism(self)
+            # 이전 월드의 시각·주기 상태를 끊는다: 남겨 두면 추세 갱신·검사 배정 주기가 이전 실행 시각에 묶이고
+            # (시작 시각을 과거로 고정하면 몇 시간 동안 갱신이 멈춘다) 재현 실행이 갈라진다. net_events 는 옛 병원의 GW 번호를 가리킨다.
+            self._mod_last = 0.0
+            self._exam_quota_t = 0.0
+            self.net_events = []
             self.log.add("system", f"월드 구성 완료: 병상 {self.hospital.bed_capacity}, 게이트웨이 {n_gw}, 프로필 {len(self.profiles)} ({time.time() - t0:.1f}s)")
             self.meta_dirty = True
             self._sync_population(initial=True)
@@ -567,6 +578,9 @@ class World:
         n_in = sum(1 for r in self.admitted.values() if not r["outpatient"])
         n_out = len(self.admitted) - n_in
         budget = 100000 if initial else 300
+        real = getattr(self, "real", None)
+        if not initial and real is not None and (g.get("census_mode", "fixed") == "weekly" or real.surge is not None):
+            target_in = n_in                                               # 재원 곡선·대량 유입: 입원 인원은 _step_adt 가 서서히 맞춘다
         while n_in < target_in and budget > 0:
             if self.admit() is None:
                 break
@@ -986,6 +1000,10 @@ class World:
                         return
         if now < rec["activity_until"]:
             return
+        if rec.get("code_blue"):
+            return
+        if self.real.routine_choose(rec, prof, intensity):              # 병원 일과(활력징후·회진·식사·면회·샤워)가 먼저
+            return
         # choose next activity
         hour = dt.datetime.fromtimestamp(now).hour
         night = hour >= 22 or hour < 6
@@ -1072,6 +1090,9 @@ class World:
             lat, jit = MCOT_UPLINK.get(self.hospital.gateways[gw].get("radio", "LTE"), MCOT_UPLINK["LTE"])
             gs["base_lat"], gs["base_jit"] = float(self.rng.uniform(*lat)), float(self.rng.uniform(*jit))
         extra_l, extra_j = (self.rng.uniform(*MCOT_OUTSIDE_EXTRA[0]), self.rng.uniform(*MCOT_OUTSIDE_EXTRA[1])) if outside else (0.0, 0.0)
+        pid = next((p for p, r in self.admitted.items() if r.get("mobile_gw") == gw), None)
+        if pid is not None and getattr(self, "real", None) and self.real.region_factor(self.by_id[pid]) > 1:
+            extra_l += 25.0                                                # 지방: 기지국 밀도가 낮아 기본 지연이 길다
         G["latency_ms"][gw] = gs["base_lat"] + extra_l
         G["jitter_ms"][gw] = gs["base_jit"] + extra_j
 
@@ -1099,6 +1120,7 @@ class World:
         elif gs["mobile_batt"] > 5 and G["status"][gw] == 2 and gs["reason"].startswith("모바일"):
             G["status"][gw] = 0
             gs["reason"] = ""
+        self.real.phone_step(rec, gw, getattr(self, "_dt_last", 1.0))
         if now < rec["activity_until"]:
             return
         # 하루 생활 모델: 움직임은 아티팩트 시나리오와 무관한 이 환자군의 기본 성질이라 강도 설정과 관계없이 적용한다.
@@ -1109,7 +1131,7 @@ class World:
         art = float(self.rng.uniform(*art_rng)) * (0.45 + 0.55 * intensity)      # 움직이는 사람의 ECG는 시나리오와 무관하게 흔들린다
         dur = float(self.rng.uniform(*dur_rng))
         outside = self.rng.random() < out_p
-        if outside and self.rng.random() < 0.08 + 0.25 * intensity:
+        if outside and self.rng.random() < (0.08 + 0.25 * intensity) * self.real.region_factor(self.by_id[rec["id"]]):   # 지방은 음영이 잦다
             rec["home_state"] = "shadow"                                          # 지하 · 엘리베이터 · 지하철
             dur = min(dur, float(self.rng.uniform(60, 400)))
         elif outside:
@@ -1122,7 +1144,7 @@ class World:
                 gs["degraded_until"] = now + self.rng.uniform(30, 180)
                 G["status"][gw] = 1
         self._set_activity(rec, act, dur, art, posture)
-        if G["status"][gw] == 0:                                    # healthy uplink: baseline (+ on-the-move extra)
+        if G["status"][gw] == 0 and (rec.get("phone") or {}).get("state", "ok") == "ok":   # healthy uplink: baseline (+ on-the-move extra)
             self._mcot_uplink(gw, outside=rec["home_state"] == "outside")
         self._relink(rec)
 
@@ -1195,11 +1217,12 @@ class World:
             hr_act = rec.get("hr_act", 1.0)
             hr_act += (ACT_HR.get(rec["activity"], 1.0) - hr_act) * 0.4     # 활동 변화 뒤 약 30 s에 걸쳐 수렴
             rec["hr_act"] = hr_act
-            P["hr_scale"][row] = st["hr_scale"] * hr_act
-            P["rr_add"][row] = st["rr_add"]
-            P["spo2_add"][row] = st["spo2_add"]
-            P["temp_add"][row] = st["temp_add"]
-            P["gl_add"][row] = st["gl_add"]
+            dh, drr, dsp, dte, dgl = self.real.deter_offsets(rec, now)       # 임상 악화·코드블루
+            P["hr_scale"][row] = st["hr_scale"] * hr_act * (1.0 + dh)
+            P["rr_add"][row] = st["rr_add"] + drr
+            P["spo2_add"][row] = st["spo2_add"] + dsp
+            P["temp_add"][row] = st["temp_add"] + dte
+            P["gl_add"][row] = st["gl_add"] + dgl
             P["gain"][row] = rec.get("gain0", 1.0) * (1.0 + trend_model._drift(pid * 7919 + 9, now, 0.08))
             if not hop:
                 continue
@@ -1441,6 +1464,11 @@ class World:
         if not kinds:
             return
         kind = str(self.rng.choice(kinds))
+        if kind == "power":                                                # 건물 정전: 발전기 전환·UPS·일반 전원 차단 모델
+            b = int(h.floors[int(self.rng.integers(len(h.floors)))]["building_idx"])
+            self.real.power_event(b, mains_s=float(self.rng.uniform(60, 600)) * (0.5 + ni), cause="정전")
+            self.counters["net_events"] += 1
+            return
         # pick an area: a floor of a building
         fl = self.rng.choice(len(h.floors))
         floor = h.floors[int(fl)]
@@ -1482,6 +1510,24 @@ class World:
         lam_d = g["discharges_per_hour"] / 3600.0 * dt_s
         n_in = [k for k, r in self.admitted.items() if not r["outpatient"]]
         target = int(g["active_patients"])
+        weekly = g.get("census_mode", "fixed") == "weekly" or self.real.surge is not None
+        if weekly:                                                         # 요일·시간대 곡선 / 대량 유입: 목표가 움직이고 조정도 서서히
+            target = self.real.census_target(target, self.sim_time, self.hospital.bed_capacity)
+            err = target - len(n_in)
+            step_n = int(math.ceil(abs(err) * dt_s / (60.0 if self.real.surge and self.sim_time < self.real.surge["end"] else 600.0)))
+            for _ in range(min(abs(err), step_n)):
+                if err > 0:
+                    rec = self.admit()
+                    if not rec:
+                        break
+                    n_in.append(rec["id"])
+                    if self.real.surge and self.sim_time < self.real.surge["end"]:
+                        p = self.by_id[rec["id"]]
+                        self.log.add("adt", f"응급 유입 입원: {p['name']} ({p['sex']}/{p['age']}) → {p['admission']['ward_name']} {p['admission']['bed']}", patient_id=p["id"])
+                else:
+                    pid = n_in.pop(int(self.rng.integers(len(n_in))))
+                    self.discharge(pid)
+            return
         # the scenario's patient count is a hard target: a lower number discharges the surplus right away and a higher one admits
         # up to the target (500 per second so a 2000 -> 100 change settles in ~4 s without stalling the world loop); the hourly
         # ADT rates below only add the realistic churn around that level
@@ -1570,6 +1616,8 @@ class World:
                      "bundle_ms": bundle, "channels_enabled": en, "patches": patches}
                 if g.get("radio"):                                  # MCOT mobile gateway: cellular uplink type
                     d["uplink"] = g["radio"]
+                elif getattr(self, "real", None) and self.real.meta_net(gw):   # 병원 GW: 유선/무선, 층 스위치·AP, 전원 계통
+                    d["net"] = self.real.meta_net(gw)
                 ent = (sig, f'"{gw}":' + json.dumps(d, ensure_ascii=False, separators=(",", ":")))
                 cache[gw] = ent
                 self.meta_versions[gw] = sig
@@ -1651,7 +1699,8 @@ class World:
     def step(self, real_dt: float) -> None:
         with self.lock:
             speed = self.cfg.get("general", "sim_speed")
-            dt_s = real_dt * speed
+            dt_s = (1.0 if self.cfg.get("general", "fixed_step", default=False) else real_dt) * speed    # 재현 실행은 1초 고정 간격
+            self._dt_last = dt_s
             self.sim_time += dt_s
             sc = self.cfg.get("scenario")
             ac = sc["artifacts"]
@@ -1670,6 +1719,7 @@ class World:
             self._step_modulation()
             self._step_episodes()
             self._step_gateways(dt_s)
+            self.real.step(dt_s)                                           # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)
             self._step_drills()
             self._step_script()
             # periodic relink (gateway recovery / capacity / rssi jitter): 1/5 of patients per second
@@ -1787,8 +1837,22 @@ class World:
                                         "plan": rec.get("trip_plan", []), "steps": self._trip_steps(rec)[0]} if (rec["trip"] or rec["trip_step_until"] > self.sim_time) else None),
                               "settling_remaining": max(0.0, (20.0 - (self._tick_now() - int(P["attach_tick"])) * (self.cfg.get("transport", "bundle_ms") / 1000.0))) if int(P["attach_tick"]) > 0 else 0.0,
                               "attach_tick": int(P["attach_tick"]), "tick_now": self._tick_now(),
-                              "sim_speed": self.cfg.get("general", "sim_speed")}
+                              "sim_speed": self.cfg.get("general", "sim_speed"),
+                              "clinical": self._clinical_view(rec),
+                              "phone": (rec.get("phone") or {}).get("state") if rec["outpatient"] else None}
         return out
+
+    def _clinical_view(self, rec: dict) -> dict | None:
+        from .realism import DETER
+        d, cb = rec.get("deter"), rec.get("code_blue")
+        if cb:
+            return {"kind": "code_blue", "label": f"코드블루 ({cb['cause']})", "stage": "소생술 중", "elapsed_min": round((self.sim_time - cb["t0"]) / 60)}
+        if d:
+            e = self.sim_time - d["t0"]
+            stage = "악화 중" if e < d["ramp"] else "최고조" if e < d["ramp"] + d["hold"] else "회복 중"
+            return {"kind": d["kind"], "label": DETER[d["kind"]]["label"], "stage": stage, "elapsed_min": round(e / 60),
+                    "peak_in_min": max(0, round((d["ramp"] - e) / 60))}
+        return None
 
     def _variant_rhythm(self, v: int) -> str:
         if self.bank.loaded and 0 <= v < len(self.bank.index["variants"]):
@@ -2118,6 +2182,28 @@ class World:
     def trigger(self, what: str, target: int | None = None, params: dict | None = None) -> str:
         params = params or {}
         with self.lock:
+            if getattr(self, "real", None):
+                self.real.record(what, target, params)                        # 녹화 중이면 시뮬 시각과 함께 기록
+            if what == "config":                                           # 녹화 재생: 설정 변경 (구조 설정은 재구성이 필요해 제외)
+                self.cfg.update(params, source="script"); self.apply_config()
+                return "config applied"
+            if what in ("switch_fault", "ap_fault", "core_fault"):
+                return self.real.device_fault(what.split("_")[0], params.get("device"), "장애", params.get("off_s"))
+            if what == "power_outage":
+                return self.real.power_event(params.get("building"), params.get("mains_s"), "정전")
+            if what == "phone":
+                pid = target if target in self.admitted else next((k for k, r in self.admitted.items() if r["outpatient"]), None)
+                return self.real.force_phone(pid, str(params.get("state", "killed")), float(params.get("minutes", 10))) if pid else "no MCOT patient"
+            if what == "surge":
+                return self.real.start_surge(params.get("count"), float(params.get("over_min", 60)))
+            if what in ("deteriorate", "code_blue"):
+                ids = [k for k, r in self.admitted.items() if not r["outpatient"] and not r.get("deter") and not r.get("code_blue")] or list(self.admitted.keys())
+                if not ids:
+                    return "no patients"
+                pid = target if target in self.admitted else int(self.rng.choice(ids))
+                if what == "code_blue":
+                    return self.real.code_blue(pid, "급성 심정지")
+                return self.real.start_deterioration(pid, params.get("kind"), fast=bool(params.get("fast", True)), ramp_min=params.get("ramp_min"))
             G = self.st.gw.arr
             now = self.sim_time
             h = self.hospital

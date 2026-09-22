@@ -60,6 +60,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "db_retention_days": 7,        # history older than this is pruned from emulator.db at startup (retired patches, closed admissions, events)
         "admissions_per_hour": 4,      # new admissions / discharges per (sim) hour
         "discharges_per_hour": 4,
+        "census_mode": "fixed",        # fixed: 재원 수 = 목표 그대로 | weekly: 요일·시간대 곡선 (주말 감소, 오전 퇴원 · 오후 입원)
+        "fixed_start": "",             # 재현 실행: 시뮬 시계 시작 시각 (ISO, 예 2026-09-22T09:00). 비우면 현재 시각. 재구성 시 적용
+        "fixed_step": False,           # 재현 실행: 월드를 실제 경과 시간이 아니라 1초 고정 간격으로 진행
     },
     "signals": {
         "ecg_fs": 250,                 # 250 or 500
@@ -116,7 +119,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "wired_failure": True,
             "latency": True,
             "power_outage": True,
+            "topology": True,          # 코어·층 스위치·무선 AP 장비 장애 (그 아래 게이트웨이 업링크 동시 단절)
         },
+        "routine": {"enabled": True},  # 병원 일과: 활력징후 측정·회진·식사·면회·저녁 샤워 시간대가 환자 움직임을 만든다
+        "clinical": {"enabled": True, "per_1000_patient_days": 20},   # 자연 발생 임상 악화 (일부는 코드블루로 진행)
+        "mcot_device": {"enabled": True},   # MCOT 단말: 앱 강제 종료·절전 모드·OS 업데이트·비행기 모드·지역별 커버리지
         "exam_trip_ratio": 5.0,        # % of inpatients out of bed on a trip at any moment (exam rooms, clinic, dialysis, cafe, lounge...); independent of the artifact scenario
         "artifacts": {
             "enabled": True,
@@ -258,6 +265,9 @@ class Config:
         g["heart_disease_ratio"] = float(min(1.0, max(0.0, g["heart_disease_ratio"])))
         g["korean_ratio"] = float(min(1.0, max(0.0, g["korean_ratio"])))
         g["sim_speed"] = float(min(1000.0, max(0.1, g["sim_speed"])))
+        g["census_mode"] = g.get("census_mode") if g.get("census_mode") in ("fixed", "weekly") else "fixed"
+        g["fixed_step"] = bool(g.get("fixed_step", False))
+        g["fixed_start"] = str(g.get("fixed_start") or "").strip()
         s = d["signals"]
         s["ecg_fs"] = 500 if int(s["ecg_fs"]) >= 500 else 250
         s["variants_per_rhythm"] = int(max(1, min(200, s["variants_per_rhythm"])))

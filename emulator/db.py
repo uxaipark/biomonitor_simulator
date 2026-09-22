@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_a
   patients INTEGER, gateways INTEGER, pkts INTEGER, bytes INTEGER, drops INTEGER, config_json TEXT);
 CREATE TABLE IF NOT EXISTS config_history (id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, source TEXT, run_id INTEGER, path TEXT, old_json TEXT, new_json TEXT);
 CREATE INDEX IF NOT EXISTS ix_cfghist_t ON config_history(t);
+CREATE TABLE IF NOT EXISTS labels (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, value TEXT, patient_id INTEGER, patch_id INTEGER, gw INTEGER,
+  t_start_ms INTEGER, t_end_ms INTEGER, meta_json TEXT);
+CREATE INDEX IF NOT EXISTS ix_labels_t ON labels(t_start_ms);
+CREATE INDEX IF NOT EXISTS ix_labels_kind ON labels(kind);
 """
 
 
@@ -76,7 +80,7 @@ class DB:
 
     def reset(self) -> None:
         with self.lock:
-            for t in ("patients", "admissions", "patches", "patch_events", "exams", "events", "runs", "gateways", "meta"):
+            for t in ("patients", "admissions", "patches", "patch_events", "exams", "events", "runs", "gateways", "meta", "labels"):
                 self.conn.execute(f"DELETE FROM {t}")
             self.conn.execute("VACUUM")
 
@@ -190,7 +194,38 @@ class DB:
     def queue_events(self, events: list[dict]) -> None:
         self._pending.extend((e["seq"], e["t"], e["kind"], e["msg"], e.get("patient_id"), e.get("gw")) for e in events)
 
+    # ------------------------------------------------------------- ground-truth labels (intervals, epoch ms)
+    def add_label(self, kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta=None) -> None:
+        self.__dict__.setdefault("_pending_lb", []).append((kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms,
+                                                            json.dumps(meta, ensure_ascii=False) if meta else None))
+
+    def labels(self, kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = 5000, offset: int = 0) -> list[dict]:
+        q, a = "SELECT kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json FROM labels WHERE 1=1", []
+        if kind:
+            ks = [k for k in kind.split(",") if k]
+            q += f" AND kind IN ({','.join('?' * len(ks))})"; a += ks
+        if patient_id is not None:
+            q += " AND patient_id = ?"; a.append(patient_id)
+        if since_ms:
+            q += " AND (t_end_ms IS NULL OR t_end_ms >= ?)"; a.append(since_ms)
+        if until_ms:
+            q += " AND t_start_ms <= ?"; a.append(until_ms)
+        q += " ORDER BY t_start_ms LIMIT ? OFFSET ?"; a += [limit, offset]
+        with self.lock:
+            rows = self.conn.execute(q, a).fetchall()
+        return [{**{k: r[k] for k in r.keys() if k != "meta_json"}, "meta": json.loads(r["meta_json"]) if r["meta_json"] else None} for r in rows]
+
+    def label_counts(self) -> dict:
+        with self.lock:
+            rows = self.conn.execute("SELECT kind, COUNT(*) AS n, MIN(t_start_ms) AS t0, MAX(COALESCE(t_end_ms, t_start_ms)) AS t1 FROM labels GROUP BY kind").fetchall()
+        return {r["kind"]: {"n": r["n"], "t0": r["t0"], "t1": r["t1"]} for r in rows}
+
     def flush(self) -> None:
+        lb = self.__dict__.get("_pending_lb")
+        if lb:
+            self._pending_lb = []
+            with self.lock:
+                self.conn.executemany("INSERT INTO labels(kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json) VALUES (?,?,?,?,?,?,?,?)", lb)
         if self._pending_pe:
             rows, self._pending_pe = self._pending_pe, []
             with self.lock:
@@ -211,6 +246,7 @@ class DB:
             n["exams"] = c.execute("DELETE FROM exams WHERE admission_id IN (SELECT id FROM admissions WHERE discharge_time IS NOT NULL AND discharge_time < ?)", (before,)).rowcount
             n["admissions"] = c.execute("DELETE FROM admissions WHERE discharge_time IS NOT NULL AND discharge_time < ?", (before,)).rowcount
             n["events"] = c.execute("DELETE FROM events WHERE t < ?", (before,)).rowcount
+            n["labels"] = c.execute("DELETE FROM labels WHERE COALESCE(t_end_ms, t_start_ms) < ?", (int(before * 1000),)).rowcount
             n["runs"] = c.execute("DELETE FROM runs WHERE stopped_at IS NOT NULL AND stopped_at < ?", (before,)).rowcount
             n["config_history"] = c.execute("DELETE FROM config_history WHERE t < ?", (before,)).rowcount
             if sum(n.values()):
