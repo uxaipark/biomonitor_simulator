@@ -64,6 +64,9 @@ PRESETS = [
                "scenario": {"network": {"enabled": True, "intensity": 50, **_ALL_NET}, "gateway": {"fault_enabled": True, "fault_intensity": 50}}},
      "actions": [{"what": "storm", "params": {"duration": 20}}]},
 ]
+POINTS = {'default': (['아티팩트 40 % · 게이트웨이 장애 20 %', '병원 일과 · 임상 악화(1,000 환자·일당 20건) · MCOT 단말 동작 켬', '네트워크 장애 꺼짐 · 재원 수 고정'], ''), 'baseline': (['네트워크 · 게이트웨이 장애 꺼짐', '아티팩트 · 병원 일과 · 임상 악화 · 단말 동작 꺼짐', '패치 배터리 소모 · 리드 오프 꺼짐, 병실 밖 이동 0 %', '진행 중이던 장애·악화도 정리'], ''), 'ward_day': (['병원 일과 · 자연 임상 악화 켬', '요일·시간대 재원 곡선', '무선 간섭 · 지연 · 장비 장애 약하게 (15 %)', '게이트웨이 장애 10 % · 아티팩트 40 %'], ''), 'network': (['네트워크 장애 70 % (무선 · 유선 · 지연 · 장비)', '정전은 제외', '게이트웨이 장애 10 %'], '층 스위치 하나 5분 장애'), 'power': (['정전만 켬 (강도 40 %)', '개별 게이트웨이 장애 끔', 'UPS 유지 → 발전기 전환 재부팅 → 일반 전원 복전 → 층 스위치 재부팅'], '한 건물 5분 정전'), 'gateway': (['게이트웨이 장애 80 % (무응답 · 성능 저하 · 하드웨어 고장)', '교체되면 새 번호·MAC 으로 재접속, META 재전송'], '게이트웨이 1대 고장 → 교체'), 'artifacts': (['아티팩트 100 % (움직임 · 샤워 · 검사 이동 · 재부착 · 전동 · 패치 교체)', '가정 전파 간섭 켬 · 병실 밖 이동 15 %'], ''), 'clinical': (['임상 악화 1,000 환자·일당 300건', '부정맥 에피소드 켬 · 아티팩트 20 %', '정답 라벨(임상 CSV)로 채점'], '3명 빠른 악화 · 1명 코드블루'), 'mcot': (['장소 혼합 · 원외 환자 200명', 'MCOT 단말 동작 켬 (앱 종료 · 절전 일괄 업로드 · OS 업데이트)', '가정 전파 간섭 · 아티팩트 60 %'], '1명 앱 강제 종료 10분'), 'router_stress': (['오염 프레임 1,000개당 5개 (전 종류)', '재접속 완만화 끔 (폭주)', '네트워크 · 게이트웨이 장애 50 %'], '20초 연결 폭주')}
+for _p in PRESETS:
+    _p["points"], _p["actions_text"] = POINTS[_p["id"]]
 BY_ID = {p["id"]: p for p in PRESETS}
 
 
@@ -102,5 +105,5 @@ def build_patch(preset_id: str, current: dict) -> dict:
 
 
 def public_list() -> list[dict]:
-    return [{"id": p["id"], "name": p["name"], "purpose": p["purpose"], "desc": p["desc"],
+    return [{"id": p["id"], "name": p["name"], "purpose": p["purpose"], "desc": p["desc"], "points": p["points"], "actions_text": p["actions_text"],
              "actions": [a["what"] for a in p.get("actions", [])], "patch": p["patch"]} for p in PRESETS]

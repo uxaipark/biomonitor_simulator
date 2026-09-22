@@ -173,9 +173,12 @@
 
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
-  <div class="card presetbar" id="presetBar"><h3>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">누르면 아래 설정이 그 시나리오로 바뀝니다 · 환자 수와 장소는 프리셋이 정할 때만 바뀜</span></h3>
-    <div class="presetlist" id="presetList"></div>
-    <div class="help" id="presetDesc"></div>
+  <div class="card presetbar" id="presetBar"><h3>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">휠을 굴리거나 끌어서 고르고 [적용] · 환자 수와 장소는 프리셋이 정할 때만 바뀜</span></h3>
+    <div class="pwrap">
+      <div class="pwheel" id="pWheel" tabindex="0" role="listbox" aria-label="테스트 시나리오 선택 휠 (마우스 휠·드래그·화살표 키)"><div class="pw-lens"></div><div class="pw-track" id="pwTrack"></div></div>
+      <div class="pdesc" id="pDesc"></div>
+      <div class="papply"><button class="primary" id="pApply">적용</button><div class="sub" id="pApplyNote"></div></div>
+    </div>
   </div>
   <div class="grid scn" id="scnGrid">
     <div class="card" data-card="scale"><h3><span class="grip" title="드래그해서 카드 위치 변경">⠿</span>입원 환자 수</h3>

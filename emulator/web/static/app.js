@@ -2447,7 +2447,7 @@ async function loadRealism() {
   const ss = $('#surgeStatus'); if (ss) ss.textContent = d.surge ? `유입 진행: ${d.surge.count}명` : '';
   const rs = $('#recStatus'); if (rs) rs.innerHTML = d.recording ? `<span class="tag err">● 녹화 중</span> ${esc(d.recording.name)} · ${d.recording.items}단계` : '';
 }
-setInterval(() => { if (curGroup === 'scn' || curGroup === 'dash') loadRealism(); if (curGroup === 'scn') loadScnPresets(); }, 5000);
+setInterval(() => { if (curGroup === 'scn' || curGroup === 'dash') loadRealism(); if (curGroup === 'scn' && !PW.drag) loadScnPresets(); }, 5000);
 $('#recStart').onclick = async () => { const r = await post('/control/record', { action: 'start', name: $('#recName').value.trim() }); toast(`녹화 시작: ${r.name}`); loadRealism(); };
 $('#recStop').onclick = async () => { const r = await post('/control/record', { action: 'stop', save: true }); toast(r.saved ? `저장: scenarios/${r.saved} (${r.items}단계)` : '녹화된 조작이 없습니다'); loadRealism(); loadScripts(); };
 async function loadLabelSummary() {
@@ -2460,24 +2460,110 @@ async function loadLabelSummary() {
     `<td><a class="btnlink" href="/api/v1/labels?format=csv&kind=${k}" download>CSV</a></td></tr>`).join('') || '<tr><td colspan="6" class="sub">아직 라벨이 없습니다</td></tr>';
   $('#lblSummaryHead').textContent = `${cnum(rows.reduce((a, [, v]) => a + v.n + (v.open || 0), 0))}개 구간`;
 }
-// ---------------- 대표 테스트 시나리오 프리셋 (기본값 + 9개): 누르면 시나리오 계층을 기본값으로 되돌리고 프리셋을 얹는다
+// ---------------- 대표 테스트 시나리오 프리셋 휠: 휠(호버 중 마우스 휠 · 드래그 · 화살표)로 고르고 [적용]으로 반영
 let scnPresets = null;
-async function loadScnPresets() {
-  try { scnPresets = await api('/presets'); } catch (e) { return; }
-  const cur = scnPresets.presets.find(p => p.id === scnPresets.current) || scnPresets.presets[0];
-  $('#presetList').innerHTML = scnPresets.presets.map((p, i) => `<button class="preset ${p.id === scnPresets.current ? 'on' : ''}" data-pid="${p.id}" title="${esc(p.desc)}">` +
-    `<b>${i === 0 ? '' : i + '. '}${esc(p.name)}</b><small>${esc(p.purpose)}</small>${p.actions.length ? `<i>즉시 주입 ${p.actions.length}</i>` : ''}</button>`).join('');
-  $('#presetState').innerHTML = `현재: <b>${esc(cur.name)}</b>${scnPresets.modified ? ' <span class="tag warn">수정됨</span>' : ''}`;
-  $('#presetDesc').textContent = cur.desc;
+const PW = { pos: 0, target: 0, raf: 0, drag: null, acc: 0, built: '' };
+const PW_H = 38;                                               // 한 칸 높이 (px)
+function pwIndex() { return Math.max(0, Math.min((scnPresets?.presets.length || 1) - 1, Math.round(PW.target))); }
+function pwBuild() {
+  const key = scnPresets.presets.map(p => p.id).join();
+  if (PW.built === key) return;
+  PW.built = key;
+  $('#pwTrack').innerHTML = scnPresets.presets.map((p, i) => `<div class="pw-item" data-i="${i}" role="option"><span class="pw-no">${i === 0 ? '·' : i}</span>${esc(p.name)}</div>`).join('');
 }
-$('#presetList').addEventListener('click', async e => {
-  const b = e.target.closest('button[data-pid]'); if (!b || !scnPresets) return;
-  const p = scnPresets.presets.find(x => x.id === b.dataset.pid);
-  if (p.actions.length && !(await askConfirm(p.name, `${p.desc}\n\n적용하면 시나리오 설정이 바뀌고 즉시 주입 ${p.actions.length}건(${p.actions.join(', ')})이 실행됩니다.`, '적용'))) return;
-  const r = await post('/presets/apply', { id: p.id });
-  toast(r.needs_rebuild ? `${r.name}: 재구성이 필요한 값이 바뀌었습니다` : `${r.name} 적용${r.actions.length ? ` · 즉시 주입 ${r.actions.length}건` : ''}`);
-  await loadConfig(); loadScnPresets(); loadRealism();
-});
+function pwRender() {
+  const items = $$('#pwTrack .pw-item');
+  items.forEach((el, i) => {
+    const d = i - PW.pos, a = Math.abs(d);
+    el.style.transform = `translateY(${d * PW_H * 0.92}px) rotateX(${-d * 19}deg) scale(${Math.max(0.72, 1 - a * 0.07)})`;
+    el.style.opacity = a > 3.2 ? 0 : String(Math.max(0.12, 1 - a * 0.3));
+    el.classList.toggle('front', a < 0.5);
+    el.classList.toggle('applied', scnPresets && scnPresets.presets[i].id === scnPresets.current);
+  });
+}
+function pwAnimate() {
+  cancelAnimationFrame(PW.raf);
+  const step = () => {
+    PW.pos += (PW.target - PW.pos) * 0.22;
+    if (Math.abs(PW.target - PW.pos) < 0.002) PW.pos = PW.target;
+    pwRender();
+    if (PW.pos !== PW.target) PW.raf = requestAnimationFrame(step);
+  };
+  PW.raf = requestAnimationFrame(step);
+}
+function pwGo(idx, animate = true) {
+  const n = scnPresets.presets.length;
+  PW.target = Math.max(0, Math.min(n - 1, idx));
+  if (animate) pwAnimate(); else { PW.pos = PW.target; pwRender(); }
+  pwDescribe();
+}
+function pwDescribe() {
+  const i = pwIndex(), p = scnPresets.presets[i], isCur = p.id === scnPresets.current;
+  $('#pDesc').innerHTML = `<div class="pd-head"><b>${i ? i + '. ' : ''}${esc(p.name)}</b> <span class="pd-purpose">${esc(p.purpose)}</span>` +
+    `${isCur ? ` <span class="tag ok">적용 중${scnPresets.modified ? ' · 수정됨' : ''}</span>` : ''}</div>` +
+    `<div class="pd-text">${esc(p.desc)}</div>` +
+    `<ul class="pd-points">${p.points.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` +
+    (p.actions_text ? `<div class="pd-act">적용 즉시: <b>${esc(p.actions_text)}</b></div>` : '');
+  const btn = $('#pApply');
+  btn.textContent = isCur && !scnPresets.modified ? '다시 적용' : '적용';
+  $('#pApplyNote').textContent = isCur ? (scnPresets.modified ? '적용 뒤 값을 바꿨습니다' : '현재 적용된 시나리오') : '누르면 아래 설정이 바뀝니다';
+}
+async function loadScnPresets(keepPos = true) {
+  try { scnPresets = await api('/presets'); } catch (e) { return; }
+  pwBuild();
+  const cur = scnPresets.presets.find(p => p.id === scnPresets.current) || scnPresets.presets[0];
+  $('#presetState').innerHTML = `현재: <b>${esc(cur.name)}</b>${scnPresets.modified ? ' <span class="tag warn">수정됨</span>' : ''}`;
+  if (!keepPos || PW.initd !== true) { PW.initd = true; pwGo(scnPresets.presets.indexOf(cur), false); } else { pwRender(); pwDescribe(); }
+}
+(() => {
+  const wh = $('#pWheel');
+  wh.addEventListener('wheel', e => {                             // 호버 중 휠: 한 칸씩 (트랙패드의 작은 값은 모아서)
+    if (!scnPresets) return;
+    e.preventDefault();
+    PW.acc += e.deltaY;
+    if (Math.abs(PW.acc) >= 40) { pwGo(pwIndex() + Math.sign(PW.acc)); PW.acc = 0; }
+  }, { passive: false });
+  wh.addEventListener('pointerdown', e => {
+    if (!scnPresets || e.button) return;
+    wh.setPointerCapture(e.pointerId); wh.classList.add('dragging');
+    cancelAnimationFrame(PW.raf);
+    PW.drag = { y0: e.clientY, p0: PW.pos, t: performance.now(), y: e.clientY, v: 0, moved: false };
+  });
+  wh.addEventListener('pointermove', e => {
+    const d = PW.drag; if (!d) return;
+    const now = performance.now(), dy = e.clientY - d.y;
+    d.v = dy / Math.max(1, now - d.t); d.t = now; d.y = e.clientY;
+    if (Math.abs(e.clientY - d.y0) > 3) d.moved = true;
+    const n = scnPresets.presets.length;
+    PW.pos = Math.max(-0.4, Math.min(n - 0.6, d.p0 - (e.clientY - d.y0) / PW_H));   // 끝에서 살짝 넘어가는 탄성
+    PW.target = PW.pos; pwRender();
+  });
+  const end = () => {
+    const d = PW.drag; if (!d) return;
+    PW.drag = null; wh.classList.remove('dragging');
+    if (!d.moved) {                                                // 탭/클릭: 누른 높이의 항목으로 돌림 (3D 변형 항목의 판정 대신 위치로 계산)
+      const r = wh.getBoundingClientRect();
+      pwGo(Math.round(PW.pos + (d.y0 - (r.top + r.height / 2)) / (PW_H * 0.92))); return;
+    }
+    const v = performance.now() - d.t > 80 ? 0 : d.v;             // 멈췄다가 놓으면 관성 없음
+    pwGo(Math.round(PW.pos - v * 140 / PW_H));                     // 놓을 때 속도만큼 관성
+  };
+  wh.addEventListener('pointerup', end); wh.addEventListener('pointercancel', end);
+  wh.addEventListener('keydown', e => {
+    if (!scnPresets) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); pwGo(pwIndex() + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); pwGo(pwIndex() - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); $('#pApply').click(); }
+  });
+  $('#pApply').onclick = async () => {
+    if (!scnPresets) return;
+    const p = scnPresets.presets[pwIndex()];
+    if (p.actions.length && !(await askConfirm(p.name, `${p.desc}\n\n적용하면 시나리오 설정이 바뀌고 즉시 ${p.actions_text} 이(가) 실행됩니다.`, '적용'))) return;
+    const r = await post('/presets/apply', { id: p.id });
+    toast(r.needs_rebuild ? `${r.name}: 재구성이 필요한 값이 바뀌었습니다` : `${r.name} 적용${r.actions.length ? ` · 즉시 주입 ${r.actions.length}건` : ''}`);
+    await loadConfig(); await loadScnPresets(); loadRealism();
+  };
+})();
 // ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다
 $$('.help').forEach(hp => {
   if ((hp.textContent || '').trim().length < 90) return;
