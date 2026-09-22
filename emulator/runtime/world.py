@@ -257,6 +257,8 @@ class World:
             self.real = Realism(self)
             from .realsig import RealSignal
             self.rsig = RealSignal(self)
+            from .fieldtest import FieldTest
+            self.ft = FieldTest(self)
             # 이전 월드의 시각·주기 상태를 끊는다: 남겨 두면 추세 갱신·검사 배정 주기가 이전 실행 시각에 묶이고
             # (시작 시각을 과거로 고정하면 몇 시간 동안 갱신이 멈춘다) 재현 실행이 갈라진다. net_events 는 옛 병원의 GW 번호를 가리킨다.
             self._mod_last = 0.0
@@ -1176,9 +1178,10 @@ class World:
             prof = self.by_id[pid]
             if drain:
                 patch.battery = max(0.0, patch.battery - drain)
-            P["battery"][row] = int(patch.battery)
+            ft_lb = rec.get("ft_lowbatt_until", 0.0) > now                  # 현장 테스트: 배터리 부족 표시
+            P["battery"][row] = 8 if ft_lb else int(patch.battery)
             f = int(P["flags"][row])
-            f = (f | FLAG_LOW_BATT) if patch.battery < 15 else (f & ~FLAG_LOW_BATT)
+            f = (f | FLAG_LOW_BATT) if patch.battery < 15 or ft_lb else (f & ~FLAG_LOW_BATT)
             if patch.new_until and now > patch.new_until:
                 patch.new_until = 0.0
                 f &= ~FLAG_NEW_PATCH
@@ -1236,6 +1239,7 @@ class World:
             P["temp_add"][row] = st["temp_add"] + dte
             P["gl_add"][row] = st["gl_add"] + dgl
             P["gain"][row] = rec.get("gain0", 1.0) * (1.0 + trend_model._drift(pid * 7919 + 9, now, 0.08))
+            self.ft.hold(rec, row, now)                            # 현장 테스트 중인 값 유지 (무수축 · SpO2 저하)
             if not hop or "rs_paced" in rec:                      # 실제 시그널 슬롯 환자는 슬롯이 리듬을 정한다
                 continue
             if now >= rec["next_hop"] and not rec["episode_until"]:
@@ -1735,6 +1739,7 @@ class World:
             self._step_gateways(dt_s)
             self.real.step(dt_s)                                           # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)
             self.rsig.step()                                               # 실제 시그널 송출 슬롯 (파일 재생 · 부정맥 순환)
+            self.ft.step()                                                 # 현장 테스트 이벤트 만료 → 정상 복귀
             self._step_drills()
             self._step_script()
             # periodic relink (gateway recovery / capacity / rssi jitter): 1/5 of patients per second
@@ -2199,6 +2204,11 @@ class World:
         with self.lock:
             if getattr(self, "real", None):
                 self.real.record(what, target, params)                        # 녹화 중이면 시뮬 시각과 함께 기록
+            if what == "fieldtest":                                        # 현장 테스트: 게이트웨이의 환자에게 이벤트
+                pid = params.get("patient_id")
+                return self.ft.inject(int(target), str(params.get("event")), int(pid) if pid not in (None, "") else None, float(params.get("duration", 60)))["message"]
+            if what == "fieldtest_clear":
+                return f"cleared {self.ft.clear(params.get('id'), target)}"
             if what == "config":                                           # 녹화 재생: 설정 변경 (구조 설정은 재구성이 필요해 제외)
                 self.cfg.update(params, source="script"); self.apply_config()
                 return "config applied"

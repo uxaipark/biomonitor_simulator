@@ -401,9 +401,33 @@
 </section>
 
 <!-- ================= 로그 -->
+<!-- ================= 현장 테스트 -->
+<section class="tab" data-tab="test" data-title="테스트">
+  <div class="card ft-intro"><h3>현장 테스트 <span class="sub" id="ftTx"></span><span class="right sub">망·장비·서버·뷰어 설정을 마친 뒤, 게이트웨이를 골라 이벤트를 보내고 그 게이트웨이를 보는 뷰어에 뜨는지 확인합니다</span></h3></div>
+  <div class="ftgrid">
+    <div class="card"><h3>1. 게이트웨이</h3>
+      <div class="row tight"><div class="field" style="flex:1"><select id="ftGw"></select></div><button class="small" id="ftGwRefresh" title="목록 새로고침">↻</button></div>
+      <label class="chk"><input type="checkbox" id="ftOnlyPat" checked> 환자가 연결된 게이트웨이만</label>
+      <div class="sub one" id="ftGwInfo"></div>
+      <h4 class="ft-sub">대상 환자</h4>
+      <div class="ft-pats" id="ftPats"></div>
+      <h4 class="ft-sub">유지 시간</h4>
+      <div class="seg ft-dur" id="ftDur"><button data-s="30">30초</button><button data-s="60" class="on">1분</button><button data-s="180">3분</button><button data-s="600">10분</button></div>
+    </div>
+    <div class="card"><h3>2. 이벤트 보내기 <span class="right sub">누르면 바로 전송 · 시간이 지나면 정상 복귀</span></h3>
+      <div id="ftEvents"></div>
+    </div>
+    <div class="card"><h3>3. 진행 중 <span class="sub" id="ftActN"></span><span class="right"><button class="small danger" id="ftClearAll">모두 정상 복귀</button></span></h3>
+      <div class="tbl"><table id="ftActive"><thead><tr><th>이벤트</th><th>게이트웨이 · 환자</th><th>남은</th><th></th></tr></thead><tbody></tbody></table></div>
+      <h4 class="ft-sub">최근 보낸 이벤트 <span class="sub">(보낸 시각과 뷰어 표시 시각을 비교)</span></h4>
+      <div class="ft-hist" id="ftHist"></div>
+    </div>
+  </div>
+</section>
+
 <section class="tab" data-tab="log" data-title="로그">
   <div class="seg logseg" id="logSeg"><button data-lv="tx">송출 장애</button><button data-lv="ev">전체 이벤트</button><button data-lv="cfg">설정 이력</button><button data-lv="chat">라우터 채팅</button></div>
-  <div class="card" id="logEvCard"><h3>이벤트 로그 <span class="right"><select id="logFilter" style="min-height:32px;padding:4px 8px;width:auto"><option value="">전체</option><option value="tx">송출 장애</option><option value="clinical">임상</option><option value="adt">입퇴원</option><option value="patch">패치</option><option value="gateway">게이트웨이</option><option value="network">네트워크</option><option value="link">연결</option><option value="rhythm">리듬</option><option value="exam">검사</option><option value="autotune">최적화</option><option value="system">시스템</option><option value="error">오류</option></select></span></h3>
+  <div class="card" id="logEvCard"><h3>이벤트 로그 <span class="right"><select id="logFilter" style="min-height:32px;padding:4px 8px;width:auto"><option value="">전체</option><option value="tx">송출 장애</option><option value="test">현장 테스트</option><option value="clinical">임상</option><option value="adt">입퇴원</option><option value="patch">패치</option><option value="gateway">게이트웨이</option><option value="network">네트워크</option><option value="link">연결</option><option value="rhythm">리듬</option><option value="exam">검사</option><option value="autotune">최적화</option><option value="system">시스템</option><option value="error">오류</option></select></span></h3>
     <div class="events" id="logEvents" style="max-height:75vh"></div></div>
   <div class="card" id="cfgHistCard" hidden><h3>설정 이력 <span class="sub" id="cfgHistSummary"></span></h3><div id="cfgHistBody">
     <div class="help">모든 설정 변경(GUI·API·자동 최적화·초기화·복원)이 시각·출처·경로·이전값→새값으로 남고, 전송 실행마다 시작 시점의 설정 전체가 스냅샷으로 저장됩니다. 실행 행의 [이 설정으로 복원]은 그때의 시나리오 전체를, 변경 행의 [되돌리기]는 그 항목 하나만 이전값으로 되돌립니다. 구조 설정이 바뀌면 [재구성]이 필요합니다.</div>

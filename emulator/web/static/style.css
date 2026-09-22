@@ -960,3 +960,30 @@ section[data-tab="scn"] label.chk > input{vertical-align:middle;margin-right:8px
 .scnwarn li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pdcol{max-height:290px}
 .pdcol .pdesc{max-height:none;flex:1 1 auto;min-height:0}
+
+/* 현장 테스트 */
+.ftgrid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(420px,1.6fr) minmax(320px,1.1fr);gap:12px;align-items:start}
+@media (max-width:1200px){ .ftgrid{grid-template-columns:1fr 1fr} .ftgrid > .card:nth-child(2){grid-column:1 / -1;order:-1} }
+@media (max-width:760px){ .ftgrid{grid-template-columns:1fr} }
+.ft-intro h3{margin:0}
+.ft-sub{margin:12px 0 6px;font-size:12.5px;color:var(--muted);font-weight:600}
+.ft-pats{display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto}
+.ft-pat{display:flex;gap:6px;align-items:center;min-height:32px;padding:0 10px;text-align:left;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:1.5px solid var(--line);border-radius:7px;background:var(--card)}
+.ft-pat.on{border-color:var(--acc);background:color-mix(in srgb, var(--acc) 12%, transparent)}
+.ft-pat .sub{overflow:hidden;text-overflow:ellipsis}
+.ft-dur{display:flex;gap:6px}
+.ft-dur button{flex:1;min-height:34px}
+.ft-dur button.on{background:var(--acc);color:var(--acc-txt);border-color:transparent;font-weight:700}
+.ft-group{border-left:4px solid var(--ftc);padding:4px 0 4px 10px;margin-bottom:12px}
+.ft-glabel{font-size:12px;font-weight:700;color:var(--ftc);margin-bottom:6px}
+.ft-evs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+.ft-ev{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-height:58px;padding:8px 10px;text-align:left;border:1.5px solid color-mix(in srgb, var(--ftc) 55%, var(--line));border-radius:9px;background:color-mix(in srgb, var(--ftc) 7%, var(--card))}
+.ft-ev:hover{background:color-mix(in srgb, var(--ftc) 16%, var(--card))}
+.ft-ev b{font-size:14px;white-space:nowrap}
+.ft-ev span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.ft-high{--ftc:#dc2626}
+.ft-med{--ftc:#d97706}
+.ft-low{--ftc:#0891b2}
+.ft-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ftc);margin-right:6px;vertical-align:middle}
+.ft-hist{display:flex;flex-direction:column;gap:3px;max-height:320px;overflow:auto}
+.ft-hrow{display:grid;grid-template-columns:auto auto auto minmax(0,1fr);gap:6px;align-items:center;font-size:12.5px;white-space:nowrap}

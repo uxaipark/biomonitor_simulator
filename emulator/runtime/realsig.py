@@ -307,6 +307,7 @@ class RealSignal:
         pids = [pid for _, pid in ins][:N_SLOTS]
         mp: dict = {}
         want_cycle: set[int] = set()
+        ft_pids = {a["pid"] for a in getattr(getattr(w, "ft", None), "active", [])}   # 현장 테스트 중인 환자는 테스트가 우선
         auto = bool(c.get("auto_cycle", True))
         for i in range(N_SLOTS):
             pid = pids[i] if i < len(pids) else None
@@ -316,6 +317,10 @@ class RealSignal:
             if pid is None:
                 continue
             row = w.admitted[pid]["row"]
+            if pid in ft_pids:
+                if pid in self.cycling:
+                    want_cycle.add(pid)                                    # 순환 상태는 유지하되 이번엔 바꾸지 않음
+                continue
             if s["state"] == "ready":
                 mp[str(row)] = {"ecg": s["npy"], "hr": s["hr"], "slot": i}
                 self._pace_off(pid)
@@ -330,6 +335,8 @@ class RealSignal:
         tick = w._tick_now()
         period = max(10.0, float(c.get("cycle_s", 60)))
         for pid in want_cycle:
+            if pid in ft_pids:
+                continue
             rec = w.admitted[pid]
             cy = self.cycling.get(pid)
             if cy is None:

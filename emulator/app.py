@@ -400,6 +400,35 @@ def presets_reset(pid: str):
     return {"preset": pid, "saved": False}
 
 
+@app.get("/api/v1/fieldtest")
+def fieldtest_status():
+    """현장 테스트: 이벤트 목록(등급·뷰어에서 확인할 것), 진행 중인 테스트(남은 초), 최근 기록."""
+    w = E().world
+    with w.lock:
+        return w.ft.status()
+
+
+@app.post("/api/v1/fieldtest")
+def fieldtest_inject(body: dict):
+    """{gw: 게이트웨이 row, event, patient_id: null=그 게이트웨이의 환자 전체, duration: 초}.  시간이 지나면 정상 복귀."""
+    w = E().world
+    if w.real and w.real.recording is not None:                          # 녹화 중이면 재생할 수 있게 트리거로 남김
+        w.trigger("fieldtest", int(body.get("gw", -1)), {"event": body.get("event"), "patient_id": body.get("patient_id"), "duration": body.get("duration", 60)})
+        return {"ok": True, "message": "녹화 중: 트리거로 실행"}
+    with w.lock:
+        pid = body.get("patient_id")
+        return w.ft.inject(int(body.get("gw", -1)), str(body.get("event", "")), int(pid) if pid not in (None, "") else None, float(body.get("duration", 60)))
+
+
+@app.post("/api/v1/fieldtest/clear")
+def fieldtest_clear(body: dict | None = None):
+    """{id} 하나, {gw} 그 게이트웨이, 비우면 전부 정상 복귀."""
+    w = E().world
+    b = body or {}
+    with w.lock:
+        return {"cleared": w.ft.clear(b.get("id"), b.get("gw"))}
+
+
 @app.get("/api/v1/realsig")
 def realsig_status():
     """실제 시그널 송출 슬롯 20개: 파일 경로·이름, 읽기 상태(empty/loading/ready/error), 입력 표본율·단위·길이·평균 HR, 배정 환자, 순환 중 리듬."""

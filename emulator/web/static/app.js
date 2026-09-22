@@ -122,6 +122,7 @@ const TAB_GROUPS = [
   { id: 'hosp', title: '병원', show: ['hosp'] },
   { id: 'scn', title: '시나리오', show: ['scn'] },
   { id: 'tx', title: '송출', show: ['tx'] },
+  { id: 'test', title: '테스트', show: ['test'] },
   { id: 'log', title: '로그', show: ['log'] },
   { id: 'data', title: '설정·데이터', show: ['data'] },
 ];
@@ -612,7 +613,7 @@ async function pollEvents() {
   } catch (e) { }
 }
 const evKindLabel = (e) => e.kind === 'tx' ? ({ error: '송출 오류', warn: '송출 경고', info: '송출 복구' }[e.level] || '송출') : (EVKIND_KO[e.kind] || e.kind);   // 로그 종류 한글 (함수 선언이 아니라 아래 상수를 쓰므로 호출 시점에만 참조)
-const EVKIND_KO = { clinical: '임상', tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트' };
+const EVKIND_KO = { clinical: '임상', tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트', test: '현장 테스트' };
 function renderLog() {
   const f = $('#logFilter').value, list = evAll.slice().reverse().filter(e => !f || e.kind === f);
   $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${e.msg}</span></div>`).join('')
@@ -2734,6 +2735,72 @@ async function loadScnPresets(keepPos = true) {
     if (p.id === scnPresets.current) { const f = scnPresets.presets.find(x => x.id === p.id); SCN_DRAFT = {}; scnCompute(); deepMerge(SV, f.values); SCN_DRAFT = clone(f.values); scnFill(); }
   };
 })();
+// ---------------- 현장 테스트: 게이트웨이를 골라 이벤트를 보내고 그 게이트웨이를 보는 뷰어에 뜨는지 확인
+const FT = { gws: [], gw: null, pats: [], pid: null, dur: 60, st: null, timer: null };
+try { const g = localStorage.getItem('ft:gw'); if (g !== null) FT.gw = Number(g); FT.dur = Number(localStorage.getItem('ft:dur')) || 60; } catch (e) { }
+const FT_PRIO = { high: ['위급', 'ft-high'], medium: ['주의', 'ft-med'], low: ['권고 · 기술', 'ft-low'] };
+const GW_ST = ['정상', '성능 저하', '무응답', '업링크 끊김'];
+async function ftLoadGws() {
+  try { FT.gws = (await api('/emr/gateways')).gateways; } catch (e) { return; }
+  const only = $('#ftOnlyPat').checked;
+  const list = FT.gws.filter(g => !only || g.n_conn > 0 || g.idx === FT.gw);
+  const sel = $('#ftGw');
+  sel.innerHTML = list.map(g => `<option value="${g.idx}">${esc(g.id)} #${g.gw_no} · ${esc(g.building)} ${g.floor}층 · 환자 ${g.n_conn} · ${GW_ST[g.status] || g.status}</option>`).join('') || '<option value="">게이트웨이 없음</option>';
+  if (FT.gw === null || !list.some(g => g.idx === FT.gw)) FT.gw = list.length ? list[0].idx : null;
+  if (FT.gw !== null) sel.value = String(FT.gw);
+  syncDropdowns(); ftGwInfo(); ftLoadPats();
+}
+function ftGwInfo() {
+  const g = FT.gws.find(x => x.idx === FT.gw);
+  $('#ftGwInfo').textContent = g ? `${GW_ST[g.status] || g.status} · 연결 패치 ${g.n_conn}/${g.capacity} · 게이트웨이 번호 #${g.gw_no} · IP ${g.ip} · MAC ${g.mac} · 라우터 연결 ${g.connected ? '됨' : '안 됨'}` : '';
+}
+async function ftLoadPats() {
+  if (FT.gw === null) { $('#ftPats').innerHTML = ''; return; }
+  try { FT.pats = (await api(`/emr/gateways/${FT.gw}/patients`)).patients || []; } catch (e) { FT.pats = []; }
+  if (FT.pid !== null && !FT.pats.some(p => p.id === FT.pid)) FT.pid = null;
+  $('#ftPats').innerHTML = `<button class="ft-pat ${FT.pid === null ? 'on' : ''}" data-pid="">전체 <span class="sub">${FT.pats.length}명</span></button>` +
+    FT.pats.map(p => `<button class="ft-pat ${FT.pid === p.id ? 'on' : ''}" data-pid="${p.id}" title="${esc(p.disease)} · ${esc(p.rhythm_label || '')}">` +
+      `<b>${esc(p.bed)}</b> ${esc(p.name)} <span class="sub">${esc(p.rhythm_label || '')}</span></button>`).join('');
+  $$('#ftPats .ft-pat').forEach(b => b.onclick = () => { FT.pid = b.dataset.pid === '' ? null : Number(b.dataset.pid); $$('#ftPats .ft-pat').forEach(x => x.classList.toggle('on', x === b)); });
+}
+function ftRenderEvents() {
+  if (!FT.st) return;
+  const by = { high: [], medium: [], low: [] };
+  FT.st.events.forEach(e => by[e.prio].push(e));
+  $('#ftEvents').innerHTML = Object.entries(by).map(([k, evs]) => `<div class="ft-group ${FT_PRIO[k][1]}"><div class="ft-glabel">${FT_PRIO[k][0]}</div><div class="ft-evs">` +
+    evs.map(e => `<button class="ft-ev" data-ev="${e.id}" title="뷰어에서 확인: ${esc(e.expect)}"><b>${esc(e.label)}</b><span>${esc(e.expect)}</span></button>`).join('') + `</div></div>`).join('');
+  $$('#ftEvents .ft-ev').forEach(b => b.onclick = () => ftSend(b.dataset.ev, b));
+}
+async function ftSend(ev, btn) {
+  if (FT.gw === null) { toast('게이트웨이를 고르세요'); return; }
+  btn.disabled = true;
+  try {
+    const r = await post('/fieldtest', { gw: FT.gw, event: ev, patient_id: FT.pid, duration: FT.dur });
+    if (r.ok === false) toast('보내지 못함: ' + (r.error || '')); else toast(`${new Date((r.sent_at || Date.now() / 1000) * 1000).toLocaleTimeString('ko-KR')} 전송 — ${r.message.replace('[현장 테스트] ', '')}`);
+  } catch (e) { toast('실패: ' + e.message); }
+  setTimeout(() => { btn.disabled = false; }, 600);
+  ftLoad(); setTimeout(ftLoadPats, 1500);
+}
+async function ftLoad() {
+  try { FT.st = await api('/fieldtest'); } catch (e) { return; }
+  if (!$('#ftEvents .ft-ev')) ftRenderEvents();
+  const act = FT.st.active;
+  $('#ftActN').textContent = act.length ? `${act.length}건` : '';
+  const t = (s) => s >= 60 ? `${Math.floor(s / 60)}분 ${s % 60}초` : `${s}초`;
+  $('#ftActive tbody').innerHTML = act.map(a => `<tr><td><span class="ft-dot ${FT_PRIO[a.prio][1]}"></span>${esc(a.label)}</td><td>${esc(a.gw_id)}${a.patient ? ' · ' + esc(a.patient) : ''}</td>` +
+    `<td class="mono">${t(a.remaining_s)}</td><td><button class="small" data-ftc="${a.id}">복귀</button></td></tr>`).join('') || '<tr><td colspan="4" class="sub">진행 중인 테스트가 없습니다</td></tr>';
+  $$('#ftActive [data-ftc]').forEach(b => b.onclick = async () => { await post('/fieldtest/clear', { id: Number(b.dataset.ftc) }); ftLoad(); });
+  $('#ftHist').innerHTML = FT.st.history.map(h => `<div class="ft-hrow"><span class="mono">${new Date(h.t_wall * 1000).toLocaleTimeString('ko-KR')}</span><span class="ft-dot ${FT_PRIO[h.prio][1]}"></span>` +
+    `<b>${esc(h.label)}</b><span class="sub one">${esc(h.gw_id)} · ${esc(h.who)} · ${h.dur}초${h.skipped ? ` · 제외 ${h.skipped}` : ''}</span></div>`).join('') || '<div class="sub">아직 보낸 이벤트가 없습니다</div>';
+  const run = document.querySelector('#runTxt'); $('#ftTx').textContent = run ? `· ${run.textContent}` : '';
+}
+$('#ftGw').addEventListener('change', () => { FT.gw = Number($('#ftGw').value); FT.pid = null; try { localStorage.setItem('ft:gw', FT.gw); } catch (e) { } ftGwInfo(); ftLoadPats(); });
+$('#ftOnlyPat').onchange = ftLoadGws;
+$('#ftGwRefresh').onclick = ftLoadGws;
+$$('#ftDur button').forEach(b => { b.classList.toggle('on', Number(b.dataset.s) === FT.dur); b.onclick = () => { FT.dur = Number(b.dataset.s); try { localStorage.setItem('ft:dur', FT.dur); } catch (e) { } $$('#ftDur button').forEach(x => x.classList.toggle('on', x === b)); }; });
+$('#ftClearAll').onclick = async () => { const r = await post('/fieldtest/clear', {}); toast(`정상 복귀 ${r.cleared}건`); ftLoad(); };
+setInterval(() => { if (document.querySelector('section[data-tab="test"].on')) { ftLoad(); if (!FT.gws.length) ftLoadGws(); } }, 1000);
+setInterval(() => { if (document.querySelector('section[data-tab="test"].on')) ftLoadGws(); }, 10000);
 // ---------------- 한 줄 상태 표시: 잘린 내용은 마우스를 올리면 전체
 $$('.one').forEach(el => new MutationObserver(() => { el.title = el.textContent; }).observe(el, { childList: true, characterData: true, subtree: true }));
 // ---------------- 설명 문구: 긴 도움말은 두 줄로 접고 눌러서 펼친다

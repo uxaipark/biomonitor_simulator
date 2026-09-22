@@ -269,7 +269,7 @@ class Gather:
         hr = np.where(hr > 0, np.rint(hr * hs), 0).astype(np.int16)
         rr = np.where(rr > 0, np.rint(rr + p["rr_add"]), 0).astype(np.int16)
         sp = np.where(sp > 0, np.clip(np.rint(sp + p["spo2_add"]), 0, 100), 0).astype(np.int16)
-        hr = np.where(hr_ov > 0, hr_ov, hr)
+        hr = np.where(hr_ov == 255, 0, np.where(hr_ov > 0, hr_ov, hr))     # 255 = 현장 테스트 무수축 (HR 0)
         if self.rs_keys.size:                                                     # 실제 시그널: 파일에서 검출한 HR
             fs = int(self.st.ctl[CTL["ecg_fs"]]) or 250
             for i in np.flatnonzero(np.isin(rows, self.rs_keys)):
