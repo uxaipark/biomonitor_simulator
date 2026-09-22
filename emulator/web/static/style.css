@@ -1021,3 +1021,7 @@ label.chk.sub-opt{padding-left:26px}
 .wg-steps{margin:4px 0 0;padding-left:20px;font-size:13px;line-height:1.6}
 .wg-steps li{margin-bottom:3px}
 .wg-steps li::marker{font-weight:700;color:var(--acc)}
+/* 검색 입력: main 쪽 입력 규칙(padding:6px 10px)이 덮어써 돋보기와 글자가 겹치던 것 */
+main .clr input[type=text], main .clr input[type=search], .clr input[type=text]{padding-left:38px;padding-right:40px}
+/* 루프 파일 은행 목록: 세로 스크롤 없이 내용 높이만큼 */
+#bankFiles .tbl{max-height:none;overflow-y:visible;overflow-x:auto}

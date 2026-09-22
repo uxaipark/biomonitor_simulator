@@ -120,7 +120,7 @@ const TAB_GROUPS = [
   { id: 'dash', title: '운영 현황', show: ['dash'] },
   { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
   { id: 'hosp', title: '병원', show: ['hosp'] },
-  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 월드 생성 · 송출 (show[1] 이 바뀜)
+  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 시그널 송출 · 바이오 월드 생성 (show[1] 이 바뀜)
   { id: 'test', title: '테스트', show: ['test'] },
   { id: 'log', title: '로그', show: ['log'] },
   { id: 'data', title: '데이터', show: ['data'] },
@@ -150,8 +150,8 @@ function showLogView(v) {
   if (v === 'chat') chatOpen();
   updateLinkPolling();
 }
-// 에뮬레이터 설정 하위 메뉴: 시나리오 / 월드 생성 / 송출
-const EMU_VIEWS = ['scn', 'struct', 'tx'];
+// 에뮬레이터 설정 하위 메뉴: 시나리오 / 시그널 송출 / 바이오 월드 생성
+const EMU_VIEWS = ['scn', 'tx', 'struct'];
 let emuView = 'scn'; try { const v = localStorage.getItem('emuView'); if (EMU_VIEWS.includes(v)) emuView = v; } catch (e) { }
 function setEmuView(v) {
   emuView = EMU_VIEWS.includes(v) ? v : 'scn';
