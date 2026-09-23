@@ -32,6 +32,7 @@ from ..signals.accel import ACTIVITIES
 from ..signals.slow import TEMP_PROFILES, GLUCOSE_PROFILES
 from ..signals import trend as trend_model
 from .realism import Realism
+from ..hospital.layout import CEIL_H
 from .state import SharedState, CTL, FUZZ_KINDS, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED, FLAG_NEW_PATCH, FLAG_CHARGING
 
 ACT_ID = {a: i for i, a in enumerate(ACTIVITIES)}
@@ -2107,7 +2108,11 @@ class World:
         out = []
         for g in h.gateways:
             i = g["idx"]
+            mobile = g["type"] == "mobile"
             out.append({"idx": i, "id": g["id"], "gw_no": g["gw_no"], "type": g["type"], "building": g["building"], "floor": g["floor"], "room": h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else "",
+                        # 물리 설치 위치: 병실·복도 게이트웨이는 그 공간 천정 한가운데 (x·y 는 도면과 같은 미터 좌표)
+                        "x": None if mobile else g["x"], "y": None if mobile else g["y"], "z": None if mobile else CEIL_H,
+                        "mount": "mobile" if mobile else "ceiling", "building_idx": g["building_idx"], "room_idx": g["room_idx"],
                         "status": int(G["status"][i]), "n_conn": int(G["n_conn"][i]), "capacity": g["capacity"], "cpu": int(G["cpu"][i]), "mem": int(G["mem"][i]),
                         "net": int(G["net"][i]), "wan_rssi": int(G["wan_rssi"][i]), "loss": float(G["loss"][i]), "latency_ms": float(G["latency_ms"][i]),
                         "uptime_s": int(G["uptime_s"][i]), "pkts": int(S["pkts"][i]), "bytes": int(S["bytes"][i]), "connected": bool(S["connected"][i]),

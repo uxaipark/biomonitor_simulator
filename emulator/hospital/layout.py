@@ -29,6 +29,7 @@ CORR_W = 3.0                      # corridor effective width: >=3.0 m for medica
 ROOM_D = 6.6                      # patient room depth (m)
 ROOM_W = {1: 4.2, 2: 5.8, 3: 7.4, 4: 7.4, 5: 9.8, 6: 9.8, 8: 12.2}   # room width by bed count (>=1.5 m between beds, >=6.3 m2/bed, WC inside)
 WC_W, WC_D = 1.7, 2.2              # en-suite toilet cell (door-side corner)
+CEIL_H = 2.7                        # 층 천정 높이 (m): 병실·복도 게이트웨이는 천정에 붙는다
 DOOR_W, DOOR_CLEAR = 1.2, 0.35     # 병실 출입문 유효 폭(침대 통과)과 문 양옆 여유 — 이 구간에는 침대를 두지 않는다
 WARD_SPECIALTIES = ["심장내과", "순환기내과", "흉부외과", "내분비내과", "호흡기내과", "신장내과", "신경과",
                     "소화기내과", "종양내과", "정형외과", "감염내과", "일반외과"]
@@ -138,9 +139,9 @@ class Floor:
                 "rooms": self.rooms, "corridors": self.corridors, "fixtures": self.fixtures, "wards": self.wards}
 
 
-BED_HW, BED_HL = 0.45, 1.0          # 침대 반폭 · 반길이 (0.9 x 2.0 m)
+BED_HW, BED_HL = 0.54, 1.2          # 침대 반폭 · 반길이 (1.08 x 2.4 m — 기본 0.9 x 2.0 에서 20 % 크게)
 BED_WALL = 0.1                      # 머리판과 벽 사이 틈
-BED_GAP = 2 * 0.45                  # 침대 사이 간격 = 침대 한 대 폭 (0.9 m)
+BED_GAP = 2 * 0.54                  # 침대 사이 간격 = 침대 한 대 폭
 
 
 def _bed_slots(a: float, b: float, k: int) -> list[float]:
@@ -208,6 +209,14 @@ def bed_positions(rid: str, poly, n: int, angle: float = 0.0, door: str = "S") -
         per_side = min(2, per_side_max, math.ceil(n / 2))           # 양옆에 기본 두 대씩
         while per_side * 2 > n and per_side > 1:
             per_side -= 1
+        while per_side < min(per_side_max, math.ceil(n / 2)):        # 창측 줄이 한 대 폭만큼 못 벌어지면 옆벽 줄을 늘린다
+            rest_n = n - per_side * 2
+            if rest_n <= 1:
+                break
+            span = U - 2 * (2 * BED_HL + 2 * BED_WALL + BED_HW)      # 창측 줄에서 침대 중심이 놓일 수 있는 폭 (양옆 침대 길이를 뺀 나머지)
+            if span >= (rest_n - 1) * (2 * BED_HW + BED_GAP) - 0.01:
+                break
+            per_side += 1
         left = [(BED_HL + BED_WALL, BED_HW + BED_WALL + side_pitch * i, head_u) for i in range(per_side)]                      # 머리는 왼쪽 벽
         right = [(U - BED_HL - BED_WALL, BED_HW + BED_WALL + side_pitch * i, (head_u + 180) % 360) for i in range(per_side)]   # 머리는 오른쪽 벽
         for i in range(per_side):                                   # 바깥(창측)부터 좌·우 짝으로

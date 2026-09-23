@@ -11,6 +11,8 @@ import math
 
 import numpy as np
 
+from .layout import CEIL_H
+
 from .names import staff_name
 from . import layout as L
 
@@ -27,6 +29,37 @@ _GW_KIND = {"room": "room", "corridor": "corridor", "elevator": "elevator", "sta
 GW_COVER_M = 8.5                     # design reach of a ceiling gateway in open space (10 m nominal minus margin)
 CROWD_DENSITY = {"lobby": 0.25, "waiting": 0.30, "lounge": 0.20, "reception": 0.20}   # peak persons per m² (outpatient morning)
 PATCHED_SHARE = 0.5                  # share of people in a public area who wear a monitored patch
+
+
+def _gw_spots_from_beds(room: dict, n: int) -> list[tuple[float, float]]:
+    """병실 천정 게이트웨이 자리: 침대 방향까지 보고 환자 상체가 오는 점들의 무게중심.
+    n 대면 방의 긴 축으로 침대를 나눠 묶음마다 하나씩.  방 안쪽으로 0.4 m, 문 앞 통로는 피한다."""
+    beds = room.get("beds") or []
+    if not beds:
+        return []
+    chest = []
+    for b in beds:
+        a = math.radians(b.get("angle", 0.0))
+        chest.append((b["x"] + 0.5 * math.sin(a), b["y"] - 0.5 * math.cos(a)))     # 머리에서 발쪽으로 0.5 m (환자 가슴)
+    x0, y0, x1, y1 = _poly_bbox(room["poly"])
+    axis = 0 if (x1 - x0) >= (y1 - y0) else 1
+    pts = sorted(chest, key=lambda p: p[axis])
+    out = []
+    for k in range(n):
+        grp = pts[k * len(pts) // n:(k + 1) * len(pts) // n] or [pts[min(k, len(pts) - 1)]]
+        gx = sum(p[0] for p in grp) / len(grp)
+        gy = sum(p[1] for p in grp) / len(grp)
+        seg = room.get("door_seg")
+        if seg:                                                                     # 문 앞 통로(1.2 m)는 비워 둔다
+            mx, my = (seg[0][0] + seg[1][0]) / 2, (seg[0][1] + seg[1][1]) / 2
+            dx, dy = gx - mx, gy - my
+            d = math.hypot(dx, dy)
+            if d < 1.2:
+                ux, uy = (room["cx"] - mx, room["cy"] - my)
+                ul = math.hypot(ux, uy) or 1.0
+                gx, gy = mx + ux / ul * 1.2, my + uy / ul * 1.2
+        out.append((min(max(gx, x0 + 0.4), x1 - 0.4), min(max(gy, y0 + 0.4), y1 - 0.4)))
+    return out
 
 
 def _poly_bbox(poly):
@@ -128,10 +161,16 @@ class Hospital:
                         expected = (x1 - x0) * (y1 - y0) * dens * PATCHED_SHARE
                         n_cap = max(1, math.ceil(expected / (0.75 * self.gw_capacity) - 1e-6))
                         n = max(n_cover, n_cap)
+                        # 병실은 침대 배치를 따른다: 환자 상체(머리에서 0.5 m) 위치들의 무게중심 천정에 건다.
+                        # 침대가 없는 공간(간호사실·로비 등)은 예전처럼 공간을 고르게 나눠 건다.
+                        spots = _gw_spots_from_beds(r, n) if r.get("beds") else []
                         for k in range(n):
-                            t = (k + 0.5) / n
-                            gx = x0 + t * (x1 - x0) if (x1 - x0) >= (y1 - y0) else r["cx"]
-                            gy = y0 + t * (y1 - y0) if (x1 - x0) < (y1 - y0) else r["cy"]
+                            if spots:
+                                gx, gy = spots[k]
+                            else:
+                                t = (k + 0.5) / n
+                                gx = x0 + t * (x1 - x0) if (x1 - x0) >= (y1 - y0) else r["cx"]
+                                gy = y0 + t * (y1 - y0) if (x1 - x0) < (y1 - y0) else r["cy"]
                             idxs.append(self._add_gateway(gtype, bidx, floor, gx, gy, ridx))
                     else:
                         idxs.append(self._add_gateway(gtype, bidx, floor, r["cx"], r["cy"], ridx))
@@ -279,8 +318,10 @@ class Hospital:
     def export_layout(self) -> dict:
         """Full plan for the router: layout JSON + derived gateways (row, hardware number, position) + bed ids."""
         out = {k: v for k, v in self.layout.items()}
+        # x·y 는 도면과 같은 미터 좌표, z 는 바닥에서의 높이: 병실·복도 게이트웨이는 그 공간 천정(CEIL_H)에 건다
         out["gateways"] = [{"row": g["idx"], "gw_no": g["gw_no"], "id": g["id"], "mac": g["mac"], "type": g["type"], "building_idx": g["building_idx"], "floor": g["floor"],
-                            "x": g["x"], "y": g["y"], "room": self.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else None, "capacity": g["capacity"]} for g in self.gateways]
+                            "x": g["x"], "y": g["y"], "z": None if g["type"] == "mobile" else CEIL_H, "mount": "mobile" if g["type"] == "mobile" else "ceiling",
+                            "room": self.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else None, "capacity": g["capacity"]} for g in self.gateways]
         out["wards"] = [{"id": w["id"], "name": w["name"], "specialty": w["specialty"], "building_idx": w["building_idx"], "floor": w["floor"],
                          "rooms": [self.rooms[i]["id"] for i in w["room_idxs"]], "beds": [self.beds[b]["id"] for b in w["bed_idxs"]]} for w in self.wards]
         out["exam_rooms"] = {k: self.rooms[v]["id"] for k, v in self.exam_rooms.items()}

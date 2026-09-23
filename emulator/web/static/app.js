@@ -1113,7 +1113,7 @@ function doorSvg(seg, cx, cy) {
     `<line class="doorleaf" x1="${a[0]}" y1="${a[1]}" x2="${ex.toFixed(2)}" y2="${ey.toFixed(2)}"/>`;
 }
 function bedIcon(b, cls, title) {
-  return `<g class="bed ${cls}" transform="translate(${b.x},${b.y}) rotate(${b.angle || 0})"><title>${esc(title || b.id)}</title><rect x="-0.45" y="-1.0" width="0.9" height="2.0" rx="0.15"/><rect class="pillow" x="-0.45" y="-1.0" width="0.9" height="0.4"/></g>`;
+  return `<g class="bed ${cls}" transform="translate(${b.x},${b.y}) rotate(${b.angle || 0})"><title>${esc(title || b.id)}</title><rect x="-0.54" y="-1.2" width="1.08" height="2.4" rx="0.18"/><rect class="pillow" x="-0.54" y="-1.2" width="1.08" height="0.48"/></g>`;
 }
 function displayIcon(f) {
   return `<g class="disp ${f.subtype}" transform="translate(${f.x},${f.y}) rotate(${f.angle || 0})"><title>${esc(f.label || '전광판')} (${f.subtype})</title><rect x="-0.8" y="-0.45" width="1.6" height="0.9" rx="0.1"/><rect class="scr" x="-0.68" y="-0.35" width="1.36" height="0.7"/><rect x="-0.12" y="0.45" width="0.24" height="0.3"/><polyline class="wave" points="-0.55,0 -0.4,0 -0.3,-0.22 -0.2,0.22 -0.1,0 0.15,0 0.25,-0.15 0.35,0.15 0.45,0"/></g>`;
@@ -1203,7 +1203,7 @@ async function loadFloor() {
     const cx = x - Math.sin(a) * oy, cy = y + Math.cos(a) * oy, HW = hw * c + hh * sn, HH = hw * sn + hh * c;
     return [cx - HW - 0.1, cy - HH - 0.1, cx + HW + 0.1, cy + HH + 0.1];
   };
-  const bedBox = (b) => rotBox(b.x, b.y, 0.45, 1.0, b.angle);
+  const bedBox = (b) => rotBox(b.x, b.y, 0.54, 1.2, b.angle);   // 침대 1.08 x 2.4 m
   const fixBox = (f) => f.type === 'display' ? rotBox(f.x, f.y, 0.8, 0.6, f.angle, 0.15) : (f.type === 'nurse_desk' || f.type === 'reception') ? rotBox(f.x, f.y, 1.5, 0.4, f.angle) : rotBox(f.x, f.y, 0.6, 0.6, f.angle);
   const allFix = (m.fixtures || []).map(f => ({ ...f, box: fixBox(f) }));
   const roomFixBoxes = (r) => allFix.filter(f => f.room === r.id).map(f => f.box);
