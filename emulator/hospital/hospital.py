@@ -32,7 +32,7 @@ PATCHED_SHARE = 0.5                  # share of people in a public area who wear
 
 
 def _gw_spots_from_beds(room: dict, n: int) -> list[tuple[float, float]]:
-    """병실 천정 게이트웨이 자리: 침대 방향까지 보고 환자 상체가 오는 점들의 무게중심.
+    """병실 천정 게이트웨이 자리: 침대 방향까지 보고 환자 가슴(침대 중심에서 머리 쪽 0.5 m) 점들의 무게중심.
     n 대면 방의 긴 축으로 침대를 나눠 묶음마다 하나씩.  방 안쪽으로 0.4 m, 문 앞 통로는 피한다."""
     beds = room.get("beds") or []
     if not beds:
@@ -40,7 +40,7 @@ def _gw_spots_from_beds(room: dict, n: int) -> list[tuple[float, float]]:
     chest = []
     for b in beds:
         a = math.radians(b.get("angle", 0.0))
-        chest.append((b["x"] + 0.5 * math.sin(a), b["y"] - 0.5 * math.cos(a)))     # 머리에서 발쪽으로 0.5 m (환자 가슴)
+        chest.append((b["x"] + 0.5 * math.sin(a), b["y"] - 0.5 * math.cos(a)))     # 침대 중심에서 머리 쪽으로 0.5 m (환자 가슴)
     x0, y0, x1, y1 = _poly_bbox(room["poly"])
     axis = 0 if (x1 - x0) >= (y1 - y0) else 1
     pts = sorted(chest, key=lambda p: p[axis])
