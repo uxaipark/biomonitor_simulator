@@ -1121,7 +1121,7 @@ function gwWifi(x, y) {
   return `<circle cx="${x}" cy="${cy.toFixed(3)}" r="0.045" fill="#fff" pointer-events="none"/>` + arc(0.13) + arc(0.24);
 }
 function bedIcon(b, cls, title) {
-  return `<g class="bed ${cls}" transform="translate(${b.x},${b.y}) rotate(${b.angle || 0})"><title>${esc(title || b.id)}</title><rect x="-0.54" y="-1.2" width="1.08" height="2.4" rx="0.18"/><rect class="pillow" x="-0.54" y="-1.2" width="1.08" height="0.48"/></g>`;
+  return `<g class="bed ${cls}" transform="translate(${b.x},${b.y}) rotate(${b.angle || 0})"><title>${esc(title || b.id)}</title><rect x="-0.54" y="-1.2" width="1.08" height="2.4" rx="0.14"/><rect class="pillow" x="-0.42" y="-1.1" width="0.84" height="0.42" rx="0.08"/></g>`;
 }
 function displayIcon(f) {
   return `<g class="disp ${f.subtype}" transform="translate(${f.x},${f.y}) rotate(${f.angle || 0})"><title>${esc(f.label || '전광판')} (${f.subtype})</title><rect x="-0.8" y="-0.45" width="1.6" height="0.9" rx="0.1"/><rect class="scr" x="-0.68" y="-0.35" width="1.36" height="0.7"/><rect x="-0.12" y="0.45" width="0.24" height="0.3"/><polyline class="wave" points="-0.55,0 -0.4,0 -0.3,-0.22 -0.2,0.22 -0.1,0 0.15,0 0.25,-0.15 0.35,0.15 0.45,0"/></g>`;
@@ -1150,10 +1150,10 @@ async function loadFloor() {
       .lbl.small{font-size:0.62px;fill:#5a6672}
       .lbl.start{text-anchor:start}
       .lbl.end{text-anchor:end}
-      .bed rect{fill:#fff;stroke:#6a8;stroke-width:0.08}.bed .pillow{fill:#6a8;stroke:none}
-      .bed.occ rect{stroke:#2b7fc2}.bed.occ .pillow{fill:#2b7fc2}
-      .bed.lead rect{stroke:#d98a00}.bed.lead .pillow{fill:#d98a00}
-      .bed.lost rect{stroke:#d33}.bed.lost .pillow{fill:#d33}
+      .bed rect{fill:#fff;stroke:#7d8a96;stroke-width:0.06}.bed .pillow{fill:#eef1f4;stroke:#7d8a96;stroke-width:0.05}
+      .bed.lead .pillow{fill:#f6c56b}.bed.lost .pillow{fill:#f19a9a}
+      .rno{font-weight:800;fill:#2b3540;text-anchor:middle;pointer-events:none;letter-spacing:0.02em}
+      .rno-sub{fill:#5a6672;text-anchor:middle;pointer-events:none}
       .bed.er rect{stroke:#c66}.bed.er .pillow{fill:#c66}
       .disp rect{fill:#1b2733;stroke:#0aa8e6;stroke-width:0.06}.disp .scr{fill:#0d1a26;stroke:none}.disp .wave{fill:none;stroke:#3ddc97;stroke-width:0.07}
       .desk{fill:#e9b96e;stroke:#a86f1a;stroke-width:0.08}
@@ -1244,27 +1244,26 @@ async function loadFloor() {
     if (r.door_seg) out += doorSvg(r.door_seg, r.cx, r.cy);                          // 복도측 벽 가운데 출입문 (벽을 끊고 여닫이 표시)
     const [x0, y0, x1, y1] = bbox(r.poly); const w = x1 - x0, h = y1 - y0;
     if (r.kind === 'room' || r.kind === 'isolation') {
-      const occ = (r.beds || []).filter(b => patByBed[b.id]).length;
-      const txt = `${r.name} ${occ}/${(r.beds || []).length}`; const fit = fitLabel(txt, w, 1.6, 1, [0.85, 0.72, 0.6]);
-      let lbl = null;                                                                // label box (for gateway collision)
-      // 침대는 창측(바깥)에 붙으므로 방 이름은 비어 있는 문쪽 벽에 둔다
-      const dm = r.door_seg ? [(r.door_seg[0][0] + r.door_seg[1][0]) / 2, (r.door_seg[0][1] + r.door_seg[1][1]) / 2] : null;
-      const atBottom = !!dm && dm[1] > r.cy + 0.1, lx = dm && dm[0] > r.cx + 0.1 ? x1 - 0.35 : x0 + 0.35;
-      const anchor = dm && Math.abs(dm[0] - r.cx) > Math.abs(dm[1] - r.cy) ? (dm[0] > r.cx ? 'end' : 'start') : 'start';
-      if (fit) {
-        const ty = atBottom ? y1 - 0.35 : y0 + 0.35 + fit.fs;
-        const tx = anchor === 'end' ? lx : x0 + 0.35;
-        labels += `<text class="lbl ${anchor === 'end' ? 'end' : 'start'}" x="${tx}" y="${ty}" style="font-size:${fit.fs}px">${esc(r.name)} <tspan class="small">${occ}/${(r.beds || []).length}</tspan></text>`;
-        const tw = textWidth(txt, fit.fs);
-        lbl = anchor === 'end' ? [tx - tw - 0.2, ty - fit.fs - 0.2, tx + 0.2, ty + 0.2] : [tx - 0.15, ty - fit.fs - 0.2, tx + tw + 0.2, ty + 0.2];
-      } else {
-        const fit2 = fitLabel(txt, w, Math.max(1.6, h * 0.45), 2, [0.72, 0.6, 0.5]);       // narrow (isolation) room: two lines along the top wall
-        if (fit2) {
-          const th2 = fit2.lines.length * fit2.fs * 1.15, lw2 = Math.max(...fit2.lines.map(l => textWidth(l, fit2.fs)));
-          labels += labelSvg(r.cx, y0 + 0.35 + th2 / 2, fit2);
-          lbl = [r.cx - lw2 / 2 - 0.2, y0 + 0.2, r.cx + lw2 / 2 + 0.2, y0 + 0.35 + th2 + 0.2];
-        }
+      // 라우터 뷰어와 같은 표기: 굵고 큰 호실 번호를 방 가운데와 문 사이에, 특수실은 아래에 작은 부제
+      const nm = String(r.name || ''), mm = nm.match(/^(\d+)\s*(.*)$/);
+      const num = mm ? mm[1] : nm, sub = mm ? mm[2].trim() : '';
+      const dm = r.door_seg ? [(r.door_seg[0][0] + r.door_seg[1][0]) / 2, (r.door_seg[0][1] + r.door_seg[1][1]) / 2] : [r.cx, y1];
+      // 가운데 게이트웨이(아이콘 + 번호, 약 1.15 m)와 문 여닫이(약 1.3 m) 사이 빈 곳에 맞춰 크기·위치를 정한다
+      const dd = Math.hypot(dm[0] - r.cx, dm[1] - r.cy) || 1, alongY = Math.abs(dm[1] - r.cy) >= Math.abs(dm[0] - r.cx);
+      let fs = Math.max(0.8, Math.min(1.6, Math.min(w, h) * 0.26)), sfs, off = 0;
+      for (let k = 0; k < 6; k++) {
+        sfs = Math.max(0.36, fs * 0.36);
+        const half = alongY ? (fs * 0.75 + (sub ? sfs * 1.4 : 0)) / 2 : Math.max(textWidth(num, fs), sub ? textWidth(sub, sfs) : 0) / 2;
+        const lo = 0.55 + half, hi = dd - 1.3 - half;                  // 병실 게이트웨이는 번호 없이 아이콘만 (반지름 0.36)
+        if (lo <= hi) { off = (lo + hi) / 2; break; }
+        fs *= 0.85; off = Math.max(0.9, hi);
       }
+      const lx = r.cx + (dm[0] - r.cx) / dd * off, ly = r.cy + (dm[1] - r.cy) / dd * off;
+      const ty = ly + fs * 0.36 - (sub ? sfs * 0.7 : 0);
+      labels += `<text class="rno" x="${lx.toFixed(2)}" y="${ty.toFixed(2)}" style="font-size:${fs.toFixed(2)}px">${esc(num)}</text>` +
+        (sub ? `<text class="rno-sub" x="${lx.toFixed(2)}" y="${(ty + sfs * 1.35).toFixed(2)}" style="font-size:${sfs.toFixed(2)}px">${esc(sub)}</text>` : '');
+      const tw = Math.max(textWidth(num, fs), sub ? textWidth(sub, sfs) : 0);
+      let lbl = [lx - tw / 2 - 0.2, ty - fs - 0.1, lx + tw / 2 + 0.2, ty + (sub ? sfs * 1.6 : 0) + 0.2];   // label box (for gateway collision)
       if (lbl) roomLbl[r.idx] = lbl;
       if (r.gateway_idx >= 0) {
         // ward room: ceiling gateway at the room centre; if a bed, monitor or the name label sits there, slide it toward the corridor door
@@ -1343,7 +1342,9 @@ async function loadFloor() {
       // ceiling gateway: drawn near the room's top-right corner so beds and labels stay readable
       let gx = g.x, gy = g.y; const rr = roomByIdx[g.room_idx];
       const slot = rr && roomGws[rr.idx] ? roomGws[rr.idx].findIndex(q => q.idx === g.idx) : 0;
-      if (rr && gwPos[rr.idx]) { const p = gwPos[rr.idx][slot] || gwPos[rr.idx][0]; gx = p.x; gy = p.y; }
+      if (rr && (rr.kind === 'room' || rr.kind === 'isolation')) {
+        // 병실 게이트웨이: 물리 설치 위치(방 정중앙 천정) 그대로 그린다 — 라우터와 같은 좌표
+      } else if (rr && gwPos[rr.idx]) { const p = gwPos[rr.idx][slot] || gwPos[rr.idx][0]; gx = p.x; gy = p.y; }
       else if (rr && rr.kind !== 'corridor' && rr.poly) {
         const [x0, y0, x1, y1] = bbox(rr.poly);
         if (x1 - x0 > 2.2 && y1 - y0 > 2.2) { const p = placeGw(rr, g.x, g.y, (rr.beds || []).map(bedBox).concat(roomFixBoxes(rr)), x0, y0, x1, y1); gx = p.x; gy = p.y; }
@@ -1364,7 +1365,7 @@ async function loadFloor() {
       gwFinal.push({ x: gx, y: gy });                                   // final marker position: patient markers keep clear of it
       // 라우터 뷰어와 같은 모양: 채운 원 안에 흰색 와이파이 (정상 파랑 · 성능 저하 주황 · 무응답 빨강 · 업링크 끊김 회색)
       const gfill = g.status === 3 ? '#8a96a3' : g.status === 2 ? th.err : g.status === 1 ? th.warn : '#2f8cf0';
-      gwOut += `<g class="gw ${g.status >= 2 ? 'down' : ''}" data-gwidx="${g.idx}" style="cursor:pointer"><circle cx="${gx}" cy="${gy}" r="0.36" fill="${gfill}" stroke="#fff" stroke-width="0.06"><title>${g.id} #${g.gw_no} · ${g.type} · 연결 ${g.n_conn}/${g.capacity} · CPU ${g.cpu}%${g.connected ? ' · TCP' : ''}</title></circle>${gwWifi(gx, gy)}<text class="gwlbl" x="${gx}" y="${gy + 0.95}">#${g.gw_no}</text></g>`;
+      gwOut += `<g class="gw ${g.status >= 2 ? 'down' : ''}" data-gwidx="${g.idx}" style="cursor:pointer"><circle cx="${gx}" cy="${gy}" r="0.36" fill="${gfill}" stroke="#fff" stroke-width="0.06"><title>${g.id} #${g.gw_no} · ${g.type} · 연결 ${g.n_conn}/${g.capacity} · CPU ${g.cpu}%${g.connected ? ' · TCP' : ''}</title></circle>${gwWifi(gx, gy)}${rr && (rr.kind === 'room' || rr.kind === 'isolation') ? '' : `<text class="gwlbl" x="${gx}" y="${gy + 0.95}">#${g.gw_no}</text>`}</g>`;
     });
     // patients: icon coloured by patch link quality (RSSI), name in small type next to it
     const linkCol = (p) => (p.gw < 0 || p.shadow) ? '#d33' : p.rssi >= -60 ? '#0e9f6e' : p.rssi >= -72 ? '#8bc34a' : p.rssi >= -82 ? '#f0a500' : '#e5602c';
