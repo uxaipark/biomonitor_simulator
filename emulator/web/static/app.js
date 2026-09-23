@@ -1658,11 +1658,37 @@ async function loadGateways() {
 $('#gwTable').addEventListener('click', async e => { const o = e.target.closest('[data-gwopen]'); if (o) { openGatewayMonitor(Number(o.dataset.gwopen)); return; } const b = e.target.closest('button[data-gw]'), c = e.target.closest('button[data-gwrep]'); if (b) { const r = await post('/control/trigger', { what: 'gateway_fault', target: Number(b.dataset.gw) }); toast(r.result); } else if (c) { const r = await post('/control/trigger', { what: 'gateway_replace', target: Number(c.dataset.gwrep) }); toast(r.result); } });
 // ---- map search (patients by name, gateways by number/id) with highlight on the plan
 let mapHighlight = null;
+// 검색 대상 목록(환자·게이트웨이)은 잠깐 캐시해 두고 글자마다 다시 받지 않는다
+const MAP_SRC = { t: 0, pats: null, gws: null, p: null };
+function mapSearchData() {
+  if (MAP_SRC.pats && Date.now() - MAP_SRC.t < 15000) return Promise.resolve(MAP_SRC);
+  if (!MAP_SRC.p) MAP_SRC.p = Promise.all([api('/emr/patients?limit=20000'), api('/emr/gateways')])
+    .then(([pr, gr]) => { MAP_SRC.pats = pr.patients; MAP_SRC.gws = gr.gateways; MAP_SRC.t = Date.now(); return MAP_SRC; })
+    .finally(() => { MAP_SRC.p = null; });
+  return MAP_SRC.p;
+}
+let mapSeq = 0, mapTimer = null;
+// 한글 자모 단위 비교: 조합 중인 글자('안재미' · '안재ㅁ')도 '안재민'에 걸리게
+const JAMO_L = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ', JAMO_V = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ',
+  JAMO_T = ['', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+function jamo(str) {
+  let out = '';
+  for (const ch of str) {
+    const c = ch.charCodeAt(0) - 0xAC00;
+    if (c >= 0 && c < 11172) out += JAMO_L[Math.floor(c / 588)] + JAMO_V[Math.floor((c % 588) / 28)] + JAMO_T[c % 28];
+    else out += ch;
+  }
+  return out;
+}
 async function mapSearch(q) {
+  const seq = ++mapSeq;                                             // 늦게 도착한 이전 검색 결과는 버린다 (목록 깜빡임 방지)
   const box = $('#mapRes'); q = q.trim().toLowerCase(); if (!q) { box.classList.remove('on'); box.innerHTML = ''; return; }
   const qn = q.replace(/^#/, '');                                   // '#123' -> gateway number 123
-  const [pr, gr] = await Promise.all([api('/emr/patients?limit=20000'), api('/emr/gateways')]);
-  const pats = q.startsWith('#') ? [] : pr.patients.filter(p => p.name.toLowerCase().includes(q) || String(p.patient_no) === q || (p.patch || '').toLowerCase().includes(q)).slice(0, 6);
+  let d; try { d = await mapSearchData(); } catch (e) { return; }
+  if (seq !== mapSeq) return;
+  const pr = { patients: d.pats }, gr = { gateways: d.gws };
+  const qj = jamo(q);
+  const pats = q.startsWith('#') ? [] : pr.patients.filter(p => p.name.toLowerCase().includes(q) || jamo(p.name.toLowerCase()).includes(qj) || String(p.patient_no) === q || (p.patch || '').toLowerCase().includes(q)).slice(0, 6);
   const gws = gr.gateways.filter(g => g.type !== 'mobile' && (String(g.gw_no) === qn || g.id.toLowerCase().includes(q) || (g.room || '').toLowerCase().includes(q))).slice(0, 6);
   box.innerHTML = '<div class="dd-list">' + pats.map(p => `<div class="dd-item" data-kind="patient" data-row="${p.row}" data-b="${p.building_idx}" data-f="${p.floor}">🧑‍⚕️ ${esc(p.name)} <small>${esc(p.bed || '')} · ${esc(p.ward || '')}</small></div>`).join('') +
     gws.map(g => `<div class="dd-item" data-kind="gw" data-idx="${g.idx}" data-bname="${esc(g.building)}" data-f="${g.floor}">📡 ${esc(g.id)} #${g.gw_no} <small>${esc(g.building)} ${g.floor}F ${esc(g.room || '')}</small></div>`).join('') +
@@ -1670,7 +1696,9 @@ async function mapSearch(q) {
   box.classList.add('on');
 }
 $('#mapQ').addEventListener('input', () => {
-  mapSearch($('#mapQ').value);
+  clearTimeout(mapTimer);                                           // 타자(한글 조합 포함)가 멈추면 한 번만 검색
+  const v = $('#mapQ').value;
+  if (!v.trim()) mapSearch(v); else mapTimer = setTimeout(() => mapSearch($('#mapQ').value), 180);
   if (!$('#mapQ').value.trim() && mapHighlight) {           // cleared -> drop the highlight, zoom out, unselect the gateway row
     mapHighlight = null; const svg = $('#floorMap'); $$('g.hl', svg).forEach(g => g.remove());
     if (planZoom.base) { planSetVB(planZoom.base.slice()); planZoom.on = false; svg.style.cursor = 'zoom-in'; }
