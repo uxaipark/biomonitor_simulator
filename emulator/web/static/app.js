@@ -1568,14 +1568,7 @@ function planSvgPoint(e) { const svg = $('#floorMap'); const r = svg.getBounding
     } else { planSetVB(planZoom.base.slice()); planZoom.on = false; svg.style.cursor = 'zoom-in'; }
   });
   svg.addEventListener('pointercancel', () => { planZoom.drag = null; });
-  svg.addEventListener('wheel', e => {          // wheel zoom (desktop)
-    if (!planZoom.base) return; e.preventDefault();
-    const p = planSvgPoint(e); const vb = planZoom.vb.slice(); const f = e.deltaY < 0 ? 0.8 : 1.25; const b = planZoom.base;
-    const w = Math.min(b[2], Math.max(b[2] / 8, vb[2] * f)), h = w * b[3] / b[2];
-    const nx = p.x - (p.x - vb[0]) * (w / vb[2]), ny = p.y - (p.y - vb[1]) * (h / vb[3]);
-    planSetVB([Math.max(b[0], Math.min(b[0] + b[2] - w, nx)), Math.max(b[1], Math.min(b[1] + b[3] - h, ny)), w, h]);
-    planZoom.on = w < b[2] - 0.01; svg.style.cursor = planZoom.on ? 'grab' : 'zoom-in';
-  }, { passive: false });
+  // 마우스 휠 확대는 없앰: 도면 위에서 휠을 굴리면 페이지가 그대로 스크롤된다 (확대는 누르기, 이동은 끌기)
 })();
 // ---- hover tips for rooms / gateways / patients / beds / fixtures on the plan (bigger, readable font)
 (function () {
