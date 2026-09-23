@@ -1727,8 +1727,14 @@ async function gotoPlanFloor(fi) {                                  // show a fl
   $('#selFloor').value = fi; syncDropdowns(); await loadFloor(); drawElevation();
   const pm = $('.planmain'); if (pm) pm.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
+let hlOwner = null, hlTimer = null;
 function applyHighlight() {
   if (!mapHighlight) return;
+  if (mapHighlight !== hlOwner) {                                        // 새 강조: 5초 뒤 빨간 원을 지우고 강조를 푼다 (도면을 다시 그려도 되살아나지 않게)
+    hlOwner = mapHighlight; clearTimeout(hlTimer);
+    const mine = mapHighlight;
+    hlTimer = setTimeout(() => { if (mapHighlight === mine) { mapHighlight = null; $$('#floorMap g.hl').forEach(g => g.remove()); } }, 5000);
+  }
   const svg = $('#floorMap');
   const el = mapHighlight.type === 'patient' ? svg.querySelector(`g.pat[data-row="${mapHighlight.row}"] circle, .bed[data-row="${mapHighlight.row}"]`)
     : mapHighlight.type === 'room' ? svg.querySelector(`polygon[data-rid="${mapHighlight.id}"]`) : svg.querySelector(`g.gw[data-gwidx="${mapHighlight.idx}"] circle`);
