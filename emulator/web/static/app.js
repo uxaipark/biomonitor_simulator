@@ -1101,6 +1101,17 @@ function shortName(r) {
 const pts = (poly) => poly.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' ');
 function ptIn(x, y, poly) { let inside = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside; } return inside; }
 const bbox = (poly) => { const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; };
+// 평면도의 출입문: 벽을 그 폭만큼 끊고, 경첩에서 90° 열린 문짝과 여닫이 호를 그린다
+function doorSvg(seg, cx, cy) {
+  const [a, b] = seg, mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+  const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+  let nx = cx - mx, ny = cy - my; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;      // 방 안쪽 방향
+  const ex = a[0] + nx * len, ey = a[1] + ny * len;                                            // 열린 문짝 끝
+  const sweep = (dx * ny - dy * nx) > 0 ? 1 : 0;
+  return `<line class="doorgap" x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>` +
+    `<path class="doorsw" d="M ${b[0].toFixed(2)} ${b[1].toFixed(2)} A ${len.toFixed(2)} ${len.toFixed(2)} 0 0 ${sweep} ${ex.toFixed(2)} ${ey.toFixed(2)}"/>` +
+    `<line class="doorleaf" x1="${a[0]}" y1="${a[1]}" x2="${ex.toFixed(2)}" y2="${ey.toFixed(2)}"/>`;
+}
 function bedIcon(b, cls, title) {
   return `<g class="bed ${cls}" transform="translate(${b.x},${b.y}) rotate(${b.angle || 0})"><title>${esc(title || b.id)}</title><rect x="-0.45" y="-1.0" width="0.9" height="2.0" rx="0.15"/><rect class="pillow" x="-0.45" y="-1.0" width="0.9" height="0.4"/></g>`;
 }
@@ -1123,6 +1134,9 @@ async function loadFloor() {
     <pattern id="covhatch" width="0.5" height="0.5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0,0.25 H0.5 M0.25,0 V0.5" stroke="#4a5560" stroke-width="0.04" stroke-opacity="0.7"/></pattern></defs>
     <style>
       .wall{fill:none;stroke:#2b3540;stroke-width:0.22;stroke-linejoin:round}
+      .doorgap{stroke:#fff;stroke-width:0.30;stroke-linecap:butt}
+      .doorleaf{stroke:#2b3540;stroke-width:0.10}
+      .doorsw{fill:none;stroke:#8c98a6;stroke-width:0.06;stroke-dasharray:0.22 0.18}
       .corr{fill:#f3f4f6;stroke:#c9ced6;stroke-width:0.06}
       .lbl{font-size:0.85px;fill:#1c2630;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:0.22;stroke-linejoin:round}
       .lbl.small{font-size:0.62px;fill:#5a6672}
@@ -1218,6 +1232,7 @@ async function loadFloor() {
     out += `<polygon points="${pts(r.poly)}" fill="${fill}" stroke="none" data-rid="${esc(r.id)}"><title>${esc(r.name)} · ${KIND_KO[r.kind] || r.kind}${r.ward ? ' · ' + esc(r.ward) : ''} · ${(bx1 - bx0).toFixed(1)} × ${(by1 - by0).toFixed(1)} m (${((bx1 - bx0) * (by1 - by0)).toFixed(0)} m²)${r.beds && r.beds.length ? ` · ${r.beds.length}병상 · 재원 ${occN}` : ''}${r.gateway_idx >= 0 ? ' · 게이트웨이 있음' : ''}</title></polygon>`;
     if (r.kind === 'stairs') out += `<polygon points="${pts(r.poly)}" fill="url(#hatch)" stroke="none"/>`;
     out += `<polygon class="wall" points="${pts(r.poly)}"/>`;
+    if (r.door_seg) out += doorSvg(r.door_seg, r.cx, r.cy);                          // 복도측 벽 가운데 출입문 (벽을 끊고 여닫이 표시)
     const [x0, y0, x1, y1] = bbox(r.poly); const w = x1 - x0, h = y1 - y0;
     if (r.kind === 'room' || r.kind === 'isolation') {
       const occ = (r.beds || []).filter(b => patByBed[b.id]).length;
