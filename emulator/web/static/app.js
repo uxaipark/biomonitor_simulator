@@ -1141,6 +1141,7 @@ async function loadFloor() {
       .lbl{font-size:0.85px;fill:#1c2630;text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:#fff;stroke-width:0.22;stroke-linejoin:round}
       .lbl.small{font-size:0.62px;fill:#5a6672}
       .lbl.start{text-anchor:start}
+      .lbl.end{text-anchor:end}
       .bed rect{fill:#fff;stroke:#6a8;stroke-width:0.08}.bed .pillow{fill:#6a8;stroke:none}
       .bed.occ rect{stroke:#2b7fc2}.bed.occ .pillow{fill:#2b7fc2}
       .bed.lead rect{stroke:#d98a00}.bed.lead .pillow{fill:#d98a00}
@@ -1238,9 +1239,16 @@ async function loadFloor() {
       const occ = (r.beds || []).filter(b => patByBed[b.id]).length;
       const txt = `${r.name} ${occ}/${(r.beds || []).length}`; const fit = fitLabel(txt, w, 1.6, 1, [0.85, 0.72, 0.6]);
       let lbl = null;                                                                // label box (for gateway collision)
+      // 침대는 창측(바깥)에 붙으므로 방 이름은 비어 있는 문쪽 벽에 둔다
+      const dm = r.door_seg ? [(r.door_seg[0][0] + r.door_seg[1][0]) / 2, (r.door_seg[0][1] + r.door_seg[1][1]) / 2] : null;
+      const atBottom = !!dm && dm[1] > r.cy + 0.1, lx = dm && dm[0] > r.cx + 0.1 ? x1 - 0.35 : x0 + 0.35;
+      const anchor = dm && Math.abs(dm[0] - r.cx) > Math.abs(dm[1] - r.cy) ? (dm[0] > r.cx ? 'end' : 'start') : 'start';
       if (fit) {
-        labels += `<text class="lbl start" x="${x0 + 0.35}" y="${y0 + 0.35 + fit.fs}" style="font-size:${fit.fs}px">${esc(r.name)} <tspan class="small">${occ}/${(r.beds || []).length}</tspan></text>`;
-        lbl = [x0 + 0.2, y0 + 0.2, x0 + 0.35 + textWidth(txt, fit.fs) + 0.2, y0 + 0.35 + fit.fs * 1.15 + 0.2];
+        const ty = atBottom ? y1 - 0.35 : y0 + 0.35 + fit.fs;
+        const tx = anchor === 'end' ? lx : x0 + 0.35;
+        labels += `<text class="lbl ${anchor === 'end' ? 'end' : 'start'}" x="${tx}" y="${ty}" style="font-size:${fit.fs}px">${esc(r.name)} <tspan class="small">${occ}/${(r.beds || []).length}</tspan></text>`;
+        const tw = textWidth(txt, fit.fs);
+        lbl = anchor === 'end' ? [tx - tw - 0.2, ty - fit.fs - 0.2, tx + 0.2, ty + 0.2] : [tx - 0.15, ty - fit.fs - 0.2, tx + tw + 0.2, ty + 0.2];
       } else {
         const fit2 = fitLabel(txt, w, Math.max(1.6, h * 0.45), 2, [0.72, 0.6, 0.5]);       // narrow (isolation) room: two lines along the top wall
         if (fit2) {

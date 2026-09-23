@@ -138,12 +138,36 @@ class Floor:
                 "rooms": self.rooms, "corridors": self.corridors, "fixtures": self.fixtures, "wards": self.wards}
 
 
+BED_HW, BED_HL = 0.45, 1.0          # 침대 반폭 · 반길이 (0.9 x 2.0 m)
+BED_WALL = 0.1                      # 머리판과 벽 사이 틈
+
+
 def _bed_slots(a: float, b: float, k: int) -> list[float]:
-    """구간 [a, b] 안에 침대 k 대를 고르게 (침대 폭 0.9 m + 사이 간격)."""
+    """구간 [a, b] 안에 침대 k 대: 양 끝은 벽(구간 끝)에 붙이고 나머지는 고른 간격 — 좌우 대칭."""
     if k <= 0 or b - a <= 0:
         return []
-    gap = (b - a) / k
-    return [a + gap * (i + 0.5) for i in range(k)]
+    if k == 1:
+        return [(a + b) / 2]
+    lo, hi = a + BED_HW, b - BED_HW
+    if hi <= lo:
+        return [(a + b) / 2] * k
+    step = (hi - lo) / (k - 1)
+    return [lo + step * i for i in range(k)]
+
+
+def _mirror_slots(c: float, inner: float, lo: float, hi: float, m: int) -> list[float]:
+    """문 중심 c 를 기준으로 좌우 m 대씩 대칭 배치 (안쪽 여유 inner, 바깥 한계 lo/hi)."""
+    if m <= 0:
+        return []
+    avail = min(c - inner - lo, hi - (c + inner))
+    if avail < 2 * BED_HW:
+        return []
+    step = avail / m
+    out = []
+    for j in range(m):
+        d = inner + step * j + BED_HW
+        out += [c - d, c + d]
+    return out
 
 
 def _door_span(u0: float, u1: float) -> tuple[float, float]:
@@ -154,55 +178,48 @@ def _door_span(u0: float, u1: float) -> tuple[float, float]:
 
 
 def bed_positions(rid: str, poly, n: int, angle: float = 0.0, door: str = "S") -> list[dict]:
-    """머리를 벽에 붙인 침대.  복도측 벽 가운데에는 출입문이 있으므로 그 자리에는 침대를 두지 않고
-    좌우로 나눠 배치한다(문 앞 통로 확보).  door 쪽 모서리 한 칸은 실내 화장실(WC_W x WC_D)이다.
+    """머리는 벽에, 발은 방 가운데 통로 쪽으로.  양옆 벽에 가로로 두 대씩(바깥=창측부터) 놓고, 남으면 창측 벽에
+    좌우 대칭으로 채운다.  복도측 벽 가운데는 출입문이라 침대를 두지 않는다.
     door: 회전 전 좌표에서 복도를 향한 면(N/S/E/W)."""
     cx, cy = centroid(poly)
     loc = rot(poly, cx, cy, -angle) if angle else poly
     lx0, lx1 = min(p[0] for p in loc), max(p[0] for p in loc)
     ly0, ly1 = min(p[1] for p in loc), max(p[1] for p in loc)
-    horizontal = (lx1 - lx0) >= (ly1 - ly0)
-    # u = 벽을 따라가는 축, v = 벽에서 안쪽으로 들어가는 축
-    if horizontal:
-        u0, u1, v0, v1 = lx0, lx1, ly0, ly1
-        door_at_v1 = door == "S"                                   # 화면 좌표: S = +y 쪽이 복도
+    # 지역 좌표: u = 복도 벽을 따라가는 축, v = 창측(0)에서 복도측(V)으로 들어오는 축
+    if door in ("S", "N"):
+        U, V = lx1 - lx0, ly1 - ly0
+        to_xy = (lambda u, v: (lx0 + u, ly0 + v)) if door == "S" else (lambda u, v: (lx0 + u, ly1 - v))
+        head_v, head_u = (0.0, 270.0) if door == "S" else (180.0, 270.0)
     else:
-        u0, u1, v0, v1 = ly0, ly1, lx0, lx1
-        door_at_v1 = door == "E"
-    v_door = (v1 - 1.35) if door_at_v1 else (v0 + 1.35)             # 복도측 줄: 머리를 복도 벽에
-    v_far = (v0 + 1.35) if door_at_v1 else (v1 - 1.35)              # 창측(반대편) 줄
-    if horizontal:
-        head_far, head_door = (0, 180) if door_at_v1 else (180, 0)
+        U, V = ly1 - ly0, lx1 - lx0
+        to_xy = (lambda u, v: (lx0 + v, ly0 + u)) if door == "E" else (lambda u, v: (lx1 - v, ly0 + u))
+        head_v, head_u = (270.0, 0.0) if door == "E" else (90.0, 0.0)
+    side_pitch = 2 * BED_HW + 0.1                                   # 옆벽 침대 사이 간격
+    v_room = V - (DOOR_W / 2 + DOOR_CLEAR) * 0                      # 옆벽 침대는 문 폭을 막지 않는다 (문은 u 가운데)
+    per_side_max = max(0, int((v_room - 2 * BED_HW) // side_pitch) + 1)
+    slots: list[tuple[float, float, float]] = []                    # (u, v, head)
+    if n == 1:                                                      # 1인실: 창측 벽 가운데
+        slots.append((U / 2, BED_HL + BED_WALL, head_v))
     else:
-        head_far, head_door = (270, 90) if door_at_v1 else (90, 270)
-    n_far, n_door = n, 0
-    if n > 2:                                                      # 3대 이상이면 두 줄 (창측 · 복도측)
-        n_far = math.ceil(n / 2)
-        n_door = n - n_far
-    dl, dr = _door_span(u0, u1)
-    segs = [(u0 + WC_W + 0.1, dl), (dr, u1 - 0.1)]                 # 복도측: 화장실 칸과 문 사이, 문과 반대 모서리 사이
-    caps = [max(0, int((b - a) // 1.15)) for a, b in segs]
-    while n_door > sum(caps) and n_door > 0:                        # 문·화장실을 빼고 남는 자리가 모자라면 창측으로
-        n_door -= 1
-        n_far += 1
-    put = [0, 0]
-    if n_door:
-        lens = [max(0.0, b - a) for a, b in segs]
-        tot = sum(lens) or 1.0
-        put[0] = min(caps[0], round(n_door * lens[0] / tot))
-        put[1] = n_door - put[0]
-        if put[1] > caps[1]:                                        # 한쪽이 넘치면 다른 쪽으로
-            put[0] += put[1] - caps[1]; put[1] = caps[1]
-    us = [(u, v_far, head_far) for u in _bed_slots(u0 + 0.45, u1 - 0.45, n_far)]
-    for (a, b), k, in zip(segs, put):
-        us += [(u, v_door, head_door) for u in _bed_slots(a, b, k)]
-    # 문이 침대 줄과 직각인 벽에 있는 방(좁은 1·2인실 등): 문 앞 통로에 걸리는 침대는 벽을 따라 밀어낸다
-    dz = _door_zone(lx0, lx1, ly0, ly1, door)
+        per_side = min(2, per_side_max, math.ceil(n / 2))           # 양옆에 기본 두 대씩
+        while per_side * 2 > n and per_side > 1:
+            per_side -= 1
+        left = [(BED_HL + BED_WALL, BED_HW + BED_WALL + side_pitch * i, head_u) for i in range(per_side)]                      # 머리는 왼쪽 벽
+        right = [(U - BED_HL - BED_WALL, BED_HW + BED_WALL + side_pitch * i, (head_u + 180) % 360) for i in range(per_side)]   # 머리는 오른쪽 벽
+        for i in range(per_side):                                   # 바깥(창측)부터 좌·우 짝으로
+            slots.append(left[i]); slots.append(right[i])
+        rest = n - len(slots)
+        if rest > 0:                                                # 남는 침대는 창측 벽에 좌우 대칭으로
+            u_lo = BED_HL * 2 + BED_WALL * 2 + BED_HW if per_side else BED_HW
+            u_hi = U - u_lo
+            rest_us = _bed_slots(u_lo - BED_HW, u_hi + BED_HW, rest)
+            slots += [(u, BED_HL + BED_WALL, head_v) for u in rest_us]
     out = []
-    for k, (u, v, head) in enumerate(us[:n]):
-        x, y = (u, v) if horizontal else (v, u)
+    dz = _door_zone(lx0, lx1, ly0, ly1, door)
+    for k, (u, v, head) in enumerate(slots[:n]):
+        x, y = to_xy(u, v)
         x, y = _clear_door(x, y, head, dz, lx0, lx1, ly0, ly1)
-        px, py = (rot([[x, y]], cx, cy, angle)[0] if angle else (round(x, 2), round(y, 2)))
+        px, py = (rot([[x, y]], cx, cy, angle)[0] if angle else (x, y))
         out.append({"id": f"{rid}-{chr(65 + k)}", "x": round(px, 2), "y": round(py, 2), "angle": (head + angle) % 360})
     return out
 
@@ -219,12 +236,11 @@ def _door_zone(lx0: float, lx1: float, ly0: float, ly1: float, door: str) -> tup
 
 def _clear_door(x: float, y: float, head: float, dz, lx0, lx1, ly0, ly1) -> tuple[float, float]:
     """침대 자리가 문 앞 통로에 걸리면 벽을 따라 옆으로 비킨다."""
-    hw, hl = 0.45, 1.0                                             # 침대 반폭 · 반길이
-    ax, ay = (hw, hl) if head % 180 == 0 else (hl, hw)             # 머리 방향에 따른 가로/세로 반지름
+    ax, ay = (BED_HW, BED_HL) if head % 180 == 0 else (BED_HL, BED_HW)
     zx0, zy0, zx1, zy1 = dz
     if not (x + ax > zx0 and x - ax < zx1 and y + ay > zy0 and y - ay < zy1):
         return x, y
-    if head % 180 == 0:                                             # 머리가 남/북 벽 → 그 벽을 따라 좌우로만 움직일 수 있다
+    if head % 180 == 0:                                             # 머리가 남/북 벽 → 그 벽을 따라 좌우로만
         cand = [c for c in (zx0 - ax - 0.05, zx1 + ax + 0.05) if lx0 + ax <= c <= lx1 - ax]
         return (min(cand, key=lambda c: abs(c - x)), y) if cand else (x, y)
     cand = [c for c in (zy0 - ay - 0.05, zy1 + ay + 0.05) if ly0 + ay <= c <= ly1 - ay]
