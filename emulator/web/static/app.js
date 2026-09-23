@@ -1112,6 +1112,14 @@ function doorSvg(seg, cx, cy) {
     `<path class="doorsw" d="M ${b[0].toFixed(2)} ${b[1].toFixed(2)} A ${len.toFixed(2)} ${len.toFixed(2)} 0 0 ${sweep} ${ex.toFixed(2)} ${ey.toFixed(2)}"/>` +
     `<line class="doorleaf" x1="${a[0]}" y1="${a[1]}" x2="${ex.toFixed(2)}" y2="${ey.toFixed(2)}"/>`;
 }
+// 게이트웨이 아이콘 안의 와이파이 표시 (점 + 위로 퍼지는 두 호, 흰색)
+function gwWifi(x, y) {
+  const cy = y + 0.13, arc = (r) => {
+    const dx = (r * Math.SQRT1_2).toFixed(3), dy = (cy - r * Math.SQRT1_2).toFixed(3);
+    return `<path d="M${(x - r * Math.SQRT1_2).toFixed(3)},${dy} A${r},${r} 0 0 1 ${(x + r * Math.SQRT1_2).toFixed(3)},${dy}" fill="none" stroke="#fff" stroke-width="0.055" stroke-linecap="round" pointer-events="none"/>`;
+  };
+  return `<circle cx="${x}" cy="${cy.toFixed(3)}" r="0.045" fill="#fff" pointer-events="none"/>` + arc(0.13) + arc(0.24);
+}
 function bedIcon(b, cls, title) {
   return `<g class="bed ${cls}" transform="translate(${b.x},${b.y}) rotate(${b.angle || 0})"><title>${esc(title || b.id)}</title><rect x="-0.54" y="-1.2" width="1.08" height="2.4" rx="0.18"/><rect class="pillow" x="-0.54" y="-1.2" width="1.08" height="0.48"/></g>`;
 }
@@ -1354,10 +1362,9 @@ async function loadFloor() {
       const col = gcol[g.status] || '#888';
       covCtx.gws[g.idx] = { x: gx, y: gy };
       gwFinal.push({ x: gx, y: gy });                                   // final marker position: patient markers keep clear of it
-      gwOut += `<g class="gw ${g.status >= 2 ? 'down' : ''}" data-gwidx="${g.idx}" style="cursor:pointer"><circle cx="${gx}" cy="${gy}" r="0.3" fill="${load > 0 ? '#e9eef3' : col}" stroke="${col}" stroke-width="0.06"><title>${g.id} #${g.gw_no} · ${g.type} · 연결 ${g.n_conn}/${g.capacity} · CPU ${g.cpu}%${g.connected ? ' · TCP' : ''}</title></circle>
-        ${[0.62, 0.92].map(rr => { const k = rr * 0.5, kx = rr * 0.866; return `<path d="M${(gx - kx).toFixed(3)},${(gy + k).toFixed(3)} A${rr},${rr} 0 0 1 ${(gx - kx).toFixed(3)},${(gy - k).toFixed(3)}" fill="none" stroke="${th.acc2}" stroke-width="0.11" stroke-linecap="round" opacity="0.95"/>`; }).join('')}
-        ${load > 0 ? (() => { const R = 0.3, a = Math.min(0.9999, load) * 2 * Math.PI, ex = gx + R * Math.sin(a), ey = gy - R * Math.cos(a); return `<path d="M${gx},${gy} L${gx},${(gy - R).toFixed(3)} A${R},${R} 0 ${a > Math.PI ? 1 : 0} 1 ${ex.toFixed(3)},${ey.toFixed(3)} Z" fill="${col}"/>`; })() : ''}
-        <text class="gwlbl" x="${gx}" y="${gy + 0.95}">#${g.gw_no}</text></g>`;
+      // 라우터 뷰어와 같은 모양: 채운 원 안에 흰색 와이파이 (정상 파랑 · 성능 저하 주황 · 무응답 빨강 · 업링크 끊김 회색)
+      const gfill = g.status === 3 ? '#8a96a3' : g.status === 2 ? th.err : g.status === 1 ? th.warn : '#2f8cf0';
+      gwOut += `<g class="gw ${g.status >= 2 ? 'down' : ''}" data-gwidx="${g.idx}" style="cursor:pointer"><circle cx="${gx}" cy="${gy}" r="0.36" fill="${gfill}" stroke="#fff" stroke-width="0.06"><title>${g.id} #${g.gw_no} · ${g.type} · 연결 ${g.n_conn}/${g.capacity} · CPU ${g.cpu}%${g.connected ? ' · TCP' : ''}</title></circle>${gwWifi(gx, gy)}<text class="gwlbl" x="${gx}" y="${gy + 0.95}">#${g.gw_no}</text></g>`;
     });
     // patients: icon coloured by patch link quality (RSSI), name in small type next to it
     const linkCol = (p) => (p.gw < 0 || p.shadow) ? '#d33' : p.rssi >= -60 ? '#0e9f6e' : p.rssi >= -72 ? '#8bc34a' : p.rssi >= -82 ? '#f0a500' : '#e5602c';
