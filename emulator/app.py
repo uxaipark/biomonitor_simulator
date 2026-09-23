@@ -103,7 +103,7 @@ def discovery():
                         "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|discharge|admit, target}", "autotune": "POST /api/v1/control/autotune {start|stop}",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
-                    "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
+                    "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds (x·y 중심, angle 머리 방향 도, bed_size_m 0.9 x 2.0)", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
                     "patients": "/api/v1/emr/patients?status=admitted|inpatient|mcot|pool|discharged|outpatient|all&q=&offset=&limit=", "patient": "/api/v1/emr/patients/{id}",
                     "avatar": "/api/v1/emr/patients/{id}/avatar.svg", "admissions": "/api/v1/emr/admissions (현재 입원+MCOT 환자와 패치/게이트웨이 매핑)",
                     "layout": "/api/v1/emr/layout (건축 도면 JSON v1: 건물·층·실 폴리곤·침대·복도·설비(전광판/간호사 카운터)·게이트웨이·병동·점유; 라우터는 이 JSON으로 동일 화면 구성)",
@@ -1000,7 +1000,12 @@ def emr_rooms(kind: str | None = None):
 
 @app.get("/api/v1/emr/beds")
 def emr_beds():
-    return {"beds": E().world.hospital.beds}
+    """침대 목록.  x·y 는 침대 중심(m), angle 은 머리 방향(도): 0 = 머리가 -y(도면 위)쪽, 시계 방향으로 증가.
+    90 = 머리가 +x(오른쪽 벽), 270 = 머리가 -x(왼쪽 벽).  그릴 때는 중심에서 ±(width/2) · ±(length/2) 사각형을
+    angle 만큼 돌린다 (angle 을 무시하면 옆벽 침대가 방 밖으로 삐져나온다)."""
+    from .hospital.layout import BED_HW, BED_HL
+    return {"beds": E().world.hospital.beds, "bed_size_m": {"width": round(2 * BED_HW, 2), "length": round(2 * BED_HL, 2)},
+            "angle_deg": "0 = 머리가 -y 쪽, 시계 방향 (90 = +x, 180 = +y, 270 = -x)"}
 
 
 @app.get("/api/v1/emr/trips")
