@@ -140,10 +140,12 @@ class Floor:
 
 BED_HW, BED_HL = 0.45, 1.0          # 침대 반폭 · 반길이 (0.9 x 2.0 m)
 BED_WALL = 0.1                      # 머리판과 벽 사이 틈
+BED_GAP = 2 * 0.45                  # 침대 사이 간격 = 침대 한 대 폭 (0.9 m)
 
 
 def _bed_slots(a: float, b: float, k: int) -> list[float]:
-    """구간 [a, b] 안에 침대 k 대: 양 끝은 벽(구간 끝)에 붙이고 나머지는 고른 간격 — 좌우 대칭."""
+    """구간 [a, b] 안에 침대 k 대: 좌우 대칭으로, 침대 사이는 한 대 폭(BED_GAP) 이상 띄운다.
+    자리가 넉넉하면 양 끝을 벽에 붙이고 고르게, 모자라면 가운데로 모아 최소 간격만 지킨다."""
     if k <= 0 or b - a <= 0:
         return []
     if k == 1:
@@ -151,8 +153,10 @@ def _bed_slots(a: float, b: float, k: int) -> list[float]:
     lo, hi = a + BED_HW, b - BED_HW
     if hi <= lo:
         return [(a + b) / 2] * k
-    step = (hi - lo) / (k - 1)
-    return [lo + step * i for i in range(k)]
+    step = max(2 * BED_HW + BED_GAP, (hi - lo) / (k - 1)) if (hi - lo) / (k - 1) >= 2 * BED_HW + BED_GAP else (hi - lo) / (k - 1)
+    mid = (a + b) / 2
+    start = mid - step * (k - 1) / 2
+    return [start + step * i for i in range(k)]
 
 
 def _mirror_slots(c: float, inner: float, lo: float, hi: float, m: int) -> list[float]:
@@ -194,12 +198,12 @@ def bed_positions(rid: str, poly, n: int, angle: float = 0.0, door: str = "S") -
         U, V = ly1 - ly0, lx1 - lx0
         to_xy = (lambda u, v: (lx0 + v, ly0 + u)) if door == "E" else (lambda u, v: (lx1 - v, ly0 + u))
         head_v, head_u = (270.0, 0.0) if door == "E" else (90.0, 0.0)
-    side_pitch = 2 * BED_HW + 0.1                                   # 옆벽 침대 사이 간격
+    side_pitch = 2 * BED_HW + BED_GAP                               # 옆벽 침대 간격: 침대 한 대 폭만큼 띄운다
     v_room = V - (DOOR_W / 2 + DOOR_CLEAR) * 0                      # 옆벽 침대는 문 폭을 막지 않는다 (문은 u 가운데)
     per_side_max = max(0, int((v_room - 2 * BED_HW) // side_pitch) + 1)
     slots: list[tuple[float, float, float]] = []                    # (u, v, head)
-    if n == 1:                                                      # 1인실: 창측 벽 가운데
-        slots.append((U / 2, BED_HL + BED_WALL, head_v))
+    if n == 1:                                                      # 1인실: 옆벽에 머리를 붙이고 창측(바깥) 끝에
+        slots.append((BED_HL + BED_WALL, BED_HW + BED_WALL, head_u))
     else:
         per_side = min(2, per_side_max, math.ceil(n / 2))           # 양옆에 기본 두 대씩
         while per_side * 2 > n and per_side > 1:
