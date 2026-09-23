@@ -51,6 +51,7 @@
 - [2026-09-17 08:50 RP5] RP5에 저장소 밖 관측 스택이 상주합니다: `/opt/biosim-monitor/`(collect·sink·read_capture·report·janitor, README 포함), systemd 유닛 `biosim-monitor`(지표 1초/60초 2단 수집), `biosim-receiver`(게이트웨이 TCP 싱크 127.0.0.1:9100, 시간별 캡처), `biosim-capture-janitor.timer`(200GB 상한), `biosim-monitor-check.timer`(일일 누수 판정). 로그 `/var/log/biosim-monitor/`, 캡처 `/var/lib/biosim-capture/`. **저장소 밖이라 배포로 갱신되지 않습니다** — 프로토콜을 바꾸면 이쪽도 같이 고쳐야 합니다(아래 v3 사고 참조).
 - [2026-09-17 08:50 RP5] v3 배포(09-17 07:59) 직후 약 40분간 수신이 전부 끊겼습니다. 원인은 CRC-32 트레일러 4바이트를 소비하지 않아 매 프레임 스트림이 밀린 것: `bad` 135,237건, 재접속 141,818회, SAF에 1,526개 게이트웨이 적체, 캡처 정지. 같은 버그가 저장소 `tools/receiver.py`에도 있었고 2b367d5로 함께 고쳐졌습니다. 교훈: 프로토콜 변경 시 `verify.py`뿐 아니라 **모든 수신 구현**(저장소 밖 포함)을 같이 올려야 합니다.
 - [2026-09-17 08:50 RP5] 누수 판정은 RSS 합계로 하면 안 됩니다. 워커 3개가 같은 로프 뱅크(~590MB)를 mmap해 RSS를 더하면 공유 페이지가 중복 계상됩니다(실측 RSS 1,206MB vs PSS 756MB, 차이 450MB). `smaps_rollup`의 PSS를 쓰고 MemAvailable로 교차 검증해야 합니다. 초기 버전이 이 때문에 LEAK을 오탐했습니다.
+- [2026-09-23 22:10 RP5-2] **병실 게이트웨이를 방 정중앙 천정으로** (사용자 요청 — 라우터 평면도에서 게이트웨이가 침대·호실 표기와 겹치지 않고 방마다 같은 자리에 오도록). `emulator/hospital/hospital.py` 에서 `kind in (room, isolation)` 은 `_gw_spots_from_beds` 대신 방 한가운데(병실은 모두 1대라 bbox 중심). 응급·투석 베이처럼 침대가 있는 그 밖의 공간은 종전대로 환자 상체 무게중심. `docs/ROUTER_FLOORPLAN.md` 문구 갱신. pytest 23 통과, 병원 생성 검증(병실 게이트웨이 958대 전부 정중앙). **배포는 RP5-1 에서 필요**(서비스 재시작 때 병원을 다시 지으므로 재구성 없이 반영). 라우터 쪽은 `/api/emr/layout` 을 5분 캐시하므로 배포 후 최대 5분 뒤 반영(또는 라우터 재시작).
 
 ## 5. 공통 주의사항
 

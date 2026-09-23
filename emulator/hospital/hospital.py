@@ -161,9 +161,11 @@ class Hospital:
                         expected = (x1 - x0) * (y1 - y0) * dens * PATCHED_SHARE
                         n_cap = max(1, math.ceil(expected / (0.75 * self.gw_capacity) - 1e-6))
                         n = max(n_cover, n_cap)
-                        # 병실은 침대 배치를 따른다: 환자 상체(머리에서 0.5 m) 위치들의 무게중심 천정에 건다.
+                        # 병실(일반·격리)은 방 정중앙 천정에 건다 (2026-09-23 요청: 평면도에서 호실 표기·침대와 겹치지 않고
+                        # 방마다 같은 자리). 침대가 있는 그 밖의 공간(응급·투석 베이 등)은 환자 상체 위치들의 무게중심에,
                         # 침대가 없는 공간(간호사실·로비 등)은 예전처럼 공간을 고르게 나눠 건다.
-                        spots = _gw_spots_from_beds(r, n) if r.get("beds") else []
+                        ward_room = kind in ("room", "isolation")
+                        spots = _gw_spots_from_beds(r, n) if r.get("beds") and not ward_room else []
                         for k in range(n):
                             if spots:
                                 gx, gy = spots[k]
