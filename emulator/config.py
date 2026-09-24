@@ -143,7 +143,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "home_interference": True,
         },
         "patch": {
-            "battery_days": 14,
+            "battery_days": 15.5,          # 패치 배터리 수명
+            "max_wear_days": 14,           # 최대 착용 기간: 넘으면 새 번호 패치로 교체
+            "rx_enabled": True,            # 모니터링 처방(위중도에 따라 3~14일) 끝나면 모니터링 종료·패치 반납
             "battery_drain_enabled": True,
             "lead_off_enabled": True,
             "replace_below_pct": 5,
@@ -333,6 +335,7 @@ class Config:
             mix.update(fingertip=55, ring=35, wrist_ptt=10)
         sc["gateway"]["fault_intensity"] = int(max(0, min(100, sc["gateway"]["fault_intensity"])))
         sc["patch"]["battery_days"] = float(max(0.01, min(30, sc["patch"]["battery_days"])))
+        sc["patch"]["max_wear_days"] = float(max(0.0, min(30, sc["patch"].get("max_wear_days", 14))))
 
 
 def channel_mask(enabled: dict[str, bool]) -> int:

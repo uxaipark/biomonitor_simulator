@@ -26,6 +26,7 @@ from ..hospital import layout as hospital_layout
 from ..hospital.profiles import EXAM_TYPES, make_profiles, make_exam_schedule
 from ..hospital.avatars import assign as assign_avatar
 from ..hospital.devices import DEVICES, assign_devices, devices_mask, spo2_source
+from ..hospital import monitoring as rx_model
 from ..signals.loops import LoopBank
 from ..signals.rhythms import RHYTHMS
 from ..signals.accel import ACTIVITIES
@@ -568,6 +569,7 @@ class World:
                              "exams": rec["exams"], "mode": "mcot" if outpatient else "inpatient"}
         dcfg = self.cfg.get("scenario", "devices", default={}) or {}
         prof["devices"] = assign_devices(self.rng, prof, outpatient, dcfg.get("policy", "auto"), dcfg.get("spo2_mix"))
+        self._prescribe(rec, prof, patch, outpatient)
         rec["adm_id"] = self.db.add_admission(prof["id"], prof["admission"], self.sim_time)
         rec["patient_no"] = rec["adm_id"]                                 # 환자번호: new unique number per admission (never reused)
         prof["admission"]["patient_no"] = rec["patient_no"]
@@ -617,6 +619,7 @@ class World:
         n_in = sum(1 for r in self.admitted.values() if not r["outpatient"])
         n_out = len(self.admitted) - n_in
         budget = 100000 if initial else 300
+        self._boot_fill = initial                                          # 시작 시 채우는 환자: 처방·패치 경과를 흩어 둔다
         real = getattr(self, "real", None)
         if not initial and real is not None and (g.get("census_mode", "fixed") == "weekly" or real.surge is not None):
             target_in = n_in                                               # 재원 곡선·대량 유입: 입원 인원은 _step_adt 가 서서히 맞춘다
@@ -636,6 +639,7 @@ class World:
         if n_out > target_out:
             for pid in [k for k, r in self.admitted.items() if r["outpatient"]][: n_out - target_out]:
                 self.discharge(pid, "MCOT 종료")
+        self._boot_fill = False
 
     # ------------------------------------------------------------------ links / RSSI
     def _unlink(self, rec: dict) -> None:
@@ -1108,6 +1112,91 @@ class World:
                 self.counters["transfers"] += 1
                 return
 
+    def _prescribe(self, rec: dict, prof: dict, patch: "Patch", outpatient: bool) -> None:
+        """ECG 패치 모니터링 처방(위중도 → 3~14일).  시작 시 한꺼번에 채우는 환자는 이미 며칠 착용 중인 것으로 흩어,
+        처방 종료·패치 교체가 한날한시에 몰리지 않게 한다."""
+        rx = rx_model.prescribe(prof, float(self.rng.random()), float(self.rng.random()), outpatient)
+        start = self.sim_time
+        if getattr(self, "_boot_fill", False):
+            elapsed = float(self.rng.uniform(0, 0.95)) * rx["days"] * 86400.0
+            start -= elapsed
+            patch.activated = start
+            bd = float(self.cfg.get("scenario", "patch", "battery_days"))
+            patch.battery = max(1.0, 100.0 - 100.0 * elapsed / (bd * 86400.0))
+        rx.update(start=start, end=start + rx["days"] * 86400.0, extended_days=0)
+        rec["rx"] = rx
+        prof["admission"]["monitoring"] = self._rx_view(rx)
+
+    def _rx_row(self, rec: dict) -> dict:
+        """목록용 처방 요약: 처방 일수(연장 포함)·단계·오늘이 며칠째(D+n)·남은 시간·패치 착용일."""
+        rx = rec.get("rx")
+        patch = self.patches.get(rec["row"])
+        out = {"patch_wear_days": round((self.sim_time - patch.activated) / 86400.0, 1) if patch else None}
+        if rx:
+            out.update(rx_days=rx["days"] + rx.get("extended_days", 0), rx_tier=rx["tier_ko"], rx_acuity=rx["acuity"],
+                       rx_day=int((self.sim_time - rx["start"]) // 86400) + 1, rx_left_h=round(max(0.0, rx["end"] - self.sim_time) / 3600.0, 1),
+                       rx_extended=rx.get("extended_days", 0))
+        return out
+
+    @staticmethod
+    def _rx_view(rx: dict) -> dict:
+        iso = lambda t: dt.datetime.fromtimestamp(t).isoformat(timespec="seconds")
+        return {"tier": rx["tier"], "tier_ko": rx["tier_ko"], "days": rx["days"] + rx.get("extended_days", 0), "prescribed_days": rx["days"],
+                "extended_days": rx.get("extended_days", 0), "acuity": rx["acuity"], "reason": rx["reason"], "start": iso(rx["start"]), "end": iso(rx["end"])}
+
+    def _step_prescriptions(self) -> None:
+        """처방 종료 → 연장 또는 모니터링 종료(패치 반납).  비어 있는 자리는 인원 목표에 따라 새 입원이 채운다."""
+        pc = self.cfg.get("scenario", "patch")
+        if not pc.get("rx_enabled", True):
+            return
+        now = self.sim_time
+        for pid, rec in list(self.admitted.items()):
+            rx = rec.get("rx")
+            if not rx or now < rx["end"]:
+                continue
+            prof = self.by_id[pid]
+            if self.rng.random() < rx_model.extension_prob(rx):
+                add = 14 if rx["acuity"] >= 6 else 7
+                rx["extended_days"] = rx.get("extended_days", 0) + add
+                rx["end"] += add * 86400.0
+                prof["admission"]["monitoring"] = self._rx_view(rx)
+                self.counters["rx_extended"] += 1
+                self.log.add("patch", f"{prof['name']} 모니터링 처방 {add}일 연장 (총 {rx['days'] + rx['extended_days']}일, 위중도 {rx['acuity']})", patient_id=pid)
+                self.meta_dirty = True
+                continue
+            self.counters["rx_completed"] += 1
+            self.discharge(pid, f"모니터링 처방 종료 ({rx['tier_ko']} {rx['days'] + rx.get('extended_days', 0)}일)")
+
+    def _patch_scenario(self, what: str, target: int | None, params: dict) -> str:
+        """패치 교체 시나리오 주입.
+        patch_wear_expire {count, within_s}: 최대 착용일에 닿게 해 within_s 안에 차례로 새 번호 패치로 교체
+        patch_low_battery {count}          : 배터리를 교체 기준까지 내려 바로 교체
+        rx_expire {count, within_s}        : 모니터링 처방 종료를 앞당김 (종료·반납 또는 연장)"""
+        pc = self.cfg.get("scenario", "patch")
+        ids = [target] if target in self.admitted else [k for k in self.admitted if self.patches.get(self.admitted[k]["row"])]
+        n = min(len(ids), max(1, int(params.get("count", 1))))
+        if not n:
+            return "no patients"
+        picks = [ids[0]] if target in self.admitted else [ids[int(i)] for i in self.rng.choice(len(ids), n, replace=False)]
+        within = max(0.0, float(params.get("within_s", 300)))
+        now = self.sim_time
+        for pid in picks:
+            rec = self.admitted[pid]
+            patch = self.patches[rec["row"]]
+            if what == "patch_wear_expire":
+                wear = float(pc.get("max_wear_days") or 14)
+                patch.activated = now - wear * 86400.0 + float(self.rng.uniform(0, within))
+                patch.battery = max(pc["replace_below_pct"] + 1.0, 100.0 - 100.0 * wear / float(pc["battery_days"]))
+            elif what == "patch_low_battery":
+                patch.battery = float(pc["replace_below_pct"])
+            elif rec.get("rx"):
+                rec["rx"]["end"] = now + float(self.rng.uniform(0, within))
+                self.by_id[pid]["admission"]["monitoring"] = self._rx_view(rec["rx"])
+        label = {"patch_wear_expire": f"착용 만료 {n}건 ({within:.0f}초 안에 교체)", "patch_low_battery": f"배터리 교체 기준 {n}건",
+                 "rx_expire": f"처방 종료 {n}건 ({within:.0f}초 안에)"}[what]
+        self.log.add("patch", f"시나리오: {label}")
+        return label
+
     def _replace_patch(self, rec: dict, reason: str) -> None:
         row = rec["row"]
         old = self.patches.get(row)
@@ -1248,7 +1337,10 @@ class World:
                 rec["batt_dead"] = False
                 self._relink(rec, force=True)
             if pc.get("replace_enabled", True):
-                if patch.battery <= pc["replace_below_pct"] and rec["activity"] != "shower":
+                wear = pc.get("max_wear_days", 14)
+                if wear and now - patch.activated >= wear * 86400.0 and rec["activity"] != "shower":
+                    self._replace_patch(rec, f"착용 {wear:g}일 만료")           # 새 패치 = 새 serial·patch_id (재사용 없음)
+                elif patch.battery <= pc["replace_below_pct"] and rec["activity"] != "shower":
                     self._replace_patch(rec, f"배터리 {patch.battery:.0f}%")
             elif drain and patch.battery <= 0.0 and not rec.get("batt_dead"):  # 교체하지 않음: 방전된 패치는 전송을 멈춘다
                 rec["batt_dead"] = True
@@ -1777,6 +1869,7 @@ class World:
                     self._step_inpatient(rec, ac, intensity)
             self._step_exam_quota(sc)
             self._step_patches(dt_s)
+            self._step_prescriptions()
             self._step_modulation()
             self._step_episodes()
             self._step_gateways(dt_s)
@@ -1902,7 +1995,7 @@ class World:
                               "attach_tick": int(P["attach_tick"]), "tick_now": self._tick_now(),
                               "sim_speed": self.cfg.get("general", "sim_speed"),
                               "clinical": self._clinical_view(rec),
-                              "phone": (rec.get("phone") or {}).get("state") if rec["outpatient"] else None}
+                              "phone": (rec.get("phone") or {}).get("state") if rec["outpatient"] else None, **self._rx_row(rec)}
         return out
 
     def _clinical_view(self, rec: dict) -> dict | None:
@@ -1959,7 +2052,7 @@ class World:
                         "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "activity": rec["activity"], "note": rec["note"],
                         "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]),
                         "patch": self.patches[row].serial if row in self.patches else None, "row": row, "outpatient": rec["outpatient"],
-                        "episode": bool(rec["episode_until"])})
+                        "episode": bool(rec["episode_until"]), **self._rx_row(rec)})
         return out
 
     # exam stations per room in a ~500-bed hospital; scaled up with bed count (a 2000-bed site has 4x the stations)
@@ -2271,6 +2364,8 @@ class World:
                 return self.real.force_phone(pid, str(params.get("state", "killed")), float(params.get("minutes", 10))) if pid else "no MCOT patient"
             if what == "surge":
                 return self.real.start_surge(params.get("count"), float(params.get("over_min", 60)))
+            if what in ("patch_wear_expire", "patch_low_battery", "rx_expire"):
+                return self._patch_scenario(what, target, params)
             if what in ("deteriorate", "code_blue"):
                 ids = [k for k, r in self.admitted.items() if not r["outpatient"] and not r.get("deter") and not r.get("code_blue") and not self.real._busy(k, r)] or list(self.admitted.keys())
                 if not ids:

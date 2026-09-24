@@ -108,7 +108,7 @@ def discovery():
         "endpoints": {
             "discovery": "/api/v1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
-                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|discharge|admit, target}", "autotune": "POST /api/v1/control/autotune {start|stop}",
+                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
                     "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds (x·y 중심, angle 머리 방향 도, bed_size_m 0.9 x 2.0)", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
@@ -1103,7 +1103,8 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: 
         d = {k: v for k, v in p.items() if k != "avatar"}
         r = live.get(p["id"])
         if r:                                                 # merge live fields for monitored patients
-            d.update({k: r[k] for k in ("patch", "patch_id", "bed", "ward", "gateway", "activity", "note", "battery", "rssi", "row", "rhythm_label", "devices", "pacemaker_mode", "pacemaker_lead", "pacemaker_type", "lead_off") if k in r})
+            d.update({k: r[k] for k in ("patch", "patch_id", "bed", "ward", "gateway", "activity", "note", "battery", "rssi", "row", "rhythm_label", "devices", "pacemaker_mode", "pacemaker_lead", "pacemaker_type", "lead_off",
+                                                   "rx_days", "rx_tier", "rx_acuity", "rx_day", "rx_left_h", "rx_extended", "patch_wear_days") if k in r})
         elif p.get("admission"):
             d["patch"] = p["admission"].get("patch")
             d["patch_id"] = p["admission"].get("patch_id")
@@ -1174,7 +1175,8 @@ def emr_admissions():
         out.append({"patient_id": rec.get("patient_no"), "profile_id": pid, "mrn": p["mrn"], "name": p["name"], "patch_id": patch.patch_id if patch else None, "patch_serial": patch.serial if patch else None,
                     "gateway_idx": rec["gw"], "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "gw_id_in_frame": h.gateways[rec["gw"]]["gw_no"] if rec["gw"] >= 0 else None,
                     "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None, "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
-                    "ward": p["admission"]["ward"], "mode": p["admission"]["mode"], "doctor": rec["doctor"], "nurse": rec["nurse"], "admit_time": p["admission"]["time"]})
+                    "ward": p["admission"]["ward"], "mode": p["admission"]["mode"], "doctor": rec["doctor"], "nurse": rec["nurse"], "admit_time": p["admission"]["time"],
+                    "monitoring": p["admission"].get("monitoring")})
     ls = emrsim_link.linked_sim()
     if ls is not None:                                        # 연동 병원 EMR 에서 이 환자를 찾을 키
         ls.advance()

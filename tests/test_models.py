@@ -3,7 +3,7 @@ import glob, json, os
 from emulator.signals import trend
 from emulator.hospital import layout as L
 
-TRIGGERS = {"gateway_fault", "gateway_replace", "network_event", "lead_off", "episode", "exam", "replace_patch", "discharge", "admit", "vfib",
+TRIGGERS = {"gateway_fault", "gateway_replace", "network_event", "lead_off", "episode", "exam", "replace_patch", "patch_wear_expire", "patch_low_battery", "rx_expire", "discharge", "admit", "vfib",
             "storm", "half_open", "dup_id", "capture", "lead_off_off", "episode_off", "exam_off"}
 
 

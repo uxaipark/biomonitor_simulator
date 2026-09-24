@@ -132,6 +132,7 @@
           <div><button data-sort="bed">병상</button> · <button data-sort="ward">병동</button> · <button data-sort="specialty">진료과</button> · <button data-sort="gateway">GW</button></div>
           <div><button data-sort="patch_id">패치ID</button> · <button data-sort="devn">기기</button></div>
           <div><button data-sort="activity">활동</button> · <button data-sort="battery">배터리</button> · <button data-sort="rssi">RSSI</button></div>
+          <div><button data-sort="rx_days">처방</button> · <button data-sort="rx_left_h">남은</button> · <button data-sort="patch_wear_days">착용</button></div>
         </div>
         <div id="patBody"></div>
       </div>
@@ -261,7 +262,8 @@
       <div class="help">재원 환자 중 항상 이 비율이 검사실·외래·투석실·편의시설 등으로 나가 있습니다. 아티팩트 설정과 관계없이 적용되고 병원 탭의 이동 중 환자 목록과 도면에 표시됩니다.</div>
     </div></div>
     <div class="card" data-card="patch"><h3><span class="grip" data-nofold title="드래그해서 카드 위치 변경">⠿</span><button class="fold" data-fold="scnb-patch" aria-expanded="true">▾</button>패치 (웨어러블 BLE)</h3><div class="scnb" id="scnb-patch">
-      <div class="row"><div class="field"><span>패치 배터리 수명 (일)</span><input type="number" id="p_days" min="0.01" max="30" step="0.5"></div><div class="field"><span>교체 기준 (%)</span><input type="number" id="p_rep" min="0" max="50"></div></div>
+      <div class="row"><div class="field"><span>패치 배터리 수명 (일)</span><input type="number" id="p_days" min="0.01" max="30" step="0.5"></div><div class="field"><span>최대 착용 (일)</span><input type="number" id="p_wear" min="0" max="30" step="0.5" title="착용 기간이 이 일수를 넘으면 새 번호의 패치로 교체 (0 = 제한 없음)"></div><div class="field"><span>교체 기준 (%)</span><input type="number" id="p_rep" min="0" max="50"></div></div>
+      <label class="chk" title="입원·MCOT 부착 때 위중도에 따라 모니터링 처방 일수를 정합니다 — 단기 3~5일, 중기 7일, 장기 14일(일부 연장). 처방이 끝나면 모니터링 종료·패치 반납, 빈자리는 새 환자가 채웁니다."><input type="checkbox" id="p_rx"> 모니터링 처방 기간 (위중도별 3~14일) 끝나면 종료·반납</label>
       <label class="chk" title="배터리 감소 시뮬레이션 (입원 시간에 따라 소모)"><input type="checkbox" id="p_dr"> 배터리 소모</label>
       <label class="chk sub-opt" title="배터리가 교체 기준 이하면 새 패치로 교체합니다. 끄면 방전된 패치는 전송을 멈춥니다."><input type="checkbox" id="p_repl"> 교체 기준 이하면 새 패치로 교체</label>
       <label class="chk" title="리드 오프 이벤트 (전극 분리, 자연 발생)"><input type="checkbox" id="p_lo"> 리드 오프 (전극 분리)</label>
