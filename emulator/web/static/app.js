@@ -124,6 +124,7 @@ const TAB_GROUPS = [
   { id: 'hosp', title: '병원', show: ['hosp'] },
   { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 시그널 송출 · 메디컬 월드 생성 (show[1] 이 바뀜)
   { id: 'test', title: '테스트', show: ['test'] },
+  { id: 'emr', title: 'EMR 연동', show: ['emr'] },
   { id: 'log', title: '로그', show: ['log'] },
   { id: 'data', title: '데이터', show: ['data'] },
 ];
@@ -177,6 +178,7 @@ function showTab(id) {
   sel.value = g.id; syncDropdowns(); try { localStorage.setItem('tab', g.id); } catch (e) { }
   if (shown.has('hosp')) { loadFloor(); drawElevation(); }
   if (shown.has('proto')) loadProto();
+  if (shown.has('emr') && window.emrLoad) window.emrLoad();
   if (shown.has('pat')) loadPatients();
   if (shown.has('data')) { loadRegistry(); loadDb(); $('#dbRun').click(); loadLabelSummary(); }
   if (shown.has('struct')) { loadBankFiles(); loadWorldStatus(); }
@@ -3050,3 +3052,97 @@ document.querySelectorAll('.fold[data-fold]').forEach(b => {
 });
 function isFolded(id) { const b = document.querySelector(`.fold[data-fold="${id}"]`); return !!b && b.getAttribute('aria-expanded') === 'false'; }   // hoisted: fold events fire before this line runs
 
+
+
+// ---------------------------------------------------------------- EMR 연동 (가상 의료기관 20곳)
+(() => {
+const $ = (q, el = document) => el.querySelector(q);
+const $$ = (q, el = document) => Array.from(el.querySelectorAll(q));
+const toast = (m) => { const t = $('#toast'); if (!t) return; t.textContent = m; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2200); };
+const EMR = { sites: [], cur: null, filter: '', logSeq: 0 };
+const emrCc = (c) => `<span class="emr-cc">${c}</span>`;   // 국기 이모지는 키오스크/라즈베리 파이 글꼴에 없어서 코드 배지로
+const EMR_AUTH = { 'smart-backend-jwt': 'SMART JWT', 'signed-jwt': '서명 JWT', 'client-credentials-basic': 'OAuth Basic', 'client-credentials-post': 'OAuth secret',
+  'basic': 'HTTP Basic', 'bearer-static': '고정 토큰', 'api-key': 'API 키', 'rnds-token': '인증서+CPF', 'mllp-facility': 'MLLP·Basic', 'ip-allow': 'IP 허용' };
+function emrEsc(v) { return String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+async function emrLoad() {
+  try {
+    const r = await fetch('/api/v1/emrsim').then(x => x.json());
+    EMR.sites = r.sites;
+    $('#emrSum').textContent = `${r.count}곳 · ` + Object.entries(r.by_country).map(([k, v]) => `${k} ${v}`).join(' · ');
+    $('#emrMllp').textContent = `MLLP tcp/${r.mllp_port}`;
+    emrRenderTable();
+    if (!EMR.cur && EMR.sites.length) emrSelect(EMR.sites[0].id);
+  } catch (e) { $('#emrSum').textContent = '불러오기 실패: ' + e; }
+}
+function emrRenderTable() {
+  const main = ['US', 'GB', 'JP', 'KR'];
+  const rows = EMR.sites.filter(s => !EMR.filter || (EMR.filter === 'etc' ? !main.includes(s.country) : s.country === EMR.filter));
+  $('#emrTbl tbody').innerHTML = rows.map(s => {
+    const st = s.stats, f = st.faults;
+    const state = f.down ? ['st-down', '다운'] : (f.latency_ms || f.error_rate) ? ['st-slow', `지연 ${f.latency_ms}ms · 오류 ${Math.round(f.error_rate * 100)}%`] : ['st-ok', f.auth === false ? '정상 (인증 끔)' : '정상'];
+    return `<tr data-id="${s.id}" class="${EMR.cur === s.id ? 'sel' : ''}"><td>${emrCc(s.country)} ${emrEsc(s.country_ko)}</td><td><b>${emrEsc(s.name_local || s.name)}</b><div class="sub">${emrEsc(s.city)}</div></td>`
+      + `<td>${emrEsc(s.protocol_ko)}<div class="sub">${emrEsc(s.style)}</div></td><td class="mono">${emrEsc(s.version)}</td><td>${EMR_AUTH[s.auth.type] || s.auth.type}</td>`
+      + `<td>${st.occupied}/${st.beds}</td><td>${st.adt_events}</td><td>${st.inbound_values}</td><td>${st.requests}</td><td>${st.errors}</td><td class="${state[0]}">${state[1]}</td></tr>`;
+  }).join('');
+}
+$('#emrFilter').addEventListener('click', e => { const b = e.target.closest('button[data-f]'); if (!b) return; EMR.filter = b.dataset.f; $$('#emrFilter button').forEach(x => x.classList.toggle('on', x === b)); emrRenderTable(); });
+$('#emrTbl').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) emrSelect(tr.dataset.id); });
+function emrSelect(id) {
+  EMR.cur = id; EMR.logSeq = 0;
+  const s = EMR.sites.find(x => x.id === id); if (!s) return;
+  $$('#emrTbl tbody tr').forEach(tr => tr.classList.toggle('sel', tr.dataset.id === id));
+  $('#emrDetail').hidden = false; $('#emrOut').hidden = true;
+  $('#emrDTitle').innerHTML = `${emrCc(s.country)} ${emrEsc(s.name_local ? s.name_local + ' · ' : '')}${emrEsc(s.name)}`;
+  const a = s.auth, ex = s.example_patient;
+  const authTxt = Object.entries(a).filter(([k]) => k !== 'type').map(([k, v]) => `${k}=${v}`).join(' · ');
+  const kv = [['형식', `${s.protocol_ko} ${s.version}`], ['계열', s.style], ['시간대', s.tz], ['기본 URL', s.base_url], ['인증', `${EMR_AUTH[a.type] || a.type} — ${authTxt}`],
+    ...(s.mllp ? [['MLLP', `tcp/${s.mllp.port} · MSH-6=${s.mllp.receiving_facility} · ${s.mllp.charset} · 허용 버전 ${s.mllp.accepts_versions.join(', ')}`]] : []),
+    ['예시 환자', `${ex.name} · ` + Object.entries(ex.ids).map(([k, v]) => `${k} ${v}`).join(' · ') + (ex.visit ? ` · 내원 ${ex.visit}` : '')],
+    ['ADT 시작', s.stats.sim_start]];
+  $('#emrInfo').innerHTML = kv.map(([k, v]) => `<b>${k}</b><span>${emrEsc(v)}</span>`).join('');
+  $('#emrEps').innerHTML = Object.entries(s.endpoints).map(([k, v]) => `<b>${k}</b><span>${emrEsc(v)}</span>`).join('');
+  const f = s.stats.faults;
+  $('#emrLat').value = f.latency_ms; $('#emrErr').value = f.error_rate; $('#emrTtl').value = f.token_ttl_s; $('#emrDown').checked = !!f.down; $('#emrAuth').checked = f.auth !== false;
+  $('#emrLog tbody').innerHTML = ''; emrPoll();
+}
+async function emrPoll() {
+  if (!EMR.cur || !$('[data-tab="emr"]').classList.contains('on')) return;
+  const id = EMR.cur;
+  try {
+    const [lg, rc] = await Promise.all([fetch(`/api/v1/emrsim/${id}/log?limit=60`).then(r => r.json()), fetch(`/api/v1/emrsim/${id}/received?limit=60`).then(r => r.json())]);
+    if (id !== EMR.cur) return;
+    $('#emrLogN').textContent = `(${lg.last_seq})`;
+    $('#emrLog tbody').innerHTML = lg.log.slice().reverse().map(x => {
+      const bad = typeof x.status === 'number' ? x.status >= 400 : /^(AE|AR|E|NOACK|DROP)$/.test(x.status);
+      return `<tr title="${emrEsc(x.path)}\n${emrEsc(x.detail)}"><td>${new Date(x.t * 1000).toLocaleTimeString()}</td><td>${{ in: '수신', out: '송신', sys: '설정' }[x.dir] || x.dir}</td><td>${x.channel}</td>`
+        + `<td class="${bad ? 'bad' : 'good'}">${emrEsc(x.status)}</td><td>${emrEsc(x.summary)}</td></tr>`;
+    }).join('');
+    $('#emrRcvN').textContent = `(누적 ${rc.total})`;
+    $('#emrRcv tbody').innerHTML = rc.rows.map(x => `<tr><td>${emrEsc(x.measured.replace('T', ' ').slice(5, 16))}</td><td>${emrEsc(x.patient)}</td><td>${emrEsc(x.label)}</td>`
+      + `<td>${x.value} ${emrEsc(x.unit)}</td><td class="sub">${x.value_in ?? ''} ${emrEsc(x.unit_in || '')}</td><td class="sub">${emrEsc(x.source)}</td></tr>`).join('');
+  } catch (e) { }
+}
+setInterval(() => { if ($('[data-tab="emr"]').classList.contains('on')) { emrPoll(); } }, 3000);
+setInterval(() => { if ($('[data-tab="emr"]').classList.contains('on')) emrLoad(); }, 15000);
+$('#emrSelftest').onclick = async () => {
+  const b = $('#emrSelftest'); b.disabled = true;
+  try {
+    const r = await fetch(`/api/v1/emrsim/${EMR.cur}/selftest`, { method: 'POST' }).then(x => x.json());
+    $('#emrOut').hidden = false;
+    $('#emrOutPre').textContent = (r.ok ? '✔ 모든 단계 통과\n\n' : '✖ 실패한 단계가 있습니다\n\n') + r.results.map(x => `[${x.ok ? 'OK' : 'FAIL'}] ${x.title} → HTTP ${x.status}\n  ${x.summary}\n${x.response.replace(/\r/g, '\n').slice(0, 1500)}`).join('\n\n');
+    emrPoll(); emrLoad();
+  } finally { b.disabled = false; }
+};
+$('#emrSamples').onclick = async () => {
+  const r = await fetch(`/api/v1/emrsim/${EMR.cur}/samples`).then(x => x.json());
+  $('#emrOut').hidden = false;
+  $('#emrOutPre').textContent = r.requests.map(x => `### ${x.title}\n${x.method} ${x.url}\n` + Object.entries(x.headers).map(([k, v]) => `${k}: ${v}`).join('\n') + (x.body ? `\n\n${x.body.replace(/\r/g, '\n')}` : '') + (x.note ? `\n\n※ ${x.note}` : '')).join('\n\n');
+};
+$('#emrRevoke').onclick = async () => { const r = await fetch(`/api/v1/emrsim/${EMR.cur}/tokens/revoke`, { method: 'POST' }).then(x => x.json()); toast(`토큰 ${r.revoked}개 폐기`); emrPoll(); };
+$('#emrFaultApply').onclick = async () => {
+  const body = { latency_ms: +$('#emrLat').value || 0, error_rate: +$('#emrErr').value || 0, token_ttl_s: +$('#emrTtl').value || 3600, down: $('#emrDown').checked, auth: $('#emrAuth').checked };
+  await fetch(`/api/v1/emrsim/${EMR.cur}/faults`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  toast('장애 설정 적용'); emrLoad(); emrPoll();
+};
+window.emrLoad = emrLoad;
+})();

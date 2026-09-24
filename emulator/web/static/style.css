@@ -1101,3 +1101,13 @@ section[data-tab="emunav"].on{display:flex;align-items:center;gap:10px}
 .wg-foot > button.primary{min-width:220px;min-height:34px;margin-left:auto}
 .emufold{margin-left:auto}
 .emufold + .emureset{margin-left:0}
+
+/* EMR 연동 */
+#emrTbl tbody tr{cursor:pointer}#emrTbl tbody tr.sel{background:var(--sel)}
+#emrTbl td.st-down{color:var(--err);font-weight:700}#emrTbl td.st-slow{color:var(--warn)}#emrTbl td.st-ok{color:var(--acc)}
+.emr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;margin-top:8px}
+.emr-kv{display:grid;grid-template-columns:max-content 1fr;gap:3px 10px;font-size:12px;word-break:break-all}.emr-kv b{color:var(--muted);font-weight:500;white-space:nowrap}
+.emr-faults{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:10px 0;padding:8px;border:1px dashed var(--line);border-radius:8px;font-size:12px}
+#emrLog td,#emrRcv td{font-size:12px}#emrLog td.bad{color:var(--err)}#emrLog td.good{color:var(--acc)}
+#emrOutPre{max-height:50vh;white-space:pre-wrap}
+.emr-cc{display:inline-block;min-width:24px;padding:1px 4px;border-radius:4px;border:1px solid var(--line);background:var(--panel2);font:700 10px/1.4 ui-monospace,Menlo,Consolas,monospace;text-align:center;color:var(--txt);letter-spacing:0}

@@ -168,6 +168,14 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 3. TCP 리슨 → 프레임 수신, `patch_id` 파일로 저장 (`tools/receiver.py --save` 참고).
 4. `POST /api/v1/router/status` 로 상태 보고 → 에뮬레이터 GUI에서 확인(`transport.router_status_url` 도 예약).
 
+## 가상 EMR 연동 서버 (`emulator/emrsim/`)
+
+상용 EMR 연동을 미리 시험하기 위한 가상 의료기관 20곳이다. 미국 4, 영국 2, 일본 2, 한국 4, 독일·프랑스·네덜란드·호주·캐나다·싱가포르·브라질·UAE 각 1곳.
+각 기관은 자기 형식과 인증 방식으로 환자·ADT·바이탈을 내주고, 들어오는 바이탈을 검증해 저장하거나 거부한다.
+- 형식: FHIR R4(US Core/UK Core/JP Core/KR Core/ISiK/AU Core/RNDS), FHIR STU3(zib), HL7 v2.3~2.5.1(MLLP tcp/2575 + HTTP, SS-MIX2 ISO-2022-JP, IHE PAM FR, IHE PCD-01), athenaOne 계열 REST, 국내 대문자 컬럼 JSON, EUC-KR XML 전문, 진료정보교류 CDA R2.
+- 카탈로그는 `GET /api/v1/emrsim`, 기관 경로는 `/emrsim/{site_id}/...`, GUI는 **EMR 연동** 메뉴(자체 시험·예시 요청·장애 주입·요청 로그).
+- 사양: `docs/EMR_SIM.md`. 테스트: `tests/test_emrsim.py`.
+
 ## 제안 / 보완이 필요한 항목
 
 * **패치 버퍼링·백필**: 실제 BLE 패치는 끊김 동안 데이터를 내부에 저장했다가 재접속 후 back-fill 합니다. 현재는 손실로만 모델링. 필요하면 지연 프레임(플래그 BACKFILL) 추가를 권합니다.

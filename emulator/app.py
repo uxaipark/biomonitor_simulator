@@ -26,6 +26,7 @@ from .signals.rhythms import RHYTHMS
 from .signals import trend as trend_model
 from .signals.accel import ACTIVITIES
 from .runtime.state import CTL
+from .emrsim import api as emrsim_api, mllp as emrsim_mllp
 
 STATIC = Path(__file__).parent / "web" / "static"
 cfg = Config()
@@ -36,6 +37,8 @@ engine: Engine | None = None
 async def lifespan(app: FastAPI):
     global engine
     engine = Engine(cfg)
+    emrsim_api.MLLP_PORT = int(os.environ.get("BIOSIM_MLLP_PORT", "2575"))
+    print("emrsim:", emrsim_mllp.start(emrsim_api.MLLP_PORT), flush=True)
     if cfg.get("general", "autostart"):
         # every deploy restarts the service, and the engine used to come up idle -- the GUI then
         # showed "stopped" and transmission stayed down until somebody noticed and pressed start.
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI):
                     pass
         threading.Thread(target=_autostart, daemon=True, name="autostart").start()
     yield
+    emrsim_mllp.stop()
     engine.shutdown()
 
 
@@ -57,6 +61,7 @@ app = FastAPI(title="Bio-Signal Emulator", version=__version__, lifespan=lifespa
 from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=16384)      # gateway/patient lists shrink ~10x on the wire (Pi over Wi-Fi); 1-2 Hz status polls (~3 KB) stay uncompressed
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+app.include_router(emrsim_api.router)
 
 
 WRITE_PATHS = ("/api/v1/control/rebuild", "/api/v1/control/profiles/regenerate", "/api/v1/presets/apply", "/api/v1/waveforms", "/api/v1/emr/layout/reset", "/api/v1/emr/layout/import", "/api/v1/config/reset", "/api/v1/control/generate")
@@ -114,6 +119,9 @@ def discovery():
             "signals": {"catalog": "/api/v1/signals/catalog", "preview": "/api/v1/signals/preview/{row}", "trend": "/api/v1/signals/trend/{patient_id}?days=1|2|3 (합성 다일 추세)", "live_ws": "ws://<host>/ws/live?row=<patch_row>"},
             "router": {"status_report": "POST /api/v1/router/status (라우터 → 에뮬레이터 상태 보고)", "status_get": "GET /api/v1/router/status"},
             "chat": {"read": "GET /api/v1/chat?since=<seq>&limit= (에뮬레이터·라우터·GUI 공용 채팅)", "send": 'POST /api/v1/chat {"from": "router", "text": "..."}', "ws": "ws://<host>/ws/chat?sender=<이름>&since=<seq> (양방향)", "link": "GET /api/v1/chat/link (송신·수신 양쪽 카운터를 한 번에; 채팅 탭 로그 스트립용)"},
+            "emr_sim": {"catalog": "GET /api/v1/emrsim (상용 EMR 연동 시험용 가상 의료기관 20곳: FHIR R4/STU3, HL7 v2 MLLP·HTTP, 벤더 REST, EUC-KR XML, CDA R2)",
+                        "site": "GET /api/v1/emrsim/{site_id} · /samples · /log · /received · POST /faults · /selftest · /push",
+                        "endpoints": "/emrsim/{site_id}/... (기관별 실제 연동 경로)", "mllp": "tcp/2575 (MSH-6 로 기관 선택)", "doc": "docs/EMR_SIM.md"},
             "db": {"stats": "GET /api/v1/db/stats", "query": "POST /api/v1/db/query {sql, params?, limit?} (SQLite, SELECT 전용; 테이블: patients, admissions, patches, patch_events, exams, events, runs)"},
         },
         "transport": {"target_ip": t["target_ip"] or None, "target_port": t["target_port"], "socket_mode": t["socket_mode"], "bundle_ms": t["bundle_ms"],

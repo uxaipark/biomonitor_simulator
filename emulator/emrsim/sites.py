@@ -1,0 +1,128 @@
+"""가상 의료기관 20곳 — 나라·EMR 계열·연동 프로토콜·인증 방식·코드 체계를 다르게 구성했다.
+
+기관명은 모두 가공이다.  '계열(style)'은 해당 상용 EMR 제품이 외부에 내보이는 인터페이스 형식을 흉내냈다는 뜻이며
+그 회사의 실제 서버·데이터와는 무관하다.  식별자 OID·URI 는 각 표준/국가 가이드가 정한 체계를 따르되 기관 부분은 합성값이다.
+"""
+from __future__ import annotations
+
+# 진료과 — 나라별 코드 체계
+#   uk: NHS Treatment Function Code, de: Fachabteilungsschlüssel (§301 SGB V), us: HL7 PV1-10 hospital service(로컬), kr/jp: 병원 로컬 코드
+DEPTS = {
+    "card": {"us": ("CAR", "Cardiology"), "uk": ("320", "Cardiology"), "jp": ("10", "循環器内科"), "kr": ("CV", "순환기내과"), "de": ("0300", "Kardiologie"),
+             "fr": ("CARDIO", "Cardiologie"), "nl": ("0320", "Cardiologie"), "au": ("CARD", "Cardiology"), "ca": ("CARD", "Cardiology"), "sg": ("CAR", "Cardiology"),
+             "br": ("CARDIO", "Cardiologia"), "ae": ("CARD", "Cardiology")},
+    "resp": {"us": ("PUL", "Pulmonary Medicine"), "uk": ("340", "Respiratory Medicine"), "jp": ("12", "呼吸器内科"), "kr": ("PU", "호흡기내과"), "de": ("1400", "Lungen- und Bronchialheilkunde"),
+             "fr": ("PNEUMO", "Pneumologie"), "nl": ("0322", "Longziekten"), "au": ("RESP", "Respiratory Medicine"), "ca": ("RESP", "Respirology"), "sg": ("RES", "Respiratory Medicine"),
+             "br": ("PNEUMO", "Pneumologia"), "ae": ("PULM", "Pulmonology")},
+    "med": {"us": ("MED", "Internal Medicine"), "uk": ("300", "General Internal Medicine"), "jp": ("01", "総合内科"), "kr": ("IM", "내과"), "de": ("0100", "Innere Medizin"),
+            "fr": ("MED", "Médecine interne"), "nl": ("0313", "Interne geneeskunde"), "au": ("GMED", "General Medicine"), "ca": ("GIM", "General Internal Medicine"),
+            "sg": ("GM", "General Medicine"), "br": ("CLIN", "Clínica Médica"), "ae": ("IM", "Internal Medicine")},
+    "neuro": {"us": ("NEU", "Neurology"), "uk": ("400", "Neurology"), "jp": ("20", "脳神経内科"), "kr": ("NR", "신경과"), "de": ("2800", "Neurologie"),
+              "fr": ("NEURO", "Neurologie"), "nl": ("0330", "Neurologie"), "au": ("NEUR", "Neurology"), "ca": ("NEUR", "Neurology"), "sg": ("NEU", "Neurology"),
+              "br": ("NEURO", "Neurologia"), "ae": ("NEUR", "Neurology")},
+    "ortho": {"us": ("ORT", "Orthopedic Surgery"), "uk": ("110", "Trauma and Orthopaedics"), "jp": ("30", "整形外科"), "kr": ("OS", "정형외과"), "de": ("2300", "Orthopädie"),
+              "fr": ("ORTHO", "Chirurgie orthopédique"), "nl": ("0305", "Orthopedie"), "au": ("ORTH", "Orthopaedics"), "ca": ("ORTH", "Orthopaedic Surgery"), "sg": ("ORT", "Orthopaedic Surgery"),
+              "br": ("ORTO", "Ortopedia"), "ae": ("ORTH", "Orthopaedics")},
+    "cts": {"us": ("CTS", "Cardiothoracic Surgery"), "uk": ("172", "Cardiac Surgery"), "jp": ("35", "心臓血管外科"), "kr": ("TS", "흉부외과"), "de": ("2100", "Herzchirurgie"),
+            "fr": ("CCV", "Chirurgie cardio-vasculaire"), "nl": ("0328", "Cardio-thoracale chirurgie"), "au": ("CTS", "Cardiothoracic Surgery"), "ca": ("CVS", "Cardiac Surgery"),
+            "sg": ("CTS", "Cardiothoracic Surgery"), "br": ("CCV", "Cirurgia Cardiovascular"), "ae": ("CTS", "Cardiothoracic Surgery")},
+}
+
+# 병동: (코드, 이름, 진료과 키들, 층, 병실별 병상 수 목록)
+SITES = [
+    # ---------------------------------------------------------------- 미국 4
+    {"id": "us-lakeshore", "country": "US", "name": "Lakeshore University Health", "city": "Chicago, IL", "tz": "America/Chicago", "locale": "us", "region": "IL", "lang": "en",
+     "protocol": "fhir", "flavor": "epic", "fhir_version": "4.0.1", "style": "Epic 계열 (FHIR R4 · US Core 6.1 · SMART Backend Services)",
+     "auth": {"type": "smart-backend-jwt", "client_id": "b3f1c0de-7a41-4c2e-9f11-lakeshore0001", "scope": "system/Patient.read system/Encounter.read system/Observation.read system/Observation.write system/Location.read system/Practitioner.read system/Condition.read system/AllergyIntolerance.read system/Group.read"},
+     "units": "us", "seed": 1101, "oid": "1.2.840.114350.1.13.861.2.7", "mrn_type": "MR", "fac": "LUH",
+     "wards": [("5W", "5 West Cardiac Step-Down", ["card"], 5, [2] * 8 + [1] * 4), ("6E", "6 East Telemetry", ["card", "cts"], 6, [2] * 6 + [1] * 6),
+               ("7N", "7 North Medicine", ["med", "resp", "neuro", "ortho"], 7, [2] * 8 + [1] * 2)]},
+    {"id": "us-sierravista", "country": "US", "name": "Sierra Vista Regional Medical Center", "city": "Phoenix, AZ", "tz": "America/Phoenix", "locale": "us", "region": "AZ", "lang": "en",
+     "protocol": "fhir", "flavor": "oracle", "fhir_version": "4.0.1", "style": "Oracle Health(Cerner Millennium) 계열 (FHIR R4 · 테넌트 경로 · client_credentials)",
+     "auth": {"type": "client-credentials-basic", "client_id": "svrmc-integration", "client_secret": "svrmc-7c1e5f0b9a", "scope": "system/Patient.read system/Encounter.read system/Observation.read system/Observation.write system/Location.read"},
+     "tenant": "8f2c1e9a-45b3-4d7e-a1c0-5e9b2d4f7a31", "units": "us", "seed": 1102, "oid": "2.16.840.1.113883.3.13.6", "mrn_type": "MR", "fac": "SVRMC",
+     "wards": [("CVU", "Cardiovascular Unit", ["card", "cts"], 3, [1] * 14), ("PCU", "Progressive Care Unit", ["card", "resp", "med"], 4, [1] * 12 + [2] * 4),
+               ("MS4", "Med/Surg 4", ["med", "neuro", "ortho", "resp"], 4, [2] * 6)]},
+    {"id": "us-pineridge", "country": "US", "name": "Pine Ridge Community Hospital", "city": "Burlington, VT", "tz": "America/New_York", "locale": "us", "region": "VT", "lang": "en",
+     "protocol": "hl7v2", "flavor": "meditech", "hl7_version": "2.5.1", "style": "MEDITECH Expanse 계열 (HL7 v2.5.1 · MLLP · IHE PCD-01 수신)",
+     "auth": {"type": "mllp-facility", "http": "basic", "username": "prch_iface", "password": "prch-2575"},
+     "units": "us", "seed": 1103, "fac": "PRCH", "app": "MEDITECH", "charset": None, "mrn_type": "MR",
+     "wards": [("2MS", "2 MED SURG", ["med", "resp", "ortho", "neuro"], 2, [2] * 10), ("ICU", "ICU/STEPDOWN", ["card", "cts", "resp"], 3, [1] * 10)]},
+    {"id": "us-bayside", "country": "US", "name": "Bayside Heart & Vascular Clinic", "city": "San Diego, CA", "tz": "America/Los_Angeles", "locale": "us", "region": "CA", "lang": "en",
+     "protocol": "athena", "flavor": "athena", "style": "athenaOne 계열 (REST · practiceid 경로 · form-encoded 쓰기 · 외래/원격 모니터링)",
+     "auth": {"type": "client-credentials-basic", "client_id": "0oa9bayside4rpm7", "client_secret": "bhvc-athena-sandbox", "scope": "athena/service/Athenanet.MDP.*"},
+     "practiceid": "1959418", "units": "us", "seed": 1104, "outpatient": True,
+     "wards": [("RPM", "Remote Cardiac Monitoring Program", ["card"], 1, [1] * 40)]},
+    # ---------------------------------------------------------------- 영국 2
+    {"id": "uk-kingsmere", "country": "GB", "name": "Kingsmere Hospitals NHS Foundation Trust", "city": "Leeds", "tz": "Europe/London", "locale": "uk", "region": None, "lang": "en",
+     "protocol": "fhir", "flavor": "uk-core", "fhir_version": "4.0.1", "style": "NHS Trust EPR (FHIR R4 · UK Core 2.0 · 서명 JWT + X-Request-ID 필수)",
+     "auth": {"type": "signed-jwt", "client_id": "kgm-ehr-monitor-01", "kid": "kgm-test-1"}, "ods": "RK9", "site_ods": "RK901", "units": "si", "seed": 1201,
+     "wards": [("WD7B", "Ward 7B (Cardiology)", ["card", "cts"], 7, [6, 6, 1, 1, 6, 1]), ("WD9", "Ward 9 (Acute Medical Unit)", ["med", "resp", "neuro", "ortho"], 9, [6, 6, 6, 1, 1])]},
+    {"id": "uk-wexcombe", "country": "GB", "name": "Wexcombe University Hospitals NHS Trust", "city": "Bradford", "tz": "Europe/London", "locale": "uk", "region": None, "lang": "en",
+     "protocol": "hl7v2", "flavor": "uk-itk", "hl7_version": "2.4", "style": "TrakCare/CareFlow 계열 PAS (HL7 v2.4 · NHS ITK 관례 · PD1 GP 정보)",
+     "auth": {"type": "mllp-facility", "http": "basic", "username": "wux_tie", "password": "wux-v24"}, "ods": "RW8", "units": "si", "seed": 1202, "fac": "RW8", "app": "PAS", "charset": None, "mrn_type": "MR",
+     "wards": [("CCU", "Coronary Care Unit", ["card"], 3, [1] * 8), ("W24", "Ward 24 Respiratory", ["resp", "med"], 4, [4, 4, 4, 1, 1]), ("W12", "Ward 12 Stroke", ["neuro", "med", "ortho"], 2, [4, 4, 1, 1])]},
+    # ---------------------------------------------------------------- 일본 2
+    {"id": "jp-toto", "country": "JP", "name": "Toto Central Medical Center", "name_local": "東都中央医療センター", "city": "東京都文京区", "tz": "Asia/Tokyo", "locale": "jp", "region": "東京都", "lang": "ja",
+     "protocol": "hl7v2", "flavor": "ss-mix2", "hl7_version": "2.5", "style": "SS-MIX2 標準化ストレージ (HL7 v2.5 · JAHIS · ISO-2022-JP)",
+     "auth": {"type": "mllp-facility", "http": "basic", "username": "ssmix", "password": "toto-2575"}, "units": "si", "seed": 1301, "fac": "1311234567", "app": "HIS", "charset": "iso-2022-jp", "mrn_type": "PI",
+     "wards": [("4E", "4階東病棟", ["card", "cts"], 4, [4, 4, 4, 1, 1, 2, 4]), ("5W", "5階西病棟", ["resp", "med", "neuro"], 5, [4, 4, 4, 4, 1, 1]), ("6E", "6階東病棟", ["ortho", "med"], 6, [4, 4, 2, 1])]},
+    {"id": "jp-kitahama", "country": "JP", "name": "Kitahama City General Hospital", "name_local": "北浜市立総合病院", "city": "大阪府大阪市", "tz": "Asia/Tokyo", "locale": "jp", "region": "大阪府", "lang": "ja",
+     "protocol": "fhir", "flavor": "jp-core", "fhir_version": "4.0.1", "style": "電子カルテ FHIR (JP Core 1.1 · 医療機関コード付き OID)",
+     "auth": {"type": "bearer-static", "token": "kth-jpcore-3f8a2c7d19"}, "medical_code": "2712345678", "units": "si", "seed": 1302,
+     "wards": [("3N", "3階北病棟", ["card"], 3, [4, 4, 4, 1, 1, 1]), ("7S", "7階南病棟", ["med", "resp", "neuro", "ortho", "cts"], 7, [4, 4, 4, 2, 1, 1])]},
+    # ---------------------------------------------------------------- 한국 4
+    {"id": "kr-hanbit", "country": "KR", "name": "Hanbit University Hospital", "name_local": "한빛대학교병원", "city": "서울특별시 종로구", "tz": "Asia/Seoul", "locale": "kr", "region": "서울특별시", "lang": "ko",
+     "protocol": "fhir", "flavor": "kr-core", "fhir_version": "4.0.1", "style": "차세대 EMR FHIR (KR Core · KCD-8 · 주민번호 마스킹)",
+     "auth": {"type": "client-credentials-post", "client_id": "hanbit-biosig", "client_secret": "hb-fhir-9a0c1d"}, "hosp_code": "11100001", "units": "si", "seed": 1401,
+     "wards": [("71", "71병동 (순환기)", ["card"], 7, [6, 6, 6, 2, 2, 1]), ("72", "72병동 (흉부외과)", ["cts", "card"], 7, [6, 6, 2, 1]), ("81", "81병동 (호흡기·내과)", ["resp", "med", "neuro", "ortho"], 8, [6, 6, 6, 2, 1])]},
+    {"id": "kr-saesol", "country": "KR", "name": "Saesol University Hospital", "name_local": "새솔대학교병원", "city": "경기도 성남시", "tz": "Asia/Seoul", "locale": "kr", "region": "경기도", "lang": "ko",
+     "protocol": "kr-json", "flavor": "kr-json", "style": "국내 대학병원 EMR 계열 REST JSON (OCS 컬럼형 대문자 키 · API 키)",
+     "auth": {"type": "api-key", "header": "X-API-KEY", "key": "SS-EMR-7F3A-91C2", "hosp_header": "X-HOSP-CD", "hosp_cd": "31200017"}, "hosp_code": "31200017", "units": "si", "seed": 1402,
+     "wards": [("51W", "51병동", ["card", "cts"], 5, [6, 6, 4, 2, 1, 1]), ("61W", "61병동", ["resp", "med"], 6, [6, 6, 6, 1]), ("62W", "62병동", ["neuro", "ortho"], 6, [6, 4, 2, 1])]},
+    {"id": "kr-donghae", "country": "KR", "name": "Donghae Central Hospital", "name_local": "동해중앙병원", "city": "강원특별자치도 동해시", "tz": "Asia/Seoul", "locale": "kr", "region": "강원특별자치도", "lang": "ko",
+     "protocol": "kr-xml", "flavor": "kr-xml", "style": "중소병원 OCS 레거시 연계 (XML over HTTP · EUC-KR · IF_ID 전문)",
+     "auth": {"type": "ip-allow", "note": "인증 없음, 송신 IP 기록 (SND_SYS_CD 필수)", "snd_sys": "BIOMON"}, "hosp_code": "32300045", "units": "si", "seed": 1403,
+     "wards": [("3W", "3병동", ["card", "med", "resp"], 3, [6, 6, 6, 4, 2, 1]), ("4W", "4병동", ["neuro", "ortho", "cts", "med"], 4, [6, 6, 5, 2, 1])]},
+    {"id": "kr-cheongram", "country": "KR", "name": "Cheongram Hospital", "name_local": "청람의료재단 청람병원", "city": "대전광역시 서구", "tz": "Asia/Seoul", "locale": "kr", "region": "대전광역시", "lang": "ko",
+     "protocol": "cda", "flavor": "kr-cda", "style": "진료정보교류 표준 (HL7 CDA R2 · 진료의뢰서/회송서 · 문서 기반)",
+     "auth": {"type": "bearer-static", "token": "crh-cda-4d2b7e61f0"}, "hosp_code": "34100089", "units": "si", "seed": 1404,
+     "wards": [("W5", "5병동", ["card", "med"], 5, [6, 6, 4, 2, 1]), ("W6", "6병동", ["resp", "neuro", "ortho", "cts"], 6, [6, 6, 2, 1])]},
+    # ---------------------------------------------------------------- 기타 8
+    {"id": "de-rheinaue", "country": "DE", "name": "Klinikum Rheinaue", "city": "Köln", "tz": "Europe/Berlin", "locale": "de", "region": None, "lang": "de",
+     "protocol": "fhir", "flavor": "isik", "fhir_version": "4.0.1", "style": "KIS (FHIR R4 · ISiK Stufe 3 · Basic Auth)",
+     "auth": {"type": "basic", "username": "vitalmonitor", "password": "rheinaue-isik"}, "ik": "260530012", "units": "si", "seed": 1501,
+     "wards": [("ST3B", "Station 3B Kardiologie", ["card", "cts"], 3, [2] * 8 + [1] * 2), ("ST4A", "Station 4A Innere/Pneumologie", ["med", "resp"], 4, [2] * 7 + [3] * 2), ("ST5C", "Station 5C Neurologie/Stroke Unit", ["neuro", "ortho"], 5, [2] * 6)]},
+    {"id": "fr-belveze", "country": "FR", "name": "CHU de Belvèze", "city": "Toulouse", "tz": "Europe/Paris", "locale": "fr", "region": None, "lang": "fr",
+     "protocol": "hl7v2", "flavor": "pam-fr", "hl7_version": "2.5", "style": "DPI hospitalier (HL7 v2.5 · IHE PAM FR 2.x · INS · ZBE · ISO 8859-1)",
+     "auth": {"type": "mllp-facility", "http": "basic", "username": "eai_belveze", "password": "pam-fr-25"}, "finess": "310781406", "units": "si", "seed": 1601, "fac": "CHUBEL", "app": "DPI", "charset": "iso-8859-1", "mrn_type": "PI",
+     "wards": [("3104", "Cardiologie - USIC", ["card", "cts"], 3, [1] * 12), ("4201", "Pneumologie", ["resp", "med"], 4, [1] * 8 + [2] * 3), ("5302", "Neurologie vasculaire", ["neuro", "ortho", "med"], 5, [1] * 8)]},
+    {"id": "nl-amstelwaard", "country": "NL", "name": "Ziekenhuis Amstelwaard", "city": "Amstelveen", "tz": "Europe/Amsterdam", "locale": "nl", "region": None, "lang": "nl",
+     "protocol": "fhir", "flavor": "nl-zib", "fhir_version": "3.0.2", "style": "EPD (FHIR STU3 · Nictiz zib2017 · BSN · client_credentials)",
+     "auth": {"type": "client-credentials-post", "client_id": "amstelwaard-monitoring", "client_secret": "azw-stu3-51f0"}, "agb": "06011234", "units": "si", "seed": 1701,
+     "wards": [("C4", "Afdeling C4 Cardiologie", ["card", "cts"], 4, [4, 4, 1, 1, 2, 4]), ("B2", "Afdeling B2 Interne/Longziekten", ["med", "resp", "neuro", "ortho"], 2, [4, 4, 4, 1, 1])]},
+    {"id": "au-brindabella", "country": "AU", "name": "Brindabella Base Hospital", "city": "Canberra, ACT", "tz": "Australia/Sydney", "locale": "au", "region": None, "lang": "en",
+     "protocol": "fhir", "flavor": "au-core", "fhir_version": "4.0.1", "style": "PAS/EMR (FHIR R4 · AU Core 1.0 · IHI · SMART client_credentials)",
+     "auth": {"type": "client-credentials-post", "client_id": "bbh-vitals-feed", "client_secret": "bbh-au-core-77"}, "hpio": "8003621566684455", "units": "si", "seed": 1801,
+     "wards": [("5A", "Ward 5A Cardiology", ["card", "cts"], 5, [4, 4, 1, 1, 2, 1, 1]), ("7B", "Ward 7B General Medicine", ["med", "resp", "neuro", "ortho"], 7, [4, 4, 4, 1, 1, 2])]},
+    {"id": "ca-stlucien", "country": "CA", "name": "St. Lucien General Hospital", "city": "Toronto, ON", "tz": "America/Toronto", "locale": "ca", "region": None, "lang": "en",
+     "protocol": "hl7v2", "flavor": "ca-v23", "hl7_version": "2.3", "style": "레거시 HIS (HL7 v2.3 · MLLP · OHIP 건강카드 + 버전코드)",
+     "auth": {"type": "mllp-facility", "http": "basic", "username": "slgh_hl7", "password": "slgh-v23"}, "units": "si", "seed": 1901, "fac": "SLGH", "app": "HIS", "charset": None, "mrn_type": "MR",
+     "wards": [("5N", "5 North Cardiology", ["card", "cts"], 5, [2] * 8 + [1] * 4), ("6S", "6 South Medicine", ["med", "resp", "neuro", "ortho"], 6, [4, 4, 2, 2, 1, 1])]},
+    {"id": "sg-tanjongrhu", "country": "SG", "name": "Tanjong Rhu General Hospital", "city": "Singapore", "tz": "Asia/Singapore", "locale": "sg", "region": None, "lang": "en",
+     "protocol": "fhir", "flavor": "sg", "fhir_version": "4.0.1", "style": "Public cluster EMR (FHIR R4 · NRIC · API 게이트웨이 키)",
+     "auth": {"type": "api-key", "header": "x-api-key", "key": "trgh-7d9c1b0e2a5f", "extra_header": "x-client-id", "extra_value": "biomonitor-gw"}, "units": "si", "seed": 2001,
+     "wards": [("W44", "Ward 44 (Cardiology, Class B2)", ["card", "cts"], 4, [6, 6, 6, 4]), ("W56", "Ward 56 (General Medicine)", ["med", "resp", "neuro", "ortho"], 5, [6, 6, 6, 1, 1])]},
+    {"id": "br-santaclara", "country": "BR", "name": "Hospital Santa Clara do Vale", "city": "São Paulo, SP", "tz": "America/Sao_Paulo", "locale": "br", "region": None, "lang": "pt",
+     "protocol": "fhir", "flavor": "br-rnds", "fhir_version": "4.0.1", "style": "Prontuário (FHIR R4 · perfis RNDS · CNS/CPF · X-Authorization-Server)",
+     "auth": {"type": "rnds-token", "requester_cpf": "529.982.247-25", "cert_cn": "HOSPITAL SANTA CLARA DO VALE:12345678000190"}, "cnes": "2077485", "units": "si", "seed": 2101,
+     "wards": [("UCO", "Unidade Coronariana", ["card", "cts"], 3, [1] * 10), ("ENF4", "Enfermaria Clínica 4º andar", ["med", "resp", "neuro", "ortho"], 4, [2, 2, 2, 3, 3, 2, 1])]},
+    {"id": "ae-alwaha", "country": "AE", "name": "Al Waha Specialty Hospital", "city": "Abu Dhabi", "tz": "Asia/Dubai", "locale": "ae", "region": None, "lang": "en",
+     "protocol": "hl7v2", "flavor": "ae-malaffi", "hl7_version": "2.5.1", "style": "HIE 연계 (HL7 v2.5.1 · Malaffi 관례 · Emirates ID · UTF-8 아랍 이름)",
+     "auth": {"type": "mllp-facility", "http": "basic", "username": "awsh_hie", "password": "awsh-251"}, "units": "si", "seed": 2201, "fac": "MF1234", "app": "HIS", "charset": "utf-8", "mrn_type": "MR",
+     "wards": [("CW3", "Cardiac Ward 3", ["card", "cts"], 3, [1] * 10 + [2] * 3), ("MW5", "Medical Ward 5", ["med", "resp", "neuro", "ortho"], 5, [2] * 6 + [1] * 4)]},
+]
+SITE_BY_ID = {s["id"]: s for s in SITES}
+
+COUNTRY_KO = {"US": "미국", "GB": "영국", "JP": "일본", "KR": "한국", "DE": "독일", "FR": "프랑스", "NL": "네덜란드", "AU": "호주", "CA": "캐나다", "SG": "싱가포르", "BR": "브라질", "AE": "아랍에미리트"}
+PROTOCOL_KO = {"fhir": "HL7 FHIR", "hl7v2": "HL7 v2 (MLLP/HTTP)", "athena": "벤더 REST", "kr-json": "REST JSON", "kr-xml": "XML/EUC-KR", "cda": "HL7 CDA R2"}
