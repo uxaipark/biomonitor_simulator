@@ -483,7 +483,7 @@ class World:
             dcfg = self.cfg.get("scenario", "devices", default={}) or {}
             policy = policy or dcfg.get("policy", "auto")
             counts: dict[str, int] = {k: 0 for k in DEVICES}
-            for pid, rec in self.admitted.items():
+            for pid, rec in list(self.admitted.items()):
                 prof = self.by_id[pid]
                 prof["devices"] = assign_devices(self.rng, prof, rec["outpatient"], policy, dcfg.get("spo2_mix"))
                 self._apply_devices_row(rec["row"], prof)
@@ -525,7 +525,7 @@ class World:
                "shadow": False, "note": "", "next_hop": self.sim_time + self.rng.uniform(480, 1500), "next_slow_hop": self.sim_time + self.rng.uniform(1800, 5400),
                "gain0": 1.0}
         if outpatient:
-            used = {r["mobile_gw"] for r in self.admitted.values() if r["outpatient"]}
+            used = {r["mobile_gw"] for r in list(self.admitted.values()) if r["outpatient"]}
             free = [g["idx"] for g in h.gateways if g["type"] == "mobile" and g["idx"] not in used]
             if not free:
                 self.free_rows.append(row)
@@ -616,7 +616,7 @@ class World:
         site = self.cfg.get("scenario", "site")
         target_in = g["active_patients"] if site in ("hospital", "mixed") else 0
         target_out = g["outpatient_count"] if site in ("mcot", "mixed") else 0
-        n_in = sum(1 for r in self.admitted.values() if not r["outpatient"])
+        n_in = sum(1 for r in list(self.admitted.values()) if not r["outpatient"])
         n_out = len(self.admitted) - n_in
         budget = 100000 if initial else 300
         self._boot_fill = initial                                          # 시작 시 채우는 환자: 처방·패치 경과를 흩어 둔다
@@ -634,10 +634,10 @@ class World:
             n_out += 1
             budget -= 1
         if n_in > target_in:
-            for pid in [k for k, r in self.admitted.items() if not r["outpatient"]][: n_in - target_in]:
+            for pid in [k for k, r in list(self.admitted.items()) if not r["outpatient"]][: n_in - target_in]:
                 self.discharge(pid, "퇴원(목표 인원 조정)")
         if n_out > target_out:
-            for pid in [k for k, r in self.admitted.items() if r["outpatient"]][: n_out - target_out]:
+            for pid in [k for k, r in list(self.admitted.items()) if r["outpatient"]][: n_out - target_out]:
                 self.discharge(pid, "MCOT 종료")
         self._boot_fill = False
 
@@ -978,7 +978,7 @@ class World:
             for k, book in self.exam_book.items():
                 if book and book[0][1] < now - 86400:
                     self.exam_book[k] = [b for b in book if b[1] >= now - 86400]
-        inpat = [rec for rec in self.admitted.values() if not rec["outpatient"]]
+        inpat = [rec for rec in list(self.admitted.values()) if not rec["outpatient"]]
         self.exam_load = collections.Counter(rec["exam_room"] for rec in inpat if rec.get("exam_room") and (rec["trip"] or rec["trip_step_until"] > now))
         on_exam = sum(1 for rec in inpat if rec["trip"] or rec["trip_step_until"] > now)      # every trip kind counts toward the moving share
         target = int(round(ratio * len(inpat)))
@@ -1228,7 +1228,7 @@ class World:
             lat, jit = MCOT_UPLINK.get(self.hospital.gateways[gw].get("radio", "LTE"), MCOT_UPLINK["LTE"])
             gs["base_lat"], gs["base_jit"] = float(self.rng.uniform(*lat)), float(self.rng.uniform(*jit))
         extra_l, extra_j = (self.rng.uniform(*MCOT_OUTSIDE_EXTRA[0]), self.rng.uniform(*MCOT_OUTSIDE_EXTRA[1])) if outside else (0.0, 0.0)
-        pid = next((p for p, r in self.admitted.items() if r.get("mobile_gw") == gw), None)
+        pid = next((p for p, r in list(self.admitted.items()) if r.get("mobile_gw") == gw), None)
         if pid is not None and getattr(self, "real", None) and self.real.region_factor(self.by_id[pid]) > 1:
             extra_l += 25.0                                                # 지방: 기지국 밀도가 낮아 기본 지연이 길다
         G["latency_ms"][gw] = gs["base_lat"] + extra_l
@@ -1359,7 +1359,7 @@ class World:
         P = self.st.patch.arr
         tick = self._tick_now()
         per = self.bank.index.get("slow_per_profile", 24) if self.bank.loaded else 24
-        for pid, rec in self.admitted.items():
+        for pid, rec in list(self.admitted.items()):
             prof = self.by_id[pid]
             st = trend_model.state(pid, prof, now)
             row = rec["row"]
@@ -1396,7 +1396,7 @@ class World:
         P = self.st.patch.arr
         now = self.sim_time
         tick = self._tick_now()
-        for pid, rec in self.admitted.items():
+        for pid, rec in list(self.admitted.items()):
             row = rec["row"]
             if "rs_paced" in rec:                                   # 실제 시그널 슬롯 환자: 에피소드 없음
                 continue
@@ -1565,7 +1565,7 @@ class World:
         h = self.hospital
         out = h.export_layout()
         occ = {}
-        for pid, rec in self.admitted.items():
+        for pid, rec in list(self.admitted.items()):
             if rec["bed_idx"] >= 0:
                 occ[h.beds[rec["bed_idx"]]["id"]] = {"patient_no": rec.get("patient_no"), "profile_id": pid, "name": self.by_id[pid]["name"],
                                                     "patch": self.patches[rec["row"]].serial if rec["row"] in self.patches else None}
@@ -1661,7 +1661,7 @@ class World:
             return
         lam_a = g["admissions_per_hour"] / 3600.0 * dt_s
         lam_d = g["discharges_per_hour"] / 3600.0 * dt_s
-        n_in = [k for k, r in self.admitted.items() if not r["outpatient"]]
+        n_in = [k for k, r in list(self.admitted.items()) if not r["outpatient"]]
         target = int(g["active_patients"])
         weekly = g.get("census_mode", "fixed") == "weekly" or self.real.surge is not None
         if weekly:                                                         # 요일·시간대 곡선 / 대량 유입: 목표가 움직이고 조정도 서서히
@@ -1734,7 +1734,7 @@ class World:
                 d["axes"] = c["axes"]
             chans.append(d)
         by_gw: dict[int, list] = {}
-        for pid, rec in self.admitted.items():
+        for pid, rec in list(self.admitted.items()):
             if rec["gw"] < 0:
                 continue
             patch = self.patches.get(rec["row"])
@@ -1881,7 +1881,7 @@ class World:
             # periodic relink (gateway recovery / capacity / rssi jitter): 1/5 of patients per second
             G = self.st.gw.arr
             k = int(self.sim_time) % 5
-            for pid, rec in self.admitted.items():
+            for pid, rec in list(self.admitted.items()):
                 if pid % 5 == k or (rec["gw"] >= 0 and G["status"][rec["gw"]] == 2) or (rec["gw"] < 0):
                     self._relink(rec)
             self.write_meta()
@@ -2148,7 +2148,7 @@ class World:
         kinds = {k: 0 for _, k in self.TRIP_KINDS}
         n_shadow = n_mri = 0
         exams_soon: list[dict] = []
-        for pid, rec in self.admitted.items():
+        for pid, rec in list(self.admitted.items()):
             prof = self.by_id[pid]
             for ex in rec.get("exams") or []:
                 if not ex["done"] and now <= ex["t"] <= now + upcoming_h * 3600:
@@ -2183,7 +2183,7 @@ class World:
                           "steps": steps, "next_exams": [{"type": e["type"], "room": e["room"], "time": iso(e["t"]), "in_s": e["t"] - now, "patch_policy": e["patch_policy"], "duration_min": e["duration_min"]} for e in next_exams]})
         trips.sort(key=lambda t: t["total_remaining"])
         exams_soon.sort(key=lambda e: e["in_s"])
-        in_room = collections.Counter(self.display_location(rec) for rec in self.admitted.values()
+        in_room = collections.Counter(self.display_location(rec) for rec in list(self.admitted.values())
                                       if not rec["outpatient"] and (rec["trip"] or rec["trip_step_until"] > now))   # who is physically in which room right now (= the plan)
         return {"sim_time": iso(now), "trips": trips,
                 "stats": {"moving": len(trips), "kinds": kinds, "shadow": n_shadow, "mri_patch_off": n_mri,
@@ -2360,14 +2360,14 @@ class World:
             if what == "power_outage":
                 return self.real.power_event(params.get("building"), params.get("mains_s"), "정전")
             if what == "phone":
-                pid = target if target in self.admitted else next((k for k, r in self.admitted.items() if r["outpatient"]), None)
+                pid = target if target in self.admitted else next((k for k, r in list(self.admitted.items()) if r["outpatient"]), None)
                 return self.real.force_phone(pid, str(params.get("state", "killed")), float(params.get("minutes", 10))) if pid else "no MCOT patient"
             if what == "surge":
                 return self.real.start_surge(params.get("count"), float(params.get("over_min", 60)))
             if what in ("patch_wear_expire", "patch_low_battery", "rx_expire"):
                 return self._patch_scenario(what, target, params)
             if what in ("deteriorate", "code_blue"):
-                ids = [k for k, r in self.admitted.items() if not r["outpatient"] and not r.get("deter") and not r.get("code_blue") and not self.real._busy(k, r)] or list(self.admitted.keys())
+                ids = [k for k, r in list(self.admitted.items()) if not r["outpatient"] and not r.get("deter") and not r.get("code_blue") and not self.real._busy(k, r)] or list(self.admitted.keys())
                 if not ids:
                     return "no patients"
                 pid = target if target in self.admitted else int(self.rng.choice(ids))
@@ -2457,7 +2457,7 @@ class World:
                         self.log.add("adt", f"[수동] 신규 입원: {p['name']} → {p['admission']['ward_name']} {p['admission']['bed']}")
                         return f"admitted {p['name']}"
                     return "no bed/profile"
-                ids = [k for k, r in self.admitted.items() if not r["outpatient"]] or list(self.admitted.keys())
+                ids = [k for k, r in list(self.admitted.items()) if not r["outpatient"]] or list(self.admitted.keys())
                 if not ids:
                     return "no patients"
                 pid = target if target in self.admitted else int(self.rng.choice(ids))
