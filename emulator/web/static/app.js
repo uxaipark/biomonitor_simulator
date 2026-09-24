@@ -951,7 +951,7 @@ async function showPatientDetail(id) {                          // detail card f
   const p = await api('/emr/patients/' + id); const r = p.runtime; const a = p.admission;
   const X = $('#patExtra'); if (!X) return;
   X.innerHTML = `<div class="xhead">입원 기록 · 위치 · 이력</div><div class="patient"><img src="/api/v1/emr/patients/${p.id}/avatar.svg"><div class="info"><b>${p.name}</b> <span class="sub">${p.sex === 'M' ? '남' : '여'} ${p.age}세 (${p.birth_date}) · ${p.nationality_label}</span><div>${a && a.patient_no ? `환자번호 #${a.patient_no} · ` : ''}${p.mrn} · 혈액형 ${p.blood_type} · ${p.height_cm}cm ${p.weight_kg}kg BMI ${p.bmi}</div><div>알레르기: ${p.allergies} · 동반질환: ${p.comorbidities.join(', ') || '없음'}</div><div>거주지: ${p.address ? p.address.label : '-'} · ${p.phone || ''}</div></div></div>
-    <table style="margin-top:8px"><tr><td>주진단</td><td>${p.disease} (${p.icd10}) · ${p.ward_specialty}</td></tr><tr><td>페이스메이커</td><td>${pmSummary(p.pacemaker_info)}</td></tr>${r ? `<tr><td>기기 세트</td><td>${devChips(p, r)}</td></tr>` : ''}<tr><td>기저 리듬</td><td>${META.rhythms[p.rhythm].label}</td></tr>
+    <table style="margin-top:8px"><tr><td>주진단</td><td>${p.disease} (${p.icd10}) · ${p.ward_specialty}</td></tr>${p.emr_link ? `<tr><td>연동 EMR</td><td><b>${esc(p.emr_link.name)}</b> <span class="sub">${esc(p.emr_link.site)}</span> · ${Object.entries(p.emr_link.identifiers).map(([k, v]) => `${esc(k)} <span class="mono">${esc(v)}</span>`).join(' · ')}${p.emr_link.visit ? ` · 내원 <span class="mono">${esc(p.emr_link.visit)}</span>` : ''}${p.emr_link.fhir_patient_id ? ` · FHIR Patient/<span class="mono">${esc(p.emr_link.fhir_patient_id)}</span>` : ''}${p.emr_link.location ? ` · ${esc(p.emr_link.location.ward_name)} ${esc(p.emr_link.location.room)}-${esc(p.emr_link.location.bed)}` : ''} · EMR 수신 ${p.emr_link.received.count}건</td></tr>` : ''}<tr><td>페이스메이커</td><td>${pmSummary(p.pacemaker_info)}</td></tr>${r ? `<tr><td>기기 세트</td><td>${devChips(p, r)}</td></tr>` : ''}<tr><td>기저 리듬</td><td>${META.rhythms[p.rhythm].label}</td></tr>
     <tr><td>상태</td><td>${p.status}</td></tr>${a ? `<tr><td>입원</td><td>${a.time} · ${a.ward_name} ${a.bed || ''} · 담당의 ${a.doctor} · 간호사 ${a.nurse} · 패치 ${a.patch}</td></tr><tr><td>검사</td><td>${(a.exams || []).map(e => `${e.time} ${e.type} (${e.room}, ${e.duration_min}분${e.patch_policy === 'remove' ? ', 패치 분리' : ''})${e.done ? ' ✓' : ''}`).join('<br>') || '-'}</td></tr>` : ''}
     ${r ? `<tr><td>입원 병실</td><td><b>${r.home_where || ''}</b> · ${a ? a.ward_name : ''} · ${r.home_room ? `병실 ${r.home_room}` : '-'} · 침상 ${r.bed || (a && a.bed) || '-'}</td></tr>
     <tr><td>현재 위치</td><td>${r.trip ? `<b>${r.location_where || ''} ${esc(r.location_name || '')}</b> <span class="sub">${r.location || ''}</span> · ${esc(r.trip.stage)} <span class="tag warn">이동 중</span>` : `${r.location_where || ''} 입원 병실 내 <span class="sub">${r.location || ''}</span>`} ${r.shadow ? '<span class="tag err">음영</span>' : ''} · GW ${r.gateway || '<span class="tag err">없음</span>'} · RSSI ${r.rssi}</td></tr>
@@ -3067,7 +3067,8 @@ function emrEsc(v) { return String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&am
 async function emrLoad() {
   try {
     const r = await fetch('/api/v1/emrsim').then(x => x.json());
-    EMR.sites = r.sites;
+    EMR.sites = r.sites; EMR.link = r.link;
+    emrLinkUi();
     $('#emrSum').textContent = `${r.count}곳 · ` + Object.entries(r.by_country).map(([k, v]) => `${k} ${v}`).join(' · ');
     $('#emrMllp').textContent = `MLLP tcp/${r.mllp_port}`;
     emrRenderTable();
@@ -3080,7 +3081,7 @@ function emrRenderTable() {
   $('#emrTbl tbody').innerHTML = rows.map(s => {
     const st = s.stats, f = st.faults;
     const state = f.down ? ['st-down', '다운'] : (f.latency_ms || f.error_rate) ? ['st-slow', `지연 ${f.latency_ms}ms · 오류 ${Math.round(f.error_rate * 100)}%`] : ['st-ok', f.auth === false ? '정상 (인증 끔)' : '정상'];
-    return `<tr data-id="${s.id}" class="${EMR.cur === s.id ? 'sel' : ''}"><td>${emrCc(s.country)} ${emrEsc(s.country_ko)}</td><td><b>${emrEsc(s.name_local || s.name)}</b><div class="sub">${emrEsc(s.city)}</div></td>`
+    return `<tr data-id="${s.id}" class="${EMR.cur === s.id ? 'sel' : ''} ${s.linked ? 'linked' : ''}"><td>${emrCc(s.country)} ${emrEsc(s.country_ko)}</td><td><b>${emrEsc(s.name_local || s.name)}</b>${s.linked ? ' <span class="tag ok">연동 중 · 에뮬레이터 환자</span>' : ''}<div class="sub">${emrEsc(s.city)}</div></td>`
       + `<td>${emrEsc(s.protocol_ko)}<div class="sub">${emrEsc(s.style)}</div></td><td class="mono">${emrEsc(s.version)}</td><td>${EMR_AUTH[s.auth.type] || s.auth.type}</td>`
       + `<td>${st.occupied}/${st.beds}</td><td>${st.adt_events}</td><td>${st.inbound_values}</td><td>${st.requests}</td><td>${st.errors}</td><td class="${state[0]}">${state[1]}</td></tr>`;
   }).join('');
@@ -3144,5 +3145,31 @@ $('#emrFaultApply').onclick = async () => {
   await fetch(`/api/v1/emrsim/${EMR.cur}/faults`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   toast('장애 설정 적용'); emrLoad(); emrPoll();
 };
+function emrLinkUi() {
+  const sel = $('#emrLinkSel'), L = EMR.link || { site: 'emulator' };
+  if (sel && !sel.dataset.filled) {
+    sel.innerHTML = '<option value="emulator">에뮬레이터 (자체 EMR · 지금 방식)</option>' + EMR.sites.map(s => `<option value="${s.id}">${s.country} · ${emrEsc(s.name_local || s.name)} — ${emrEsc(s.protocol_ko)} ${emrEsc(s.version)}</option>`).join('');
+    sel.dataset.filled = '1';
+  }
+  if (sel) { sel.value = L.site; sel.dispatchEvent(new Event('change')); }   // 사용자 정의 드롭다운(버튼 글자)도 같이 갱신
+  const st = $('#emrLinkState');
+  if (st) st.textContent = L.linked ? `연동 중: ${L.name} · 재원 ${L.patients}명 · ADT ${L.adt_events}건 (연동 시작 ${String(L.since || '').replace('T', ' ').slice(0, 19)})` : '연동 없음 — 에뮬레이터 자체 EMR';
+  emrPill(L);
+}
+function emrPill(L) {
+  const pill = $('#pillEmr'); if (!pill) return;
+  const s = L.linked ? EMR.sites.find(x => x.id === L.site) : null;
+  pill.textContent = L.linked ? `EMR ${s ? (s.name_local || s.name) : L.site}` : 'EMR 에뮬레이터';
+  pill.classList.toggle('on', !!L.linked);
+}
+$('#emrLinkApply').onclick = async () => {
+  const site = $('#emrLinkSel').value;
+  const r = await fetch('/api/v1/emrsim/link', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ site }) }).then(x => x.json());
+  EMR.link = r; toast(r.linked ? `연동 병원: ${r.name} (재원 ${r.patients}명)` : '에뮬레이터 자체 EMR 로 전환');
+  await emrLoad(); if (r.linked) emrSelect(r.site);
+};
+$('#pillEmr').onclick = () => { const b = document.querySelector('#tabs button[data-tab="emr"]'); if (b) b.click(); };
+fetch('/api/v1/emrsim/link').then(x => x.json()).then(emrPill).catch(() => { });
+setInterval(() => { fetch('/api/v1/emrsim/link').then(x => x.json()).then(L => { EMR.link = L; emrPill(L); if ($('[data-tab="emr"]').classList.contains('on')) emrLinkUi(); }).catch(() => { }); }, 20000);
 window.emrLoad = emrLoad;
 })();

@@ -371,7 +371,7 @@ def site_info(sim, root: str, detail: bool = False) -> dict:
     base = f"{root}/emrsim/{s['id']}"
     p, e = _example_person(sim)
     a = dict(s["auth"])
-    info = {"id": s["id"], "country": s["country"], "country_ko": COUNTRY_KO[s["country"]], "name": s["name"], "name_local": s.get("name_local"), "city": s["city"], "tz": s["tz"],
+    info = {"id": s["id"], "linked": bool(s.get("linked")), "country": s["country"], "country_ko": COUNTRY_KO[s["country"]], "name": s["name"], "name_local": s.get("name_local"), "city": s["city"], "tz": s["tz"],
             "protocol": s["protocol"], "protocol_ko": PROTOCOL_KO[s["protocol"]], "flavor": s["flavor"],
             "version": s.get("fhir_version") or s.get("hl7_version") or {"athena": "athenaOne REST v1", "kr-json": "JSON/UTF-8", "kr-xml": "XML/EUC-KR", "cda": "CDA R2"}[s["protocol"]],
             "style": s["style"], "base_url": base, "auth": a, "stats": sim.summary()}
@@ -437,8 +437,29 @@ def catalog(request: Request):
     by_p = {}
     for s in sites:
         by_p[s["protocol_ko"]] = by_p.get(s["protocol_ko"], 0) + 1
-    return {"description": "상용 EMR 연동 시험용 가상 의료기관 20곳. 기관명은 가공, 형식·코드 체계·식별자 검증 규칙은 각국 표준/벤더 관례를 따름. 서명·인증서 검증은 형식만 검사.",
+    from . import link
+    return {"link": link.status(), "description": "상용 EMR 연동 시험용 가상 의료기관 20곳. 기관명은 가공, 형식·코드 체계·식별자 검증 규칙은 각국 표준/벤더 관례를 따름. 서명·인증서 검증은 형식만 검사.",
             "count": len(sites), "by_country": by_c, "by_protocol": by_p, "mllp_port": MLLP_PORT, "doc": "docs/EMR_SIM.md", "sites": sites}
+
+
+@router.get("/api/v1/emrsim/link")
+def link_get():
+    from . import link
+    return link.status()
+
+
+@router.post("/api/v1/emrsim/link")
+def link_set(body: dict):
+    """{"site": "emulator" | site_id} — 에뮬레이터 환자를 어느 병원 EMR 로 내보낼지."""
+    from . import link
+    try:
+        st = link.select(body.get("site"))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    sim = get_sim(st["site"]) if st["linked"] else None
+    if sim:
+        sim.add_log("sys", "admin", f"연동 병원으로 선택됨 — 에뮬레이터 환자 {st['patients']}명을 이 EMR 형식으로 제공")
+    return st
 
 
 @router.get("/api/v1/emrsim/{site_id}")

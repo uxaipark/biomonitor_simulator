@@ -31,6 +31,7 @@
   <span class="pill" id="pillErrPkt" title="오류 패킷 = 시나리오 손실 + 송신 백로그 드롭 + 전송 오류 (누적)">오류 pkt 0</span>
   <span class="pill" id="pillNoConn" title="라우터에 TCP 연결이 없어 버려진 프레임 (누적)" hidden>라우터 미연결</span>
   <span class="pill" id="pillErrGw" title="오류 게이트웨이 = 장애 + 성능저하">오류 GW 0</span>
+  <span class="pill" id="pillEmr" title="연동 EMR — EMR 연동 메뉴에서 바꿉니다">EMR 에뮬레이터</span>
 </div>
 </div>
 <main>
@@ -406,6 +407,8 @@
 <section class="tab" data-tab="emr" data-title="EMR 연동">
   <div class="card"><h3>상용 EMR 연동 시험 서버 <span class="sub" id="emrSum"></span><span class="right mono" id="emrMllp"></span></h3>
     <div class="help">가상 의료기관 20곳이 각자의 형식(FHIR R4·STU3, HL7 v2 MLLP·HTTP, 벤더 REST, EUC-KR XML, CDA R2)과 인증 방식으로 환자·입퇴원(ADT)·바이탈을 내주고, 라우터가 보내는 바이탈을 그 기관 규칙대로 검증해 받습니다. 기관명은 가공이며 식별번호는 각국 검증 규칙을 통과하는 합성값입니다. 사양: <span class="mono">docs/EMR_SIM.md</span> · 카탈로그 <span class="mono">GET /api/v1/emrsim</span></div>
+    <div class="emr-link"><b>연동 병원</b> <select id="emrLinkSel"></select> <button class="small primary" id="emrLinkApply">적용</button> <span class="sub" id="emrLinkState"></span>
+      <div class="sub">에뮬레이터: 지금처럼 에뮬레이터 자체 EMR(<span class="mono">/api/v1/emr</span>)만 사용하고 20곳은 독립 가상 병원으로 동작. 병원을 고르면 그 병원 EMR이 에뮬레이터의 재원 환자·병상·입퇴원을 그 병원 형식(식별번호·이름 관례·코드 체계)으로 제공하고, 에뮬레이터 환자 정보(<span class="mono">/emr/admissions[].emr</span>, 환자 상세 '연동 EMR')에 그 EMR의 번호가 붙습니다.</div></div>
     <div class="seg" id="emrFilter"><button data-f="" class="on">전체</button><button data-f="US">미국</button><button data-f="GB">영국</button><button data-f="JP">일본</button><button data-f="KR">한국</button><button data-f="etc">기타</button></div>
     <div class="tbl"><table id="emrTbl"><thead><tr><th>국가</th><th>기관</th><th>형식</th><th>버전</th><th>인증</th><th>재원/병상</th><th>ADT</th><th>수신값</th><th>요청</th><th>오류</th><th>상태</th></tr></thead><tbody></tbody></table></div>
   </div>

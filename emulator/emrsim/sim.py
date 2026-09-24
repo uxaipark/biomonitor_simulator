@@ -250,7 +250,7 @@ class SiteSim:
         if fl in ("oracle", "au-core", "jp-core", "kr-core"):
             base = {"Patient": 12700000, "Encounter": 97900000, "Observation": 0, "Practitioner": 4120000, "Location": 3210000, "Condition": 51000000, "AllergyIntolerance": 23000000}.get(kind, 100000)
             if kind == "Observation":
-                return f"{'VS' if fl == 'oracle' else 'vs'}-{h % 10**9}"
+                return f"{'VS' if fl == 'oracle' else 'vs'}-{h % 10**12}"
             return str(base + (key if isinstance(key, int) else h % 900000))
         if fl == "isik":
             return f"{kind[:3].lower()}-{uuid.UUID(int=h << 64 | h64(kind, key, 1)).hex[:12]}"
@@ -532,6 +532,11 @@ def get(site_id: str) -> SiteSim | None:
     s = SITE_BY_ID.get(site_id)
     if s is None:
         return None
+    from . import link
+    if link.current() == site_id:                     # 연동 선택된 병원 = 에뮬레이터 세계를 그 형식으로
+        ls = link.linked_sim()
+        if ls is not None:
+            return ls
     with _SIMS_LOCK:
         sim = _SIMS.get(site_id)
         if sim is None:

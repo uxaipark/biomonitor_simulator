@@ -118,10 +118,14 @@ def _weighted(r: random.Random, items):
     return items[-1]
 
 
-def make_person(locale: str, r: random.Random, today: dt.date, age_mu: float = 64.0) -> dict:
-    sex = M if r.random() < 0.52 else F
-    age = int(min(96, max(19, r.gauss(age_mu, 15))))
-    birth = today - dt.timedelta(days=int(age * 365.25 + r.randint(0, 364)))
+def make_person(locale: str, r: random.Random, today: dt.date, age_mu: float = 64.0, sex: str | None = None, birth: dt.date | None = None) -> dict:
+    """sex/birth 를 주면 그대로 쓴다(에뮬레이터 환자를 연동 EMR 의 현지 인물로 옮길 때)."""
+    s0 = M if r.random() < 0.52 else F
+    a0 = int(min(96, max(19, r.gauss(age_mu, 15))))
+    b0 = today - dt.timedelta(days=int(a0 * 365.25 + r.randint(0, 364)))
+    sex = sex or s0
+    birth = birth or b0
+    age = (today - birth).days // 365 if birth != b0 else a0
     p = {"sex": sex, "birth": birth.isoformat(), "age": age, "prefix": None, "given": [], "family": "", "text": ""}
     phone_tail = f"{r.randint(0, 99):02d}"
     if locale == "us":

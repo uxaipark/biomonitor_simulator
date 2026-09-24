@@ -232,7 +232,7 @@ def _al1(sim, p: dict) -> list[str]:
     if key == "nka":
         return []
     lang = sim.site["lang"]
-    typ = {"shellfish": "FA", "latex": "EA"}.get(key, "DA")
+    typ = {"shellfish": "FA", "peanut": "FA", "latex": "EA"}.get(key, "DA")
     return [seg("AL1", {1: "1", 2: typ, 3: f"{sct}^{esc(nm.get(lang, nm['en']))}^SCT", 4: "SV" if key in ("penicillin", "contrast") else "MO"})]
 
 

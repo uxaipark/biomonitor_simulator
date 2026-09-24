@@ -26,7 +26,7 @@ from .signals.rhythms import RHYTHMS
 from .signals import trend as trend_model
 from .signals.accel import ACTIVITIES
 from .runtime.state import CTL
-from .emrsim import api as emrsim_api, mllp as emrsim_mllp
+from .emrsim import api as emrsim_api, mllp as emrsim_mllp, link as emrsim_link
 
 STATIC = Path(__file__).parent / "web" / "static"
 cfg = Config()
@@ -39,6 +39,8 @@ async def lifespan(app: FastAPI):
     engine = Engine(cfg)
     emrsim_api.MLLP_PORT = int(os.environ.get("BIOSIM_MLLP_PORT", "2575"))
     print("emrsim:", emrsim_mllp.start(emrsim_api.MLLP_PORT), flush=True)
+    emrsim_link.configure(lambda: engine.world if engine else None, BASE_DIR)
+    emrsim_link.start()
     if cfg.get("general", "autostart"):
         # every deploy restarts the service, and the engine used to come up idle -- the GUI then
         # showed "stopped" and transmission stayed down until somebody noticed and pressed start.
@@ -54,6 +56,7 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=_autostart, daemon=True, name="autostart").start()
     yield
     emrsim_mllp.stop()
+    emrsim_link.stop()
     engine.shutdown()
 
 
@@ -120,6 +123,7 @@ def discovery():
             "router": {"status_report": "POST /api/v1/router/status (라우터 → 에뮬레이터 상태 보고)", "status_get": "GET /api/v1/router/status"},
             "chat": {"read": "GET /api/v1/chat?since=<seq>&limit= (에뮬레이터·라우터·GUI 공용 채팅)", "send": 'POST /api/v1/chat {"from": "router", "text": "..."}', "ws": "ws://<host>/ws/chat?sender=<이름>&since=<seq> (양방향)", "link": "GET /api/v1/chat/link (송신·수신 양쪽 카운터를 한 번에; 채팅 탭 로그 스트립용)"},
             "emr_sim": {"catalog": "GET /api/v1/emrsim (상용 EMR 연동 시험용 가상 의료기관 20곳: FHIR R4/STU3, HL7 v2 MLLP·HTTP, 벤더 REST, EUC-KR XML, CDA R2)",
+                        "link": "GET/POST /api/v1/emrsim/link {site: emulator|site_id} — 연동 병원 선택. 병원을 고르면 그 EMR 이 에뮬레이터 재원 환자·병상·입퇴원을 자기 형식으로 제공하고, /emr/admissions[].emr · /emr/patients/{id}.emr_link 에 그 EMR 의 식별자(MRN·FHIR id·내원번호)가 붙는다",
                         "site": "GET /api/v1/emrsim/{site_id} · /samples · /log · /received · POST /faults · /selftest · /push",
                         "endpoints": "/emrsim/{site_id}/... (기관별 실제 연동 경로)", "mllp": "tcp/2575 (MSH-6 로 기관 선택)", "doc": "docs/EMR_SIM.md"},
             "db": {"stats": "GET /api/v1/db/stats", "query": "POST /api/v1/db/query {sql, params?, limit?} (SQLite, SELECT 전용; 테이블: patients, admissions, patches, patch_events, exams, events, runs)"},
@@ -1135,6 +1139,9 @@ def emr_patient(pid: int):
     v = E().world.patient_view(pid)
     if v is None:
         raise HTTPException(404, "patient not found")
+    ls = emrsim_link.linked_sim()
+    if ls is not None:
+        v["emr_link"] = ls.identity(pid)
     r = v.get("runtime")
     if r and r.get("row") is not None:
         try:
@@ -1168,7 +1175,18 @@ def emr_admissions():
                     "gateway_idx": rec["gw"], "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "gw_id_in_frame": h.gateways[rec["gw"]]["gw_no"] if rec["gw"] >= 0 else None,
                     "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None, "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
                     "ward": p["admission"]["ward"], "mode": p["admission"]["mode"], "doctor": rec["doctor"], "nurse": rec["nurse"], "admit_time": p["admission"]["time"]})
-    return {"admissions": out}
+    ls = emrsim_link.linked_sim()
+    if ls is not None:                                        # 연동 병원 EMR 에서 이 환자를 찾을 키
+        ls.advance()
+        for a in out:
+            idx = ls.person_of_profile.get(a["profile_id"])
+            if idx is None:
+                continue
+            pp = ls.people[idx]
+            enc = ls.encounters.get(a["patient_id"])
+            a["emr"] = {"site": ls.id, "name": pp["text"], "mrn": pp["ids"].get("mrn") or pp["ids"].get("patientid"), "fhir_patient_id": pp["fhir_id"] if ls.site["protocol"] == "fhir" else None,
+                        "visit": enc["visit"] if enc else None, "fhir_encounter_id": enc["fhir_id"] if enc and ls.site["protocol"] == "fhir" else None}
+    return {"emr_link": emrsim_link.current() or "emulator", "admissions": out}
 
 
 @app.get("/api/v1/emr/devices")

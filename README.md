@@ -174,6 +174,7 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 각 기관은 자기 형식과 인증 방식으로 환자·ADT·바이탈을 내주고, 들어오는 바이탈을 검증해 저장하거나 거부한다.
 - 형식: FHIR R4(US Core/UK Core/JP Core/KR Core/ISiK/AU Core/RNDS), FHIR STU3(zib), HL7 v2.3~2.5.1(MLLP tcp/2575 + HTTP, SS-MIX2 ISO-2022-JP, IHE PAM FR, IHE PCD-01), athenaOne 계열 REST, 국내 대문자 컬럼 JSON, EUC-KR XML 전문, 진료정보교류 CDA R2.
 - 카탈로그는 `GET /api/v1/emrsim`, 기관 경로는 `/emrsim/{site_id}/...`, GUI는 **EMR 연동** 메뉴(자체 시험·예시 요청·장애 주입·요청 로그).
+- **연동 병원 선택**: '에뮬레이터'(기본, 지금 방식) 또는 20곳 중 하나. 병원을 고르면 그 병원 EMR 이 에뮬레이터의 실제 재원 환자·병상·입퇴원을 그 형식으로 내주고, `/emr/admissions[].emr` 에 그 EMR 의 번호가 붙는다(`POST /api/v1/emrsim/link`).
 - 사양: `docs/EMR_SIM.md`. 테스트: `tests/test_emrsim.py`.
 
 ## 제안 / 보완이 필요한 항목

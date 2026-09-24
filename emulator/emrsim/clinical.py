@@ -47,7 +47,48 @@ CONDITIONS = {
              "names": {"en": "Presence of aortocoronary bypass graft", "ko": "대동맥관상동맥 우회로 이식의 존재", "ja": "冠動脈バイパス術後", "de": "Vorhandensein eines aortokoronaren Bypasses",
                        "fr": "Présence d'un pontage aorto-coronaire", "nl": "Status na CABG", "pt": "Presença de enxerto de ponte aortocoronária", "ar": "وجود طعم مجازة أبهرية تاجية"}},
 }
-COND_KEYS = list(CONDITIONS)
+# 에뮬레이터 환자 프로필(emulator/hospital/profiles.py)의 진단·동반질환을 연동 EMR 로 옮길 때 쓰는 추가 항목.
+# 무작위 입원 생성(COND_WEIGHT)에는 쓰지 않는다.
+_N = lambda en, ko, ja, de, fr, nl, pt, ar: {"en": en, "ko": ko, "ja": ja, "de": de, "fr": fr, "nl": nl, "pt": pt, "ar": ar}
+EXTRA_CONDITIONS = {
+    "cad": ("I25.1", "I25.10", "53741008", "20055010", "card", _N("Atherosclerotic heart disease", "죽상경화성 심장병", "冠動脈硬化症", "Atherosklerotische Herzkrankheit", "Cardiopathie artérioscléreuse", "Coronairlijden", "Doença aterosclerótica do coração", "مرض القلب التصلبي العصيدي")),
+    "ami": ("I21.0", "I21.09", "54329005", "20064430", "card", _N("Acute transmural myocardial infarction of anterior wall", "앞벽의 급성 전층심근경색증", "急性前壁心筋梗塞", "Akuter transmuraler Myokardinfarkt der Vorderwand", "Infarctus transmural aigu du myocarde, de la paroi antérieure", "Acuut voorwandinfarct", "Infarto agudo transmural da parede anterior do miocárdio", "احتشاء عضلة القلب الحاد في الجدار الأمامي")),
+    "htn_hd": ("I11.0", "I11.0", "64715009", "20058740", "card", _N("Hypertensive heart disease with heart failure", "울혈성 심부전을 동반한 고혈압성 심장병", "高血圧性心疾患(心不全を伴う)", "Hypertensive Herzkrankheit mit Herzinsuffizienz", "Cardiopathie hypertensive, avec insuffisance cardiaque", "Hypertensieve hartziekte met hartfalen", "Doença cardíaca hipertensiva com insuficiência cardíaca", "مرض القلب الناتج عن ارتفاع ضغط الدم مع قصور القلب")),
+    "arrhythmia": ("I49.9", "I49.9", "698247007", "20056200", "card", _N("Cardiac arrhythmia, unspecified", "상세불명의 심장부정맥", "不整脈", "Kardiale Arrhythmie, nicht näher bezeichnet", "Arythmie cardiaque, sans précision", "Hartritmestoornis", "Arritmia cardíaca não especificada", "اضطراب نظم القلب غير محدد")),
+    "sss": ("I49.5", "I49.5", "36083008", "20056160", "card", _N("Sick sinus syndrome", "동기능부전증후군", "洞不全症候群", "Sick-Sinus-Syndrom", "Maladie du sinus", "Sick-sinussyndroom", "Síndrome do nó sinusal", "متلازمة العقدة الجيبية المريضة")),
+    "valve": ("I35.0", "I35.0", "60573004", "20053390", "cts", _N("Aortic (valve) stenosis", "대동맥판 협착", "大動脈弁狭窄症", "Aortenklappenstenose", "Rétrécissement aortique", "Aortaklepstenose", "Estenose da valva aórtica", "تضيق الصمام الأبهري")),
+    "cmp": ("I42.0", "I42.0", "399020009", "20062020", "card", _N("Dilated cardiomyopathy", "확장성 심근병증", "拡張型心筋症", "Dilatative Kardiomyopathie", "Myocardiopathie avec dilatation", "Gedilateerde cardiomyopathie", "Cardiomiopatia dilatada", "اعتلال عضلة القلب التوسعي")),
+    "arrest": ("I46.0", "I46.9", "410429000", "20056830", "card", _N("Cardiac arrest with successful resuscitation", "성공적으로 소생된 심장정지", "心停止(蘇生成功)", "Herzstillstand mit erfolgreicher Wiederbelebung", "Arrêt cardiaque réanimé avec succès", "Hartstilstand met succesvolle reanimatie", "Parada cardíaca com ressuscitação bem sucedida", "سكتة قلبية مع إنعاش ناجح")),
+    "dm2": ("E11.9", "E11.9", "44054006", "20087910", "med", _N("Type 2 diabetes mellitus without complications", "합병증을 동반하지 않은 2형 당뇨병", "2型糖尿病", "Diabetes mellitus Typ 2 ohne Komplikationen", "Diabète sucré de type 2, sans complication", "Diabetes mellitus type 2", "Diabetes mellitus tipo 2 sem complicações", "داء السكري من النوع الثاني بدون مضاعفات")),
+    "ckd": ("N18.5", "N18.5", "433146000", "20089620", "med", _N("Chronic kidney disease, stage 5", "만성 콩팥병(5기)", "慢性腎臓病ステージ5", "Chronische Nierenkrankheit, Stadium 5", "Maladie rénale chronique, stade 5", "Chronische nierschade stadium 5", "Doença renal crônica estágio 5", "مرض الكلى المزمن المرحلة الخامسة")),
+    "cancer": ("C34.9", "C34.90", "363358000", "20074590", "med", _N("Malignant neoplasm of bronchus or lung, unspecified", "상세불명의 기관지 또는 폐의 악성 신생물", "肺癌", "Bösartige Neubildung: Bronchus oder Lunge, nicht näher bezeichnet", "Tumeur maligne des bronches ou du poumon, sans précision", "Longcarcinoom", "Neoplasia maligna dos brônquios ou pulmões, não especificado", "ورم خبيث في القصبة أو الرئة غير محدد")),
+    "osa": ("G47.3", "G47.33", "78275009", "20066110", "resp", _N("Sleep apnoea", "수면무호흡", "睡眠時無呼吸症候群", "Schlafapnoe", "Apnée du sommeil", "Slaapapneu", "Apneia de sono", "انقطاع النفس أثناء النوم")),
+    "hyperthyroid": ("E05.9", "E05.90", "34486009", "20054480", "med", _N("Thyrotoxicosis, unspecified", "상세불명의 갑상선중독증", "甲状腺機能亢進症", "Hyperthyreose, nicht näher bezeichnet", "Thyréotoxicose, sans précision", "Hyperthyreoïdie", "Tireotoxicose não especificada", "فرط نشاط الغدة الدرقية غير محدد")),
+    "cholecystitis": ("K81.0", "K81.0", "65275009", "20055470", "med", _N("Acute cholecystitis", "급성 담낭염", "急性胆嚢炎", "Akute Cholezystitis", "Cholécystite aiguë", "Acute cholecystitis", "Colecistite aguda", "التهاب المرارة الحاد")),
+    "htn": ("I10", "I10", "38341003", "20059870", "med", _N("Essential (primary) hypertension", "본태성(원발성) 고혈압", "本態性高血圧症", "Essentielle (primäre) Hypertonie", "Hypertension essentielle (primitive)", "Essentiële hypertensie", "Hipertensão essencial (primária)", "ارتفاع ضغط الدم الأساسي")),
+    "dyslipidemia": ("E78.5", "E78.5", "370992007", "20059050", "med", _N("Hyperlipidaemia, unspecified", "상세불명의 고지질혈증", "脂質異常症", "Hyperlipidämie, nicht näher bezeichnet", "Hyperlipidémie, sans précision", "Hyperlipidemie", "Hiperlipidemia não especificada", "فرط شحميات الدم غير محدد")),
+    "obesity": ("E66.9", "E66.9", "414916001", "20053120", "med", _N("Obesity, unspecified", "상세불명의 비만", "肥満症", "Adipositas, nicht näher bezeichnet", "Obésité, sans précision", "Obesitas", "Obesidade não especificada", "السمنة غير محددة")),
+    "smoking": ("F17.2", "F17.210", "77176002", "20082200", "med", _N("Tobacco dependence", "담배 의존", "ニコチン依存症", "Tabakabhängigkeit", "Dépendance au tabac", "Tabaksverslaving", "Dependência de tabaco", "الاعتماد على التبغ")),
+}
+for _k, (_icd, _cm, _sct, _medis, _dept, _names) in EXTRA_CONDITIONS.items():
+    CONDITIONS[_k] = {"icd10": _icd, "icd10cm": _cm, "snomed": _sct, "medis": _medis, "dept": _dept, "vs": {}, "names": _names}
+CONDITIONS["cad"]["vs"] = {"hr": (80, 10)}
+CONDITIONS["ami"]["vs"] = {"hr": (96, 14), "sbp": (126, 20)}
+CONDITIONS["sss"]["vs"] = {"hr": (52, 9)}
+CONDITIONS["cmp"]["vs"] = {"hr": (94, 12), "spo2": (94, 2)}
+CONDITIONS["hyperthyroid"]["vs"] = {"hr": (112, 12)}
+CONDITIONS["osa"]["vs"] = {"spo2": (93, 2.5)}
+CONDITIONS["cholecystitis"]["vs"] = {"temp": (37.6, 0.5)}
+# 에뮬레이터 ICD-10 → 키, 에뮬레이터 동반질환 문자열 → 키
+EMU_ICD = {"I48.0": "afib", "I25.1": "cad", "I21.0": "ami", "I50.0": "hf", "I11.0": "htn_hd", "I49.9": "arrhythmia", "I49.5": "sss", "I44.2": "avb3", "I35.0": "valve",
+           "I42.0": "cmp", "Z95.1": "cabg", "I46.0": "arrest", "E11.9": "dm2", "J18.9": "pneumonia", "J44.1": "copd", "N18.5": "ckd", "I63.9": "stroke", "K92.2": "gibleed",
+           "C34.9": "cancer", "S72.0": "hipfx", "A41.9": "sepsis", "G47.3": "osa", "E05.9": "hyperthyroid", "K81.0": "cholecystitis"}
+EMU_COMORB = {"고혈압": "htn", "이상지질혈증": "dyslipidemia", "제2형 당뇨병": "dm2", "만성 신질환": "ckd", "COPD": "copd", "비만": "obesity", "갑상선질환": "hyperthyroid", "흡연": "smoking",
+              "뇌졸중 병력": "stroke"}
+EMU_ALLERGY = {"없음": "nka", "페니실린": "penicillin", "조영제": "contrast", "NSAIDs": "nsaid", "아스피린": "aspirin", "갑각류": "shellfish", "땅콩": "peanut", "설파제": "sulfonamide"}
+EMU_DEPT = {"심장내과": "card", "순환기내과": "card", "흉부외과": "cts", "호흡기내과": "resp", "내분비내과": "med", "신경과": "neuro", "신장내과": "med", "소화기내과": "med",
+            "종양내과": "med", "정형외과": "ortho", "감염내과": "med", "일반외과": "med"}
+COND_KEYS = [k for k in CONDITIONS if k not in EXTRA_CONDITIONS]
 COND_WEIGHT = {"afib": 14, "hf": 14, "nstemi": 9, "stemi": 4, "avb3": 4, "svt": 5, "syncope": 6, "pneumonia": 10, "copd": 7, "sepsis": 6, "stroke": 7, "gibleed": 5, "hipfx": 5, "cabg": 4}
 
 ALLERGIES = [  # key, snomed(substance), rxnorm, names
@@ -59,8 +100,11 @@ ALLERGIES = [  # key, snomed(substance), rxnorm, names
     ("aspirin", "387458008", "1191", {"en": "Aspirin", "ko": "아스피린", "ja": "アスピリン", "de": "Acetylsalicylsäure", "fr": "Acide acétylsalicylique", "nl": "Acetylsalicylzuur", "pt": "Ácido acetilsalicílico", "ar": "أسبرين"}),
     ("latex", "111088007", None, {"en": "Latex", "ko": "라텍스", "ja": "ラテックス", "de": "Latex", "fr": "Latex", "nl": "Latex", "pt": "Látex", "ar": "اللاتكس"}),
     ("shellfish", "227037002", None, {"en": "Shellfish", "ko": "갑각류", "ja": "甲殻類", "de": "Schalentiere", "fr": "Crustacés", "nl": "Schaaldieren", "pt": "Frutos do mar", "ar": "المحار"}),
+    ("peanut", "256349002", None, {"en": "Peanut", "ko": "땅콩", "ja": "落花生", "de": "Erdnuss", "fr": "Arachide", "nl": "Pinda", "pt": "Amendoim", "ar": "الفول السوداني"}),
+    ("sulfonamide", "387406002", "10180", {"en": "Sulfonamide", "ko": "설파제", "ja": "サルファ剤", "de": "Sulfonamid", "fr": "Sulfamide", "nl": "Sulfonamide", "pt": "Sulfonamida", "ar": "السلفوناميد"}),
+    ("nsaid", "372665008", None, {"en": "Non-steroidal anti-inflammatory agent", "ko": "비스테로이드성 소염진통제(NSAIDs)", "ja": "NSAIDs", "de": "NSAR", "fr": "AINS", "nl": "NSAID's", "pt": "AINE", "ar": "مضادات الالتهاب غير الستيرويدية"}),
 ]
-ALLERGY_WEIGHT = (70, 9, 6, 5, 4, 6)
+ALLERGY_WEIGHT = (70, 9, 6, 5, 4, 6, 0, 0, 0)
 
 # ------------------------------------------------------------------ 바이탈 카탈로그
 # kind: loinc, 표시명(en), ucum 단위, IEEE 11073 MDC (code, 참조 id), 한국 로컬 코드/단위, 일본 로컬 코드, 허용 범위

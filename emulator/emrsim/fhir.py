@@ -257,13 +257,16 @@ def location(sim, kind: str, key) -> dict:
         w = sim.wards[w_idx]
         name, pt, part, ident, status = f"{w['code']} {room}", ("ro", "Room"), loc_id(sim, "ward", w_idx), f"{w['code']}-{room}", None
     else:
+        emu_bed = None
         b = sim.beds[key]
         w = sim.wards[b["ward"]]
         name, pt, part, ident = f"{w['code']} {b['room']}-{b['bed']}", ("bd", "Bed"), loc_id(sim, "room", (b["ward"], b["room"])), f"{w['code']}-{b['room']}-{b['bed']}"
         occ = sim.bed_occ[key] is not None
         status = _code("http://terminology.hl7.org/CodeSystem/v2-0116", "O" if occ else "U", "Occupied" if occ else "Unoccupied")
+        emu_bed = b.get("emu_bed")
     res = {"resourceType": "Location", "id": loc_id(sim, kind, key), "meta": _meta(sim, "Location", 1, sim.start),
-           "identifier": [{"system": f"https://fhir.{_local_domain(sim)}/location", "value": ident}], "status": "active",
+           "identifier": [{"system": f"https://fhir.{_local_domain(sim)}/location", "value": ident}] +
+                         ([{"system": "urn:biosim:bed", "value": emu_bed}] if kind == "bed" and emu_bed else []), "status": "active",
            **({"operationalStatus": status} if status else {}), "name": name, "mode": "instance",
            "physicalType": _cc([_code("http://terminology.hl7.org/CodeSystem/location-physical-type" if not stu3(sim) else "http://hl7.org/fhir/location-physical-type", pt[0], pt[1])]),
            "managingOrganization": {"reference": "Organization/" + org_id(sim)}}
@@ -369,7 +372,8 @@ def allergy(sim, p: dict) -> dict:
     lang = sim.site["lang"] if sim.site["flavor"] != "kr-core" else "ko"
     text = nm.get(lang, nm["en"])
     code = [_code(SCT, sct, nm["en"])] + ([_code("http://www.nlm.nih.gov/research/umls/rxnorm", rx, nm["en"])] if rx and sim.site["flavor"] in ("epic", "oracle") else [])
-    cat = {"penicillin": "medication", "aspirin": "medication", "contrast": "medication", "shellfish": "food", "latex": "environment"}.get(key)
+    cat = {"penicillin": "medication", "aspirin": "medication", "contrast": "medication", "nsaid": "medication", "sulfonamide": "medication", "shellfish": "food", "peanut": "food",
+           "latex": "environment"}.get(key)
     res = {"resourceType": "AllergyIntolerance", "id": sim.fid("AllergyIntolerance", p["idx"]), "meta": _meta(sim, "AllergyIntolerance", 1, p["updated"])}
     if stu3(sim):
         res.update(clinicalStatus="active", verificationStatus="confirmed", **({"category": [cat]} if cat else {}), code=_cc(code, text), patient={"reference": "Patient/" + p["fhir_id"]})

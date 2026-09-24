@@ -194,3 +194,61 @@ def test_token_expiry(sims):
     sim.tokens[tok] = time.time() - 1
     assert not sim.token_ok(tok)
     sim.faults["token_ttl_s"] = 3600
+
+
+# ---------------------------------------------------------------- 연동 병원 선택 (에뮬레이터 world → 병원 EMR)
+class _FakeHospital:
+    def __init__(self):
+        self.wards = [{"idx": 0, "id": "W103A", "name": "심장내과 병동 3A", "specialty": "심장내과", "floor": 3, "bed_idxs": [0, 1]},
+                      {"idx": 1, "id": "W204B", "name": "호흡기내과 병동 4B", "specialty": "호흡기내과", "floor": 4, "bed_idxs": [2]}]
+        self.rooms = [{"idx": 0, "id": "103A01", "name": "103A01", "ward_idx": 0}, {"idx": 1, "id": "204B01", "name": "204B01", "ward_idx": 1},
+                      {"idx": 2, "id": "ER01", "name": "응급실 1", "ward_idx": None}]
+        self.beds = [{"idx": 0, "id": "103A01-A", "room_idx": 0}, {"idx": 1, "id": "103A01-B", "room_idx": 0}, {"idx": 2, "id": "204B01-A", "room_idx": 1},
+                     {"idx": 3, "id": "ER01-1", "room_idx": 2}]
+
+
+class _FakeWorld:
+    def __init__(self):
+        self.hospital = _FakeHospital()
+        mk = lambda i, name, sex, icd: {"id": i, "name": name, "sex": sex, "age": 70, "birth_date": "1956-03-12", "mrn": f"MRN-{i:08d}", "icd10": icd,
+                                        "comorbidities": ["고혈압", "제2형 당뇨병"], "allergies": "페니실린", "phone": "010-1234-5678",
+                                        "address": {"sido": "서울", "sigungu": "마포구", "dong": "공덕동"}, "admission": {"time": "2026-09-20T10:00:00"}}
+        self.by_id = {1: mk(1, "김영수", "M", "I48.0"), 2: mk(2, "남궁민", "F", "J18.9"), 3: mk(3, "이순자", "F", "N18.5")}
+        self.admitted = {1: {"patient_no": 5001, "bed_idx": 0, "outpatient": False}, 2: {"patient_no": 5002, "bed_idx": 2, "outpatient": False},
+                         3: {"patient_no": 5003, "bed_idx": -1, "outpatient": True}}
+
+
+def test_link_follows_emulator_world():
+    from emulator.emrsim.link import LinkedSim
+    from emulator.emrsim.sites import SITE_BY_ID
+    w = _FakeWorld()
+    ls = LinkedSim(SITE_BY_ID["us-pineridge"], w)
+    assert len(ls.census()) == 3 and not ls.events                   # 연동 시점의 재원 환자는 이벤트 없이 반영(census 로 동기화)
+    p = ls.people[ls.person_of_profile[1]]
+    assert p["sex"] == "M" and p["birth"] == "1956-03-12" and p["allergy"] == "penicillin" and p["ids"]["mrn"].startswith("M000")
+    e = ls.encounters[5001]
+    assert e["cond"] == "afib" and set(e["comorbid"]) == {"htn", "dm2"} and ls.beds[e["bed"]]["emu_bed"] == "103A01-A"
+    assert ls.wards[ls.beds[ls.encounters[5003]["bed"]]["ward"]]["code"] == "RPM"   # 원외(MCOT) → 원격 모니터링 병동
+    # 전동, 퇴원, 새 입원이 ADT 이벤트로
+    w.admitted[1]["bed_idx"] = 1
+    del w.admitted[2]
+    w.by_id[4] = dict(w.by_id[1], id=4, name="박철수", icd10="I63.9")
+    w.admitted[4] = {"patient_no": 5004, "bed_idx": 2, "outpatient": False}
+    ls.advance()
+    assert [x["code"] for x in ls.events] == ["A03", "A02", "A01"]
+    a02 = hl7v2.adt(ls, ls.events[1])
+    pv1 = next(l for l in a02.split("\r") if l.startswith("PV1")).split("|")
+    assert pv1[3] == "W103A^103A01^B^PRCH" and pv1[6] == "W103A^103A01^A^PRCH"          # 새 병상 / 이전 병상
+    # 같은 환자는 다시 만들어도 같은 번호
+    ls2 = LinkedSim(SITE_BY_ID["us-pineridge"], _FakeWorld())
+    assert ls2.people[ls2.person_of_profile[1]]["ids"] == p["ids"]
+
+
+def test_link_korean_site_keeps_emulator_name():
+    from emulator.emrsim.link import LinkedSim
+    from emulator.emrsim.sites import SITE_BY_ID
+    ls = LinkedSim(SITE_BY_ID["kr-saesol"], _FakeWorld())
+    p = ls.people[ls.person_of_profile[2]]
+    assert p["text"] == "남궁민" and p["family"] == "남궁" and p["given"] == ["민"]
+    rows = vendor.kr_json_handle(ls, "GET", ["api", "v1", "adm", "inpatients"], {}, b"")["DATA"]
+    assert {r["PT_NM"] for r in rows} == {"김영수", "남궁민", "이순자"}
