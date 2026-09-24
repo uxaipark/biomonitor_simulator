@@ -1132,6 +1132,7 @@ async function loadFloor() {
   if (!floors.length) await loadFloors();
   const f = floors[Number($('#selFloor').value)]; if (!f) return;
   const m = await api(`/emr/floors/${f.building_idx}/${f.floor}`);
+  planGeom = m;
   const mode = $('#mapMode').value, th = TH();
   const W = m.width, D = m.depth;
   const svg = $('#floorMap'); const base = [-0.5, -0.5, W + 1, D + 1];
@@ -1545,17 +1546,33 @@ function drawAllCoverage() {
 }
 // ---- plan zoom & pan: click to zoom in (2.5x) at the pointer, drag to pan, click again to zoom out
 const planZoom = { base: null, on: false, drag: null, moved: false, vb: null };
+let planGeom = null;                                         // 지금 그린 층의 방·복도 폴리곤 (건물 안/밖 판정)
+function inPoly(x, y, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function planInsideBuilding(x, y) {                         // 방(중정 제외) 또는 복도 위를 눌렀는가
+  if (!planGeom) return true;
+  return (planGeom.rooms || []).some(r => r.kind !== 'courtyard' && r.poly && inPoly(x, y, r.poly)) || (planGeom.corridors || []).some(c => c.poly && inPoly(x, y, c.poly));
+}
 const PLAN_CLUSTER_AT = 8;                                   // >= this many moving patients in one spot -> count badge + hover list regardless of space
 let planClusters = {};                                       // badge id -> patients (set by loadFloor)
 function planSetVB(vb) { planZoom.vb = vb; $('#floorMap').setAttribute('viewBox', vb.map(v => v.toFixed(3)).join(' ')); }
 function planSvgPoint(e) { const svg = $('#floorMap'); const r = svg.getBoundingClientRect(); const vb = planZoom.vb || planZoom.base; const cx = e.touches ? e.touches[0].clientX : e.clientX, cy = e.touches ? e.touches[0].clientY : e.clientY;
-  // meet: uniform scale, centred
-  const sc = Math.min(r.width / vb[2], r.height / vb[3]); const ox = (r.width - vb[2] * sc) / 2, oy = (r.height - vb[3] * sc) / 2;
+  // meet: uniform scale, 가로 가운데 · 세로 위쪽 정렬 (preserveAspectRatio xMidYMin)
+  const sc = Math.min(r.width / vb[2], r.height / vb[3]); const ox = (r.width - vb[2] * sc) / 2, oy = 0;
   return { x: vb[0] + (cx - r.left - ox) / sc, y: vb[1] + (cy - r.top - oy) / sc, sc }; }
 (function () {
   const svg = $('#floorMap');
   svg.addEventListener('pointerdown', e => { if (e.button !== 0 && e.pointerType === 'mouse') return; e.preventDefault(); planZoom.drag = { x: e.clientX, y: e.clientY, vb: planZoom.vb ? planZoom.vb.slice() : null, target: e.target.closest('[data-row], [data-gwidx]') }; planZoom.moved = false; svg.setPointerCapture(e.pointerId); });
   svg.addEventListener('pointermove', e => {
+    if (!planZoom.drag && e.pointerType === 'mouse' && planZoom.base) {       // 커서: 건물 안이면 확대/이동, 바깥이면 보통 화살표
+      const p = planSvgPoint(e); svg.style.cursor = planInsideBuilding(p.x, p.y) ? (planZoom.on ? 'grab' : 'zoom-in') : 'default';
+    }
     if (!planZoom.drag || !planZoom.on) return;
     const dx = e.clientX - planZoom.drag.x, dy = e.clientY - planZoom.drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 4) planZoom.moved = true;
@@ -1571,8 +1588,10 @@ function planSvgPoint(e) { const svg = $('#floorMap'); const r = svg.getBounding
     if (t && t.dataset.row !== undefined) { openPatientFromMap(Number(t.dataset.row)); return; }
     if (t && t.dataset.gwidx !== undefined) { highlightGateway(Number(t.dataset.gwidx)); openGatewayMonitor(Number(t.dataset.gwidx)); return; }
     if (!planZoom.base) return;
+    const p = planSvgPoint(e);
+    if (!planInsideBuilding(p.x, p.y)) return;                  // 건물 바깥(여백·중정)을 누르면 확대/축소하지 않는다
     if (!planZoom.on) {                       // zoom in around the pointer
-      const p = planSvgPoint(e); const b = planZoom.base; const f = 2.5; const w = b[2] / f, h = b[3] / f;
+      const b = planZoom.base; const f = 2.5; const w = b[2] / f, h = b[3] / f;
       planSetVB([Math.max(b[0], Math.min(b[0] + b[2] - w, p.x - w / 2)), Math.max(b[1], Math.min(b[1] + b[3] - h, p.y - h / 2)), w, h]);
       planZoom.on = true; svg.style.cursor = 'grab';
     } else { planSetVB(planZoom.base.slice()); planZoom.on = false; svg.style.cursor = 'zoom-in'; }
