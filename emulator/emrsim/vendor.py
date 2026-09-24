@@ -152,7 +152,7 @@ def athena_handle(sim, method: str, parts: list[str], q: dict, form: dict, clien
     if rest[:2] == ["patients", "changed"]:
         if rest[2:] == ["subscription"]:
             if method == "POST":
-                sim.athena_changed_cursor.setdefault(client, len(sim.events))
+                sim.athena_changed_cursor.setdefault(client, sim.last_seq())
                 return 200, {"success": "true"}
             if method == "GET":
                 return 200, {"status": "ACTIVE" if client in sim.athena_changed_cursor else "INACTIVE", "subscriptions": [{"eventname": "UpdatePatient"}, {"eventname": "AddPatient"}]}
@@ -164,8 +164,8 @@ def athena_handle(sim, method: str, parts: list[str], q: dict, form: dict, clien
                 raise VendorError(400, {"error": "The practice is not subscribed to patient changed events.", "detailedmessage": "POST /patients/changed/subscription first"})
             start = sim.athena_changed_cursor[client]
             evs = sim.events_since(start, 1000)
-            if str(q.get("leaveunprocessed", "false")).lower() != "true":
-                sim.athena_changed_cursor[client] = start + len(evs)
+            if str(q.get("leaveunprocessed", "false")).lower() != "true" and evs:
+                sim.athena_changed_cursor[client] = evs[-1]["seq"]
             seen, rows = set(), []
             for ev in evs:
                 if ev["person"] in seen:

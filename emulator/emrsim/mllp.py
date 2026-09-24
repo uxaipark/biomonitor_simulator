@@ -24,8 +24,30 @@ def _site_for(fac: str, app: str):
     return None
 
 
+MAX_CONN = 64                  # 동시 연결 상한 (연결마다 스레드 1개)
+MAX_FRAME = 1048576            # 프레임 끝(0x1C 0x0D) 없이 이만큼 쌓이면 끊는다
+_active = 0
+_active_lock = threading.Lock()
+
+
 class _Handler(socketserver.BaseRequestHandler):
     def handle(self):
+        global _active
+        with _active_lock:
+            if _active >= MAX_CONN:
+                try:
+                    self.request.close()
+                except OSError:
+                    pass
+                return
+            _active += 1
+        try:
+            self._handle()
+        finally:
+            with _active_lock:
+                _active -= 1
+
+    def _handle(self):
         sock = self.request
         sock.settimeout(300)
         buf = b""
@@ -38,6 +60,8 @@ class _Handler(socketserver.BaseRequestHandler):
             if not chunk:
                 return
             buf += chunk
+            if len(buf) > MAX_FRAME and hl7v2.EB not in buf:
+                return
             while True:
                 s = buf.find(hl7v2.SB)
                 e = buf.find(hl7v2.EB + hl7v2.CR, s + 1)

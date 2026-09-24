@@ -43,6 +43,18 @@ def _all_locations(sim) -> list[dict]:
     return out
 
 
+def _location_by_id(sim, lid: str) -> dict | None:
+    idx = sim.__dict__.get("_loc_index")
+    if idx is None or idx[0] != len(sim.beds):                  # 병상이 늘면(원외 슬롯) 다시 만든다
+        m = {F.loc_id(sim, "ward", w["idx"]): ("ward", w["idx"]) for w in sim.wards}
+        for b in sim.beds:
+            m[F.loc_id(sim, "bed", b["idx"])] = ("bed", b["idx"])
+            m.setdefault(F.loc_id(sim, "room", (b["ward"], b["room"])), ("room", (b["ward"], b["room"])))
+        idx = sim._loc_index = (len(sim.beds), m)
+    k = idx[1].get(lid)
+    return F.location(sim, *k) if k else None
+
+
 def _groups(sim) -> list[dict]:
     census = sim.census()
     gs = [("inpatient-census", "재원 환자 전체" if sim.site["lang"] == "ko" else "Current inpatient census", census)]
@@ -138,7 +150,7 @@ def search(sim, rtype: str, qm: list[tuple[str, str]], base: str, path_url: str)
                 bt = dt.datetime.fromisoformat(p["birth"]).replace(tzinfo=tz).timestamp() + 43200
                 if not F.date_match(bt, [F.parse_date(v, tz) for v in q["birthdate"]]):
                     continue
-            rows.append(F.patient(sim, p))
+            rows.append(lambda p=p: F.patient(sim, p))              # 렌더링은 돌려줄 페이지만
     elif rtype == "Encounter":
         sim.advance()
         pidx = pat_filter(q.get("patient") or q.get("subject")) if (q.get("patient") or q.get("subject")) else None
@@ -166,24 +178,7 @@ def search(sim, rtype: str, qm: list[tuple[str, str]], base: str, path_url: str)
                     continue
             if q.get("_lastUpdated") and not F.date_match(e["updated"], [F.parse_date(v, tz) for v in q["_lastUpdated"]]):
                 continue
-            rows.append(F.encounter(sim, e))
-        inc = set(q.get("_include", []))
-        if "Encounter:patient" in inc or "Encounter:subject" in inc:
-            seen = set()
-            for r in rows:
-                pid = _ref_id(r["subject"]["reference"])
-                if pid not in seen:
-                    seen.add(pid)
-                    includes.append(F.patient(sim, sim.people[sim.find_person(pid)]))
-        if "Encounter:location" in inc:
-            allloc = {x["id"]: x for x in _all_locations(sim)}
-            seen = set()
-            for r in rows:
-                for l in r.get("location", []):
-                    lid = _ref_id(l["location"]["reference"])
-                    if lid not in seen and lid in allloc:
-                        seen.add(lid)
-                        includes.append(allloc[lid])
+            rows.append(lambda e=e: F.encounter(sim, e))
     elif rtype == "Observation":
         if one("_id"):
             r = read(sim, "Observation", one("_id"))
@@ -222,16 +217,15 @@ def search(sim, rtype: str, qm: list[tuple[str, str]], base: str, path_url: str)
         for e in sorted(list(sim.encounters.values()), key=lambda e: e["admit"]):
             if pidx is not None and e["person"] != pidx or eid and e["fhir_id"] != eid:
                 continue
+            if one("clinical-status") and F.parse_token(one("clinical-status"))[1] != ("active" if e["status"] == "in-progress" else "resolved"):
+                continue
             for c in F.encounter_conditions(sim, e):
                 if one("_id") and c["id"] != one("_id"):
-                    continue
-                cs = c["clinicalStatus"] if isinstance(c["clinicalStatus"], str) else c["clinicalStatus"]["coding"][0]["code"]
-                if one("clinical-status") and F.parse_token(one("clinical-status"))[1] != cs:
                     continue
                 rows.append(c)
     elif rtype == "AllergyIntolerance":
         pidx = pat_filter(q.get("patient")) if q.get("patient") else None
-        rows = [F.allergy(sim, p) for p in sim.people if (pidx is None or p["idx"] == pidx) and (not one("_id") or F.allergy(sim, p)["id"] == one("_id"))]
+        rows = [(lambda p=p: F.allergy(sim, p)) for p in sim.people if (pidx is None or p["idx"] == pidx) and (not one("_id") or sim.fid("AllergyIntolerance", p["idx"]) == one("_id"))]
     elif rtype == "Practitioner":
         for s in sim.staff:
             r = F.practitioner(sim, s)
@@ -261,7 +255,26 @@ def search(sim, rtype: str, qm: list[tuple[str, str]], base: str, path_url: str)
         raise F.FhirError(404, "not-supported", f"Resource type {rtype} is not supported by this server")
 
     total = len(rows)
-    page = rows[offset: offset + count]
+    page = [r() if callable(r) else r for r in rows[offset: offset + count]]
+    if rtype == "Encounter":
+        inc = set(q.get("_include", []))
+        if "Encounter:patient" in inc or "Encounter:subject" in inc:
+            seen = set()
+            for r in page:
+                pid = _ref_id(r["subject"]["reference"])
+                if pid not in seen:
+                    seen.add(pid)
+                    includes.append(F.patient(sim, sim.people[sim.find_person(pid)]))
+        if "Encounter:location" in inc:
+            seen = set()
+            for r in page:
+                for l in r.get("location", []):
+                    lid = _ref_id(l["location"]["reference"])
+                    if lid not in seen:
+                        seen.add(lid)
+                        loc = _location_by_id(sim, lid)
+                        if loc:
+                            includes.append(loc)
     base_q = [(k, v) for k, v in qm if k not in (pkey, "-pageDirection")]
     self_url = path_url + ("?" + urlencode(qm) if qm else "")
     nxt = None
@@ -294,11 +307,7 @@ def read(sim, rtype: str, rid: str) -> dict:
             return r
         if rid in sim.fhir_obs_cache:
             return sim.fhir_obs_cache[rid]
-        for e in sim.census():
-            for r in _obs_all(sim, e["person"], e["no"]):
-                if r["id"] == rid:
-                    return r
-        raise nf()
+        raise nf()                        # 생성 바이탈은 검색으로 한 번 나간 것만 id 로 읽힌다 (전 환자 재계산 방지)
     if rtype == "Condition":
         for e in list(sim.encounters.values()):
             for c in F.encounter_conditions(sim, e):

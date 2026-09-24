@@ -351,9 +351,10 @@ class SiteSim:
                 t, _, kind, arg = heapq.heappop(self.heap)
                 getattr(self, "_ev_" + kind)(t, arg)
             self.clock = now
+        self.prune(now)
 
     def _emit(self, t: float, code: str, enc: dict, prior_bed: int | None = None, note: str = ""):
-        self.events.append({"seq": len(self.events) + 1, "t": t, "code": code, "enc": enc["no"], "person": enc["person"], "bed": enc["bed"], "prior_bed": prior_bed, "note": note})
+        self.events.append({"seq": self.last_seq() + 1, "t": t, "code": code, "enc": enc["no"], "person": enc["person"], "bed": enc["bed"], "prior_bed": prior_bed, "note": note})
 
     def _ev_admit(self, t: float, bed: int):
         if self.bed_occ[bed] is not None:
@@ -372,24 +373,24 @@ class SiteSim:
         self._push(t + self.rng.uniform(*gap_h) * 3600, "admit", enc["bed"])
 
     def _ev_discharge(self, t: float, no: int):
-        enc = self.encounters[no]
-        if enc["status"] != "in-progress":
+        enc = self.encounters.get(no)                 # 끝나서 정리된 입원에 걸린 예약 이벤트는 버린다
+        if enc is None or enc["status"] != "in-progress":
             return
         enc.update(status="finished", end=t, updated=t, disposition=self.rng.choices(["home", "home-health", "snf", "other-hcf", "exp"], weights=(78, 9, 7, 5, 1))[0])
         self._free(enc, t, (1, 8))
         self._emit(t, "A03", enc)
 
     def _ev_cancel(self, t: float, no: int):
-        enc = self.encounters[no]
-        if enc["status"] != "in-progress":
+        enc = self.encounters.get(no)                 # 끝나서 정리된 입원에 걸린 예약 이벤트는 버린다
+        if enc is None or enc["status"] != "in-progress":
             return
         enc.update(status="cancelled", end=t, updated=t)
         self._free(enc, t, (0.5, 3))
         self._emit(t, "A11", enc, note="입원 등록 취소")
 
     def _ev_transfer(self, t: float, no: int):
-        enc = self.encounters[no]
-        if enc["status"] != "in-progress":
+        enc = self.encounters.get(no)                 # 끝나서 정리된 입원에 걸린 예약 이벤트는 버린다
+        if enc is None or enc["status"] != "in-progress":
             return
         cur_w = self.beds[enc["bed"]]["ward"]
         free = [b for b in range(len(self.beds)) if self.bed_occ[b] is None]
@@ -407,8 +408,8 @@ class SiteSim:
         self._emit(t, "A02", enc, prior_bed=old)
 
     def _ev_update(self, t: float, no: int):
-        enc = self.encounters[no]
-        if enc["status"] != "in-progress":
+        enc = self.encounters.get(no)                 # 끝나서 정리된 입원에 걸린 예약 이벤트는 버린다
+        if enc is None or enc["status"] != "in-progress":
             return
         p = self.people[enc["person"]]
         r = random.Random(h64(self.id, "upd", no))
@@ -423,9 +424,17 @@ class SiteSim:
         self.advance()
         return [self.encounters[n] for n in self.bed_occ if n is not None]
 
+    def last_seq(self) -> int:
+        return self.events[-1]["seq"] if self.events else getattr(self, "events_base", 0)
+
     def events_since(self, seq: int, limit: int = 500) -> list[dict]:
+        """seq 보다 뒤의 이벤트.  오래된 이벤트는 prune() 로 잘려 나가므로 목록 첫 seq 기준으로 찾는다."""
         self.advance()
-        return self.events[seq: seq + limit]
+        ev = self.events
+        if not ev:
+            return []
+        start = max(0, seq - (ev[0]["seq"] - 1))
+        return ev[start: start + limit]
 
     def enc_of_person(self, pidx: int, active_only: bool = False) -> list[dict]:
         self.advance()
@@ -473,6 +482,34 @@ class SiteSim:
                         "id_base": f"{enc['no']}.{i}"})
         return out
 
+    # ------------------------------------------------------------------ 보관 한도 (장시간 가동 시 메모리가 늘지 않게)
+    KEEP_S = 3 * 86400            # 끝난 입원·ADT 이벤트 보관 기간
+    CAP = {"fhir_store": 20000, "fhir_obs_cache": 20000, "documents": 2000, "inbound": 50000}
+
+    def prune(self, now: float | None = None):
+        now = now or time.time()
+        if now - getattr(self, "_pruned_at", 0) < 600:
+            return
+        self._pruned_at = now
+        cut = now - self.KEEP_S
+        with self.lock:
+            old = [n for n, e in self.encounters.items() if e["status"] != "in-progress" and (e["end"] or 0) < cut]
+            for n in old:
+                del self.encounters[n]
+            if self.events and self.events[0]["t"] < cut:
+                keep = [e for e in self.events if e["t"] >= cut and e["enc"] in self.encounters]
+                self.events_base = self.events[-1]["seq"] if not keep else keep[0]["seq"] - 1
+                self.events[:] = keep
+            for name in ("fhir_store", "fhir_obs_cache"):
+                d = getattr(self, name, None)
+                if d is not None and len(d) > self.CAP[name]:
+                    for k in list(d)[: len(d) - self.CAP[name] // 2]:
+                        del d[k]
+            if len(self.documents) > self.CAP["documents"]:
+                del self.documents[: len(self.documents) - self.CAP["documents"]]
+            for k in [k for k, e in self.tokens.items() if e < now]:
+                del self.tokens[k]
+
     # ------------------------------------------------------------------ 수신·로그
     def store_inbound(self, person: int, enc_no: int | None, t: float, kind: str, value: float, source: str, device: str | None = None,
                       unit_in: str | None = None, value_in=None, ref: str | None = None) -> dict:
@@ -506,6 +543,9 @@ class SiteSim:
             now = time.time()
             for k in [k for k, e in self.tokens.items() if e < now]:
                 del self.tokens[k]
+            if len(self.tokens) > 5000:                    # 토큰을 매 요청 새로 받는 클라이언트 대비
+                for k in sorted(self.tokens, key=self.tokens.get)[:2500]:
+                    del self.tokens[k]
             self.tokens[tok] = now + ttl
         return tok, ttl
 
@@ -517,7 +557,7 @@ class SiteSim:
     def summary(self) -> dict:
         self.advance()
         occ = sum(1 for x in self.bed_occ if x is not None)
-        return {"beds": len(self.beds), "occupied": occ, "patients_in_pool": len(self.people), "encounters": len(self.encounters), "adt_events": len(self.events),
+        return {"beds": len(self.beds), "occupied": occ, "patients_in_pool": len(self.people), "encounters": len(self.encounters), "adt_events": self.last_seq(),
                 "inbound_values": self.counters["inbound_values"], "requests": sum(v for k, v in self.counters.items() if k.startswith("in_")),
                 "errors": self.counters["errors"], "sim_start": self.iso(self.start), "faults": dict(self.faults),
                 "push": ({k: v for k, v in self.push.items() if k not in ("thread", "stop")} if self.push else None)}

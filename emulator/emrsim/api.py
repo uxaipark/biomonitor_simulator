@@ -28,6 +28,7 @@ from .sites import SITES, SITE_BY_ID, COUNTRY_KO, PROTOCOL_KO
 
 router = APIRouter()
 MLLP_PORT = 2575
+MAX_BODY = 5 * 1048576          # Bundle·CDA 한 건 상한
 
 # FHIR base 경로 (사이트 루트 뒤)
 FHIR_BASE = {"epic": "api/FHIR/R4", "oracle": "r4/{tenant}", "uk-core": "FHIR/R4", "jp-core": "fhir", "kr-core": "fhir/r4", "isik": "fhir", "nl-zib": "fhir/stu3",
@@ -286,7 +287,7 @@ def dispatch(sim, ctx: Ctx) -> Reply:
             if ctx.q.get("TYPE"):
                 docs = [d for d in docs if d["type"] == ctx.q["TYPE"].upper()]
             if ctx.q.get("ADMITTED", "").upper() == "Y":
-                docs = [d for d in docs if d["enc"] is not None and sim.encounters[d["enc"]]["status"] == "in-progress"]
+                docs = [d for d in docs if d["enc"] is not None and (sim.encounters.get(d["enc"]) or {}).get("status") == "in-progress"]
             if ctx.q.get("FROM"):
                 t0 = vendor._parse_local(sim, ctx.q["FROM"], ("%Y%m%d%H%M%S", "%Y%m%d")) or 0
                 docs = [d for d in docs if d["t"] >= t0]
@@ -337,7 +338,11 @@ async def emr_entry(site_id: str, path: str, request: Request):
     sim = get_sim(site_id)
     if sim is None:
         return JSONResponse({"error": f"unknown site {site_id}", "sites": [s["id"] for s in SITES]}, 404)
+    if int(request.headers.get("content-length") or 0) > MAX_BODY:
+        return JSONResponse({"error": f"request body too large (max {MAX_BODY // 1048576} MB)"}, 413)
     body = await request.body()
+    if len(body) > MAX_BODY:
+        return JSONResponse({"error": f"request body too large (max {MAX_BODY // 1048576} MB)"}, 413)
     t0 = time.time()
     lat = int(sim.faults.get("latency_ms") or 0)
     if lat:
@@ -482,7 +487,7 @@ def site_received(site_id: str, limit: int = 200):
         p = sim.people[x["person"]]
         rows.append({"seq": x["seq"], "id": x["id"], "received": dt.datetime.fromtimestamp(x["received"], sim.tz).isoformat(timespec="seconds"),
                      "measured": sim.iso(x["t"]), "patient": p["text"], "patient_ids": {k: v for k, v in p["ids"].items() if k != "rrn"},
-                     "visit": sim.encounters[x["enc"]]["visit"] if x["enc"] else None, "kind": x["kind"], "label": VITALS[x["kind"]]["display"],
+                     "visit": (sim.encounters.get(x["enc"]) or {}).get("visit"), "kind": x["kind"], "label": VITALS[x["kind"]]["display"],
                      "value": x["value"], "unit": VITALS[x["kind"]]["ucum"], "value_in": x["value_in"], "unit_in": x["unit_in"], "source": x["source"], "device": x["device"], "ref": x["ref"]})
     return {"site": site_id, "total": sim.counters["inbound_values"], "rows": rows}
 
@@ -518,7 +523,7 @@ def site_push(site_id: str, body: dict):
     host, port = body.get("host"), int(body.get("port") or 0)
     if not host or not port:
         raise HTTPException(400, "host and port required")
-    return mllp.start_push(sim, host, port, int(body.get("since", len(sim.events))))
+    return mllp.start_push(sim, host, port, int(body.get("since", sim.last_seq())))
 
 
 @router.delete("/api/v1/emrsim/{site_id}/push")

@@ -252,3 +252,25 @@ def test_link_korean_site_keeps_emulator_name():
     assert p["text"] == "남궁민" and p["family"] == "남궁" and p["given"] == ["민"]
     rows = vendor.kr_json_handle(ls, "GET", ["api", "v1", "adm", "inpatients"], {}, b"")["DATA"]
     assert {r["PT_NM"] for r in rows} == {"김영수", "남궁민", "이순자"}
+
+
+def test_retention_prune_keeps_cursors_consistent():
+    """오래된 입원·이벤트를 잘라도 seq 커서(ADT 피드, athena changed)와 렌더링이 깨지지 않는다."""
+    sim = S.SiteSim(SITES[2])                     # us-pineridge (HL7)
+    sim.advance()
+    last = sim.last_seq()
+    mid = sim.events[len(sim.events) // 2]
+    sim.KEEP_S = time.time() - mid["t"] + 1       # 중간 이후만 남도록
+    sim._pruned_at = 0
+    sim.prune()
+    assert sim.events and sim.events[0]["seq"] > 1 and sim.last_seq() == last
+    assert all(e["enc"] in sim.encounters for e in sim.events)
+    tail = sim.events_since(last - 3)
+    assert [e["seq"] for e in tail] == [last - 2, last - 1, last]
+    assert sim.events_since(0)[0]["seq"] == sim.events[0]["seq"]          # 잘린 구간을 달라고 하면 남은 첫 이벤트부터
+    for ev in sim.events_since(0):
+        hl7v2.adt(sim, ev)
+    sim.fhir_obs_cache.update({str(i): {} for i in range(25000)})
+    sim._pruned_at = 0
+    sim.prune()
+    assert len(sim.fhir_obs_cache) <= 20000

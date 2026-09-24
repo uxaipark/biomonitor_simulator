@@ -315,6 +315,7 @@ class LinkedSim(S.SiteSim):
                     self._emit(now, "A02", enc, prior_bed=old)
             self._snap = cur
             self.clock = now
+        self.prune(now)
 
     def _new_linked(self, pid: int, pno: int, bed: int, outp: bool, now: float) -> dict:
         prof = self.world.by_id[pid]
