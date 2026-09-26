@@ -1,0 +1,523 @@
+<title>Bio-Signal Emulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#F5F8F6; --paper:#FFFFFF; --ink:#13201B; --ink-2:#3E4D47; --muted:#6B7A74; --line:#D7E0DB; --line-2:#E7EDEA;
+  --ecg:#0B8457; --ecg-soft:#E3F2EA; --spo2:#1C6AA8; --spo2-soft:#E4EEF7; --warn:#B86E00; --warn-soft:#FBF0DD;
+  --grid-minor:rgba(11,132,87,.07); --grid-major:rgba(11,132,87,.16); --code:#EEF3F0;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0D1412; --paper:#131C19; --ink:#E4ECE8; --ink-2:#B9C6C0; --muted:#8A9993; --line:#26332E; --line-2:#1D2824;
+    --ecg:#3CCB8F; --ecg-soft:#12291F; --spo2:#6AAEE6; --spo2-soft:#13222F; --warn:#E3A33D; --warn-soft:#2A2012;
+    --grid-minor:rgba(60,203,143,.07); --grid-major:rgba(60,203,143,.15); --code:#18231F; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0D1412; --paper:#131C19; --ink:#E4ECE8; --ink-2:#B9C6C0; --muted:#8A9993; --line:#26332E; --line-2:#1D2824;
+  --ecg:#3CCB8F; --ecg-soft:#12291F; --spo2:#6AAEE6; --spo2-soft:#13222F; --warn:#E3A33D; --warn-soft:#2A2012;
+  --grid-minor:rgba(60,203,143,.07); --grid-major:rgba(60,203,143,.15); --code:#18231F; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.7;margin:0;padding-inline:20px;word-break:keep-all;overflow-wrap:break-word}
+.wrap{max-width:1180px;margin:0 auto}
+h1,h2,h3{text-wrap:balance;line-height:1.3;margin:0}
+p{margin:0}
+a{color:var(--spo2)}
+code,.mono{font-family:var(--mono);font-size:.9em}
+code{background:var(--code);padding:.08em .35em;border-radius:3px}
+:focus-visible{outline:2px solid var(--spo2);outline-offset:2px}
+
+/* ---------- 상단 */
+.top{display:flex;align-items:center;gap:14px;padding-block:22px 10px;border-bottom:1px solid var(--line)}
+.mark{width:34px;height:34px;display:grid;place-items:center;border:1.5px solid var(--ecg);border-radius:6px;color:var(--ecg)}
+.brand{font-weight:700;letter-spacing:-.01em;font-size:17px}
+.brand small{display:block;font-weight:400;color:var(--muted);font-size:12.5px;letter-spacing:0}
+.top .ver{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);border:1px solid var(--line);padding:3px 8px;border-radius:4px}
+
+/* ---------- 여는 부분 */
+.hero{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:40px;padding-block:44px 30px;align-items:center}
+.eyebrow{font-family:var(--mono);font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ecg);margin-bottom:14px}
+.hero h1{font-size:clamp(30px,4.2vw,46px);font-weight:700;letter-spacing:-.02em}
+.hero h1 em{font-style:normal;color:var(--ecg)}
+.hero .lede{margin-top:18px;font-size:17.5px;color:var(--ink-2);max-width:34em}
+.who{margin-top:22px;display:flex;flex-wrap:wrap;gap:8px}
+.who span{font-size:13px;border:1px solid var(--line);background:var(--paper);padding:4px 10px;border-radius:999px;color:var(--ink-2)}
+.strip{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:14px 14px 10px}
+.strip-head{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:8px;gap:10px;flex-wrap:wrap}
+.strip-head b{color:var(--ecg);font-weight:600}
+#ecg{width:100%;height:190px;display:block;border-radius:4px}
+.frames{display:flex;margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.frames span{flex:1;border-left:1px solid var(--line);padding-left:5px;white-space:nowrap;overflow:hidden}
+.strip-nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px;border-top:1px solid var(--line-2);padding-top:10px}
+.strip-nums div{font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.3}
+.strip-nums b{display:block;font-size:22px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.strip-nums .hr b{color:var(--ecg)} .strip-nums .sp b{color:var(--spo2)}
+
+/* ---------- 실측 */
+.measured{border-block:1px solid var(--line);padding-block:22px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:18px}
+.measured .k{font-family:var(--mono);font-size:clamp(22px,2.6vw,30px);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.measured .l{font-size:13px;color:var(--muted);line-height:1.45;margin-top:2px}
+.measured-note{font-size:12.5px;color:var(--muted);margin-top:10px}
+
+/* ---------- 본문 + 목차 */
+.body{display:grid;grid-template-columns:200px minmax(0,1fr);gap:48px;padding-block:40px 20px}
+.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 18px);align-self:start;font-size:13.5px}
+.toc b{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+.toc a{display:block;color:var(--ink-2);text-decoration:none;padding:4px 0 4px 10px;border-left:2px solid var(--line)}
+.toc a:hover{color:var(--ecg);border-left-color:var(--ecg)}
+section.sec{padding-block:6px 42px;border-bottom:1px solid var(--line-2);margin-bottom:38px}
+section.sec:last-of-type{border-bottom:0}
+.sec h2{font-size:26px;font-weight:700;letter-spacing:-.015em;margin-bottom:6px}
+.sec .sub{color:var(--muted);font-size:15px;margin-bottom:22px;max-width:44em}
+.sec h3{font-size:17px;font-weight:600;margin:28px 0 10px}
+.prose{max-width:44em;color:var(--ink-2)}
+.prose p+p{margin-top:12px}
+ul.list{margin:10px 0 0;padding-left:1.1em;color:var(--ink-2);max-width:46em}
+ul.list li{margin:4px 0}
+ul.list li::marker{color:var(--ecg)}
+
+.cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.cols.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.cell{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+.cell h4{margin:0 0 6px;font-size:15px;font-weight:600}
+.cell p{font-size:14px;color:var(--ink-2);line-height:1.6}
+.cell .tag{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--ecg);margin-bottom:6px;letter-spacing:.04em}
+
+/* 표 */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line-2);vertical-align:top}
+th{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.03em;background:var(--ground);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.m{font-family:var(--mono);font-size:13px;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.n{font-family:var(--mono);font-size:13px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip{display:inline-block;font-family:var(--mono);font-size:11px;padding:1px 6px;border-radius:3px;background:var(--ecg-soft);color:var(--ecg);margin:1px 2px 1px 0;white-space:nowrap}
+.chip.b{background:var(--spo2-soft);color:var(--spo2)} .chip.w{background:var(--warn-soft);color:var(--warn)}
+
+/* 프레임 바이트 그림 */
+.bytes{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;font-family:var(--mono);font-size:11.5px;background:var(--paper);min-width:640px}
+.bytes div{padding:8px 6px;border-right:1px solid var(--line);text-align:center;line-height:1.35}
+.bytes div:last-child{border-right:0}
+.bytes b{display:block;color:var(--ink);font-weight:600}
+.bytes span{color:var(--muted)}
+.bytes .h{background:var(--ecg-soft)} .bytes .p{background:var(--paper)} .bytes .t{background:var(--spo2-soft)}
+.scroll{overflow-x:auto;padding-bottom:4px}
+
+pre.code{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;font-family:var(--mono);font-size:13px;line-height:1.6;overflow-x:auto;margin:12px 0 0;color:var(--ink)}
+.note{border-left:3px solid var(--warn);background:var(--warn-soft);padding:12px 16px;border-radius:0 6px 6px 0;font-size:14px;color:var(--ink-2);margin-top:18px;max-width:52em}
+.note b{color:var(--ink)}
+
+/* 흐름 그림 */
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;align-items:stretch;margin-top:6px}
+.flow .st{background:var(--paper);border:1px solid var(--line);padding:14px 12px;position:relative}
+.flow .st:not(:last-child)::after{content:"";position:absolute;right:-7px;top:50%;width:12px;height:12px;background:var(--paper);border-top:1px solid var(--line);border-right:1px solid var(--line);transform:translateY(-50%) rotate(45deg);z-index:1}
+.flow .st:first-child{border-radius:8px 0 0 8px}.flow .st:last-child{border-radius:0 8px 8px 0}
+.flow .st+.st{border-left:0}
+.flow .st h4{margin:0 0 4px;font-size:14px;font-weight:600}
+.flow .st p{font-size:12.5px;color:var(--muted);line-height:1.5}
+.flow .st .io{font-family:var(--mono);font-size:11px;color:var(--ecg);display:block;margin-bottom:4px}
+
+footer{border-top:1px solid var(--line);padding-block:26px 40px;color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between}
+
+@media (max-width:980px){
+  .hero{grid-template-columns:1fr;gap:26px;padding-block:32px 22px}
+  .body{grid-template-columns:1fr;gap:0}
+  .toc{position:static;display:flex;flex-wrap:wrap;gap:6px;margin-bottom:26px}
+  .toc b{width:100%}
+  .toc a{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px}
+  .measured{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .cols{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .flow{grid-template-columns:1fr}
+  .flow .st{border-radius:0!important;border-left:1px solid var(--line)!important}
+  .flow .st+.st{border-top:0}
+  .flow .st:first-child{border-radius:8px 8px 0 0!important}.flow .st:last-child{border-radius:0 0 8px 8px!important}
+  .flow .st:not(:last-child)::after{right:50%;top:auto;bottom:-7px;transform:translateX(50%) rotate(135deg)}
+}
+@media (max-width:620px){
+  body{padding-inline:16px;font-size:15.5px}
+  .measured{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cols,.cols.two{grid-template-columns:1fr}
+  .strip-nums{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .sec h2{font-size:23px}
+}
+@media (prefers-reduced-motion: reduce){ *{scroll-behavior:auto!important} }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="mark" aria-hidden="true"><svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="M1 8h4l1.5-3 2 7 2.5-11 2 7H19"/></svg></div>
+    <div class="brand">Bio-Signal Emulator<small>병원 규모 생체신호 · 게이트웨이 · EMR 연동 에뮬레이터</small></div>
+    <span class="ver">v1.0 · 2026-09</span>
+  </header>
+
+  <!-- 여는 부분: 제품의 한 문장과, 실제로 흐르는 것(200 ms 프레임) -->
+  <div class="hero">
+    <div>
+      <p class="eyebrow">Hospital-scale vital-sign traffic generator</p>
+      <h1>병원 하나를 통째로,<br><em>라즈베리파이 한 대</em>에서 흉내 냅니다.</h1>
+      <p class="lede">수천 명의 환자가 ECG·SpO₂ 패치를 달고 병동과 검사실을 오가고, 층마다 달린 BLE 게이트웨이가 그 신호를 200 ms마다 라우터 서버로 보냅니다. 입퇴원, 패치 교체, 게이트웨이 고장, 망 장애, 부정맥 발작까지 실제 병원에서 일어나는 일을 재현해, 중앙 모니터·수집 서버·EMR 연동을 <b>실제 병동에 들어가기 전에</b> 시험할 수 있게 해 줍니다.</p>
+      <div class="who" aria-label="대상">
+        <span>원격 모니터링 · 수집 서버 개발팀</span><span>중앙 모니터 · 뷰어 개발팀</span><span>병원 정보팀 · EMR 연동 담당</span><span>의료기기 인허가 시험 준비</span>
+      </div>
+    </div>
+    <figure class="strip" style="margin:0" aria-label="ECG 스트립 예시">
+      <div class="strip-head"><span><b>ECG II</b> · 250 Hz · 0.001 mV/LSB</span><span>1 칸 = 200 ms 전송 프레임</span></div>
+      <canvas id="ecg" width="1100" height="380" role="img" aria-label="정상 동율동 ECG 파형 예시 (합성)"></canvas>
+      <div class="frames" aria-hidden="true"><span>seq 4118</span><span>4119</span><span>4120</span><span>4121</span><span>4122</span><span>4123</span></div>
+      <div class="strip-nums">
+        <div class="hr"><b>72</b>HR bpm</div><div class="sp"><b>97</b>SpO₂ %</div><div><b>16</b>RR brpm</div><div><b>36.8</b>Temp °C</div>
+      </div>
+    </figure>
+  </div>
+
+  <!-- 운영 실측 -->
+  <div>
+    <div class="measured">
+      <div><div class="k">2,050</div><div class="l">동시 모니터링 패치<br>(병원 2,000 + 원외 MCOT 50)</div></div>
+      <div><div class="k">2,124</div><div class="l">가상 BLE 게이트웨이<br>게이트웨이당 TCP 소켓 1개</div></div>
+      <div><div class="k">3,350</div><div class="l">패킷/초 · 2.0 MB/s<br>라우터로 연속 전송</div></div>
+      <div><div class="k">≈13 %</div><div class="l">200 ms 주기 부하<br>(워커 3개, 오버런 0)</div></div>
+      <div><div class="k">5.2억</div><div class="l">37시간 무중단 누적 패킷<br>(298 GB)</div></div>
+    </div>
+    <p class="measured-note">측정: Raspberry Pi 5 (Cortex-A76 4코어, 16 GB) 운영 장비, 2026-09-26. 워커당 한 주기 조립 ≈19 ms + 송신 5~8 ms / 200 ms.</p>
+  </div>
+
+  <div class="body">
+    <nav class="toc" aria-label="목차">
+      <b>목차</b>
+      <a href="#overview">개요</a>
+      <a href="#world">병원과 환자</a>
+      <a href="#signals">생체신호</a>
+      <a href="#devices">기기와 패치 수명</a>
+      <a href="#protocol">전송 프로토콜</a>
+      <a href="#scenarios">시나리오</a>
+      <a href="#emr">EMR 연동 시험</a>
+      <a href="#tools">검증 도구 · API</a>
+      <a href="#gui">운영 화면</a>
+      <a href="#perf">성능 · 요구사항</a>
+      <a href="#uses">활용 사례</a>
+      <a href="#limits">한계 · 로드맵</a>
+    </nav>
+
+    <main>
+      <!-- 개요 -->
+      <section class="sec" id="overview">
+        <h2>개요</h2>
+        <p class="sub">실제 환자와 병동 없이도, 원격 환자 모니터링 시스템 전체를 운영 규모로 돌려 볼 수 있는 시험대입니다.</p>
+        <div class="prose">
+          <p>웨어러블 패치 기반 모니터링 시스템은 패치, 병동 게이트웨이, 수집(라우터) 서버, 중앙 모니터, 병원 EMR이 이어진 구조입니다. 각 구간은 따로 만들 수 있지만, 수천 명 규모의 동시 트래픽과 병원 현장의 불규칙한 사건(환자 이동, 전극 분리, 장비 교체, 망 장애)은 실제 병동에 들어가기 전에는 재현하기 어렵습니다.</p>
+          <p>Bio-Signal Emulator는 이 앞단 전체를 소프트웨어로 대신합니다. 병원 건물과 병동을 도면 수준으로 만들고, 환자 프로필과 질환에 맞는 생체신호를 생성하며, 게이트웨이별 TCP 연결로 실제와 같은 바이너리 스트림을 보냅니다. 수집 서버는 이 에뮬레이터를 실제 병원처럼 대하면 됩니다.</p>
+        </div>
+        <h3>구성 흐름</h3>
+        <div class="flow" role="list">
+          <div class="st" role="listitem"><span class="io">환자 · 질환</span><h4>프로필 1만 명</h4><p>질환→리듬 매핑, 나이·동반질환·삽입형 기기</p></div>
+          <div class="st" role="listitem"><span class="io">신호 생성</span><h4>1시간 루프 은행</h4><p>27종 리듬, ECG·PPG·호흡·가속도·체온·혈당</p></div>
+          <div class="st" role="listitem"><span class="io">병원 월드 1 Hz</span><h4>입퇴원 · 이동 · 장애</h4><p>병상·검사실·엘리베이터, 패치 수명, 망 이벤트</p></div>
+          <div class="st" role="listitem"><span class="io">게이트웨이 200 ms</span><h4>프레임 조립 · 전송</h4><p>게이트웨이별 TCP, CRC-32, 저장 후 전송, 재전송</p></div>
+          <div class="st" role="listitem"><span class="io">시험 대상</span><h4>라우터 · 뷰어 · EMR</h4><p>진입점 API로 설정을 읽고 수신 시작</p></div>
+        </div>
+      </section>
+
+      <!-- 병원과 환자 -->
+      <section class="sec" id="world">
+        <h2>병원과 환자</h2>
+        <p class="sub">병원 규모는 모니터링할 환자 수에서 거꾸로 정해집니다. 환자 500명이면 628병상 1동 9층, 2,000명이면 2,503병상 3동 20층이 됩니다(병상 여유 20 %).</p>
+        <div class="cols">
+          <div class="cell"><span class="tag">BUILDING</span><h4>건축 도면 원형 10종</h4><p>단일 이중복도형(≤80병상)부터 L·T자, 레이스트랙, 중정형, 십자 4익동, 고층 타워, 분산 포드, 대학병원 다동, 메디컬센터 Y자 트리플 타워(≤5,000병상)까지 병상 수에 맞춰 자동 선택합니다.</p></div>
+          <div class="cell"><span class="tag">CODE</span><h4>국내 규정 치수 반영</h4><p>다인실 병상당 6.3 m² 이상, 1인실 10 m² 이상, 병상 간 1.5 m, 신축 병실 최대 4병상, 복도 유효폭 3.0 m, 3층 이상 직통계단 2개소를 생성기가 스스로 검증합니다.</p></div>
+          <div class="cell"><span class="tag">WARD</span><h4>병동 · 진단부 구성</h4><p>층마다 두 간호단위(A/B), 간호사실·투약실·청결/오염 처치실·음압 격리실. 1층에는 응급실, CT·MRI(Zone II~IV)·X-ray, 심혈관조영실, 투석실, 내시경, 외래가 들어갑니다.</p></div>
+          <div class="cell"><span class="tag">GATEWAY</span><h4>게이트웨이 배치 규칙</h4><p>방마다 천장 중앙에 두되 모든 지점이 도달거리 8.5 m 안에 들도록 늘리고, 로비·대기실은 피크 인원으로 계산해 게이트웨이당 BLE 용량(32)의 75 %를 넘지 않게 추가합니다.</p></div>
+          <div class="cell"><span class="tag">PATIENT</span><h4>환자 프로필 1만 명</h4><p>24개 진단(심장 12 · 기타 12), 나이·성별·체격·혈액형·알레르기·동반질환·거주지(동 단위). 한국식 이름은 출생 연대별 작명 경향을 따르고 외국인 환자도 섞입니다.</p></div>
+          <div class="cell"><span class="tag">DAY</span><h4>병원의 하루</h4><p>검사 이동(엘리베이터 음영 구간 포함), 병실 이동, 화장실·샤워·재활, 가족 면회, 요일·시간대 재원 곡선, 오전 퇴원·오후 입원, 임상 악화와 코드블루.</p></div>
+        </div>
+        <h3>원외 모니터링 (MCOT)</h3>
+        <p class="prose">원외 환자는 스마트폰형 모바일 게이트웨이로 연결됩니다. 집·외출·음영 구간, 모바일 회선 지연, 단말 배터리 방전과 충전, 앱 강제 종료·절전 모드·OS 업데이트·비행기 모드에 따른 끊김과 일괄 업로드를 흉내 냅니다.</p>
+      </section>
+
+      <!-- 신호 -->
+      <section class="sec" id="signals">
+        <h2>생체신호</h2>
+        <p class="sub">런타임에 수학 계산을 하지 않습니다. 모든 파형은 미리 만든 1시간 루프에서 잘라 쓰고, 환자마다 변형·오프셋·게인·노이즈를 조합해 서로 다르게 보이게 합니다.</p>
+        <h3>채널</h3>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>ID</th><th>채널</th><th>단위 · 해상도</th><th>형식</th><th>주기</th><th>비고</th></tr></thead>
+            <tbody>
+              <tr><td class="m">1</td><td>ECG</td><td class="m">0.001 mV</td><td class="m">int16</td><td class="m">250 / 500 Hz</td><td>1채널, 전극 분리·부착 과도 현상 포함</td></tr>
+              <tr><td class="m">2</td><td>심박수 (HR)</td><td class="m">1 bpm</td><td class="m">uint8</td><td class="m">1 s</td><td>패치별로 프레임을 엇갈려 전송</td></tr>
+              <tr><td class="m">3</td><td>체온</td><td class="m">0.01 °C</td><td class="m">int16</td><td class="m">1 s</td><td>피부 패치, 저녁 상승 일주기</td></tr>
+              <tr><td class="m">4</td><td>호흡수</td><td class="m">1 brpm</td><td class="m">uint8</td><td class="m">1 s</td><td>용량성 · EDR · SpO₂ 세 가지 출처</td></tr>
+              <tr><td class="m">5</td><td>SpO₂</td><td class="m">1 %</td><td class="m">uint8</td><td class="m">1 s</td><td>손끝 · 반지형 · 손목 PTT 센서</td></tr>
+              <tr><td class="m">6</td><td>혈당 (CGM)</td><td class="m">0.1 mg/dL</td><td class="m">uint16</td><td class="m">1 s</td><td>식후 07:30 · 12:30 · 18:30 반영</td></tr>
+              <tr><td class="m">7</td><td>가속도 XYZ</td><td class="m">0.001 g</td><td class="m">int16 × 3</td><td class="m">50 Hz</td><td>활동 템플릿이 ECG 움직임 잡음과 같은 출처</td></tr>
+              <tr><td class="m">8</td><td>PPG</td><td class="m">a.u.</td><td class="m">int16</td><td class="m">100 Hz</td><td>선택 채널 (기본 꺼짐)</td></tr>
+              <tr><td class="m">9</td><td>호흡 파형</td><td class="m">a.u.</td><td class="m">int16</td><td class="m">25 Hz</td><td>선택 채널</td></tr>
+              <tr><td class="m">10</td><td>페이스 마커</td><td class="m">표본 위치</td><td class="m">uint16</td><td class="m">이벤트</td><td>하위 14비트 오프셋, 상위 2비트 심방/심실/LV</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>리듬 27종</h3>
+        <p class="prose">환자의 진단에 맞춰 기저 리듬이 정해지고, 발작성 에피소드가 1초 크로스페이드로 들어왔다가 돌아갑니다. 변형 사이 전환(8~25분 간격)과 진폭 드리프트, 다일 변동 모델이 겹쳐 같은 1시간 구간을 두 번 재생하지 않습니다.</p>
+        <p style="margin-top:12px;line-height:2">
+          <span class="chip">NSR</span><span class="chip">동서맥</span><span class="chip">동빈맥</span><span class="chip">심방세동</span><span class="chip">AF RVR</span><span class="chip">심방조동</span><span class="chip">PVC</span><span class="chip">이단맥</span><span class="chip">PAC</span><span class="chip">SVT</span><span class="chip">1도 AVB</span><span class="chip">Mobitz I</span><span class="chip">Mobitz II</span><span class="chip">3도 AVB</span><span class="chip">LBBB</span><span class="chip">RBBB</span><span class="chip">ST 하강·허혈</span><span class="chip">동정지</span><span class="chip b">VVI</span><span class="chip b">AAI</span><span class="chip b">DDD</span><span class="chip b">CRT</span><span class="chip b">페이서 오작동</span><span class="chip w">NSVT</span><span class="chip w">VT</span><span class="chip w">STEMI</span><span class="chip w">VFib</span>
+        </p>
+
+        <h3>생리적 일관성</h3>
+        <ul class="list">
+          <li>호흡이 RR 간격(RSA)과 ECG 진폭(EDR)을 흔들고, PPG는 맥파 전달 시간만큼 늦게 따라옵니다. 수치와 파형이 같은 출처에서 나옵니다.</li>
+          <li>다일 변동: 주간 심박·호흡 상승, 저녁 체온 상승, 야간 SpO₂ 저하, 6~71시간 주기 드리프트. 심박 계수는 파형 재생 속도에 그대로 적용되어 파형과 HR이 어긋나지 않습니다.</li>
+          <li>페이스메이커: 심장 환자의 약 6 %가 이중방(52 %)·단일심실(20 %)·ICD(10 %)·CRT(11 %)·리드리스(5 %)·단일심방(2 %)을 갖습니다. 스파이크 크기는 유니폴라 2~8 mV, 바이폴라 0.08~0.5 mV, 리드리스 0.05~0.25 mV이고 캡처 실패·언더/오버센싱 오작동도 있습니다.</li>
+          <li>전극: 떨어지는 순간 3초간 크게 요동한 뒤 레일에 포화되고, 다시 붙이면 약 20초 동안 오프셋이 감쇠하며 그 동안 HR·RR은 무효로 표시됩니다.</li>
+          <li>NIBP는 패치 채널이 아니라 병동 간호 스팟체크(커프, 1시간 간격) 모델로 API에서 제공합니다.</li>
+        </ul>
+      </section>
+
+      <!-- 기기·패치 수명 -->
+      <section class="sec" id="devices">
+        <h2>기기와 패치 수명</h2>
+        <p class="sub">환자마다 증상에 맞는 기기 세트를 달고, 패치는 실제 제품처럼 수명이 있고 교체되면 새 번호를 받습니다.</p>
+        <div class="cols two">
+          <div class="cell"><span class="tag">DEVICE SET</span><h4>환자별 기기 세트</h4><p>ECG 패치(항상) + 체온 패치 + SpO₂ 센서(손끝·반지형·손목 PTT 중 하나) + CGM. 자동 정책에서는 호흡기·감염·심부전·심장수술 환자의 92 %가 SpO₂를, 발열·수술·종양 병동 환자의 95 %가 체온 패치를, 당뇨 환자의 95 %가 CGM을 답니다. 패치마다 실제 달린 기기의 채널만 보냅니다.</p></div>
+          <div class="cell"><span class="tag">LIFECYCLE</span><h4>패치 수명과 교체</h4><p>배터리 15.5일, 최대 착용 14일. 착용 만료·배터리 부족·병실 이동·MRI 촬영 때 교체되고, 교체된 패치는 새 시리얼과 patch_id를 받습니다(재사용 없음). 모든 패치는 레지스트리에 발급·종료 시각과 사유가 남습니다.</p></div>
+        </div>
+        <h3>모니터링 처방 (위중도별 3~14일)</h3>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>처방</th><th>기간</th><th>대표 적응증</th><th>운영 분포 예</th></tr></thead>
+            <tbody>
+              <tr><td>단기</td><td class="m">3~5일</td><td>급성기 비심장 입원(폐렴, 당뇨, 골절 등) 중 리듬 감시</td><td class="n">460명 · 22 %</td></tr>
+              <tr><td>중기</td><td class="m">7일</td><td>심방세동 조절, 심부전, 관상동맥질환, 심장수술 후 회복</td><td class="n">783명 · 38 %</td></tr>
+              <tr><td>장기</td><td class="m">14일</td><td>부정맥 포착 목적: 실신, 원인 불명 뇌경색의 AF 탐지, 심근병증, 전도장애, 심정지 후, 원외 MCOT</td><td class="n">807명 · 39 %</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="prose" style="margin-top:12px">위중도는 진단 기본값에 고위험 리듬, 75세 이상, 동반질환 2개 이상, 삽입형 기기, 원외 여부를 더해 정합니다. 처방이 끝나면 모니터링을 종료하고 패치를 반납하며, 빈자리는 새 입원이 채웁니다. 장기 처방 일부는 연장되어 14일째에 새 번호 패치로 교체됩니다.</p>
+      </section>
+
+      <!-- 프로토콜 -->
+      <section class="sec" id="protocol">
+        <h2>전송 프로토콜</h2>
+        <p class="sub">게이트웨이마다 TCP 연결 하나로, 200 ms마다 연결된 패치들의 레코드를 묶은 리틀엔디언 바이너리 프레임을 보냅니다. 전체 명세는 진입점 API가 기계가독 형태로 제공합니다.</p>
+        <h3>프레임</h3>
+        <div class="scroll">
+          <div class="bytes" role="img" aria-label="프레임 구조: 헤더 26바이트, 선택 블록, 레코드, CRC-32 트레일러">
+            <div class="h" style="flex:1.1"><b>magic</b><span>u16 0x4742</span></div>
+            <div class="h" style="flex:.7"><b>ver</b><span>u8</span></div>
+            <div class="h" style="flex:.7"><b>flags</b><span>u8</span></div>
+            <div class="h" style="flex:1"><b>gw_id</b><span>u32</span></div>
+            <div class="h" style="flex:1"><b>seq</b><span>u32</span></div>
+            <div class="h" style="flex:1.3"><b>ts_ms</b><span>u64</span></div>
+            <div class="h" style="flex:.9"><b>n_rec</b><span>u16</span></div>
+            <div class="h" style="flex:1.2"><b>payload_len</b><span>u32</span></div>
+            <div class="p" style="flex:1.8"><b>[GW_STATUS] [META]</b><span>선택 블록</span></div>
+            <div class="p" style="flex:1.6"><b>record × n_rec</b><span>패치별</span></div>
+            <div class="t" style="flex:1"><b>crc32</b><span>u32</span></div>
+          </div>
+        </div>
+        <div class="tbl" style="margin-top:14px">
+          <table>
+            <thead><tr><th>구성</th><th>크기</th><th>내용</th></tr></thead>
+            <tbody>
+              <tr><td>헤더</td><td class="m">26 B</td><td>flags 0x01 META · 0x02 GW_STATUS · 0x04 KEEPALIVE · 0x08 제어 프레임. seq는 게이트웨이 프레임 순번, ts_ms는 게이트웨이 시각(epoch ms).</td></tr>
+              <tr><td>GW_STATUS</td><td class="m">11 B</td><td>CPU·메모리·망 부하 %, WAN RSSI, BLE 연결 수, 상태(정상/저하/다운), uptime, 온도. 5프레임마다.</td></tr>
+              <tr><td>META</td><td class="m">u32 + JSON</td><td>재연결 직후와 25프레임마다: 채널 구성, 패치↔환자 매핑, 기기 세트, 페이스메이커 정보, 게이트웨이 번호·MAC.</td></tr>
+              <tr><td>레코드 헤더</td><td class="m">16 B</td><td>patch_id · patient_id(입원마다 새 환자번호) · 패치 패킷 순번 · flags(리드오프·움직임·배터리 부족·SpO₂ 센서 분리·페이스메이커·새 패치) · 배터리 % · RSSI · 채널 수, 이어서 채널별 <code>ch_id u8 | dtype u8 | n u16 | data</code></td></tr>
+              <tr><td>트레일러</td><td class="m">4 B</td><td>헤더+페이로드 CRC-32. 불일치하면 수신 측이 다음 헤더로 재동기화하고 NACK를 보낼 수 있습니다.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>유실 판별과 복구</h3>
+        <ul class="list">
+          <li><b>두 종류의 순번</b>: 게이트웨이 프레임 seq의 틈은 게이트웨이→라우터 구간 유실이고, 패치 패킷 seq의 틈은 패치→게이트웨이→라우터 전체 구간 유실입니다. 어느 구간에서 사라졌는지 구분됩니다.</li>
+          <li><b>재전송(NACK)</b>: 라우터가 같은 소켓으로 요청 구간을 돌려보내면 게이트웨이가 최근 10초(워커당 64 MB)분을 원래 순번 그대로 다시 보냅니다.</li>
+          <li><b>저장 후 전송</b>: 회선이 끊긴 동안 게이트웨이별로 최대 2 MB를 쌓아 두었다가, 복구되면 과거 타임스탬프·연속 순번으로 주기당 40프레임씩 버스트 전송합니다.</li>
+          <li>회선 오류는 TCP가 이미 고치므로 오류정정 부호(FEC)는 쓰지 않습니다. 실제 유실(끊김, 버퍼 넘침)은 재전송과 저장 후 전송으로 다룹니다.</li>
+        </ul>
+        <h3>진입점 API</h3>
+        <pre class="code">GET  /api/v1                      # 프로토콜·채널·엔드포인트·현재 설정 (라우터는 이것부터 읽는다)
+GET  /api/v1/emr/layout           # 건축 도면 JSON v1 (미터 단위 폴리곤, 침대 방향, 게이트웨이 좌표·높이)
+GET  /api/v1/emr/admissions       # 재원 환자 ↔ 패치 ↔ 게이트웨이 매핑, 모니터링 처방
+TCP  &lt;router&gt;:9100                # 게이트웨이별 연결로 프레임 수신 시작
+POST /api/v1/router/status        # 라우터 상태를 에뮬레이터 GUI로 보고 (선택)</pre>
+      </section>
+
+      <!-- 시나리오 -->
+      <section class="sec" id="scenarios">
+        <h2>시나리오</h2>
+        <p class="sub">대표 테스트 시나리오 14개를 한 번에 적용할 수 있고, 개별 사건은 트리거·스크립트로 원하는 시각에 주입합니다. 모든 설정 변경은 이력으로 남고 실행별 스냅샷으로 되돌릴 수 있습니다.</p>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>프리셋</th><th>무엇을 시험하나</th></tr></thead>
+            <tbody>
+              <tr><td>무장애 기준선</td><td>처리량과 장기 안정성(메모리 누수) — 변수를 모두 끈 기준</td></tr>
+              <tr><td>일상 병동 운영</td><td>요일·시간대 재원 곡선, 병원 일과, 약한 간섭 — 현장과 가장 비슷한 평상시</td></tr>
+              <tr><td>네트워크 장비 장애</td><td>코어·층 스위치·AP 장애, 업링크 단절 동안의 버퍼링과 재전송</td></tr>
+              <tr><td>건물 정전 · UPS</td><td>UPS 유지 → 발전기 전환 재부팅 → 순차 복구의 대량 동시 단절</td></tr>
+              <tr><td>게이트웨이 장애 · 교체</td><td>무응답·성능 저하·하드웨어 교체(새 번호·MAC)와 인접 게이트웨이 재접속</td></tr>
+              <tr><td>움직임 · 아티팩트 최대</td><td>신호 품질 판정과 잡음 내성의 최악 조건</td></tr>
+              <tr><td>임상 악화 · 코드블루 다발</td><td>조기경보(NEWS2)와 부정맥 분석 — 정답 라벨로 채점 가능</td></tr>
+              <tr><td>원외 MCOT 중심</td><td>모바일 회선, 단말 끊김, 일괄 업로드</td></tr>
+              <tr><td>라우터 내구성</td><td>오염 프레임, 연결 폭주, 반열림 연결, gw_id 중복</td></tr>
+              <tr><td>퍼포먼스</td><td>최대 부하 처리량</td></tr>
+              <tr><td>전파 방해 (2.4 GHz)</td><td>BLE 신호 감쇠·흔들림, 잦은 짧은 끊김</td></tr>
+              <tr><td>패치 교체 · 처방 종료</td><td>착용 만료·배터리 교체(새 번호), 처방 종료·반납, 새 부착</td></tr>
+              <tr><td>실제 시그널 송출</td><td>실측 심전도 파일(ATF/CSV)을 표본율 맞춰 반복 전송</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>라우터 검증 드릴</h3>
+        <p class="prose">프레임 1,000개당 N개를 잘못된 magic·버전·길이, 잘린 프레임, 과대 길이, 프레임 사이 쓰레기 바이트, 중복, 순서 뒤바뀜, 순번 건너뜀, 알 수 없는 채널로 오염시킵니다. 소켓에 넘긴 원본 바이트를 정답으로 캡처해 두면, 라우터가 받은 것과 (gw_id, seq) 단위로 대조해 누락·초과·불일치를 보고합니다.</p>
+      </section>
+
+      <!-- EMR -->
+      <section class="sec" id="emr">
+        <h2>EMR 연동 시험</h2>
+        <p class="sub">상용 EMR 연동 코드를 실제 병원에 붙이기 전에 형식 차이, 인증, 오류 응답, 장애를 미리 겪어 볼 수 있도록 가상 의료기관 20곳을 내장했습니다.</p>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>국가</th><th>기관 수</th><th>형식</th></tr></thead>
+            <tbody>
+              <tr><td>미국</td><td class="n">4</td><td>FHIR R4 · US Core (2곳, 계열별 검색 제약), HL7 v2.5.1 MLLP + IHE PCD-01, 외래 REST</td></tr>
+              <tr><td>영국</td><td class="n">2</td><td>FHIR R4 · UK Core (NHS 번호, 요청 ID 필수), HL7 v2.4 (NHS ITK 관례)</td></tr>
+              <tr><td>일본</td><td class="n">2</td><td>SS-MIX2 HL7 v2.5 (ISO-2022-JP, 한자·가나 이름), FHIR R4 · JP Core</td></tr>
+              <tr><td>한국</td><td class="n">4</td><td>FHIR R4 · KR Core (KCD-8), 대학병원식 REST JSON, EUC-KR XML 전문, 진료정보교류 CDA R2</td></tr>
+              <tr><td>독·불·네·호·캐·싱·브·UAE</td><td class="n">8</td><td>ISiK, IHE PAM FR (INS·ZBE), FHIR STU3 (zib), AU Core, HL7 v2.3 (OHIP), NRIC, RNDS (CNS·CPF), Malaffi (Emirates ID)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="list" style="margin-top:14px">
+          <li><b>인증 10가지 방식</b>: SMART Backend Services JWT, 서명 JWT, client_credentials(Basic/폼), HTTP Basic, 고정 토큰, API 키, 인증서+CPF, MLLP 기관 라우팅.</li>
+          <li><b>현실적인 식별자</b>: NHS·BSN·CPF·CNS·INS·IHI·NRIC·Emirates ID·NPI·OHIP·KVNR·주민번호가 각국 체크 디지트 규칙을 통과하는 합성값입니다. 주민번호는 항상 마스킹합니다.</li>
+          <li><b>코드 체계</b>: ICD-10-CM · ICD-10 · KCD-8 · ICD-10-GM · CID-10 · MEDIS 병명 · SNOMED CT, 바이탈은 LOINC · IEEE 11073 MDC · 병원 로컬 코드.</li>
+          <li><b>연동 병원 선택</b>: 20곳 중 하나를 고르면 그 병원 EMR이 에뮬레이터의 실제 재원 환자·병상·입퇴원을 자기 형식으로 내주고, 프레임의 환자번호와 그 EMR의 번호를 잇는 조인 키가 제공됩니다.</li>
+          <li><b>장애 주입</b>: 병원별 지연, 5xx 비율, 서버 다운, 토큰 수명을 바꿔 재시도·백오프를 시험합니다.</li>
+        </ul>
+        <div class="note"><b>상표 안내</b> — 기관명은 모두 가공입니다. 표 안의 계열 표기(US Core, SS-MIX2 등)는 표준과 관례를 가리키며, 특정 EMR 회사의 서버·데이터와는 관계가 없습니다.</div>
+      </section>
+
+      <!-- 도구 -->
+      <section class="sec" id="tools">
+        <h2>검증 도구 · API</h2>
+        <p class="sub">에뮬레이터는 보내기만 하지 않습니다. 정답을 함께 내주어 수집 서버와 분석 알고리즘을 채점할 수 있게 합니다.</p>
+        <div class="cols">
+          <div class="cell"><span class="tag">GROUND TRUTH</span><h4>정답 라벨</h4><p>부정맥 에피소드·임상 악화·장애 구간을 epoch ms 단위 라벨로 내보냅니다(JSON/CSV). 알람 로직의 민감도·특이도를 계산할 수 있습니다.</p></div>
+          <div class="cell"><span class="tag">RECEIVER</span><h4>참조 수신기 · 검증기</h4><p>엄격 모드 수신기가 magic·버전·길이·CRC, 순번 틈·중복·역순, 시각 역행, 알 수 없는 채널을 집계합니다. 라우터 구현의 레퍼런스 디코더입니다.</p></div>
+          <div class="cell"><span class="tag">SCRIPT</span><h4>재현 가능한 시나리오</h4><p>시뮬레이션 시각에 맞춰 사건을 재생하는 스크립트와 녹화·재생, 고정 시작 시각·고정 스텝 모드로 회귀 시험을 결정적으로 반복합니다.</p></div>
+          <div class="cell"><span class="tag">DATA</span><h4>SQLite 이력</h4><p>입퇴원, 패치 레지스트리, 검사 일정, 게이트웨이 장비 이력, 이벤트, 실행 기록을 저장하고 SELECT 전용 조회 API를 엽니다.</p></div>
+          <div class="cell"><span class="tag">TUNE</span><h4>자동 최적화</h4><p>현재 장비에서 오버런 없이 보낼 수 있는 최대 채널 수를 스스로 찾아 설정합니다.</p></div>
+          <div class="cell"><span class="tag">CHAT</span><h4>연동 채널</h4><p>에뮬레이터·라우터·운영자가 함께 쓰는 채팅 허브(WebSocket/REST)로 배포 예고와 연동 이슈를 주고받습니다.</p></div>
+        </div>
+      </section>
+
+      <!-- GUI -->
+      <section class="sec" id="gui">
+        <h2>운영 화면</h2>
+        <p class="sub">반응형 웹 제어판 하나로 전부 다룹니다. 44 px 터치 타깃으로 설계해 7인치 키오스크부터 데스크톱까지 같은 화면을 씁니다.</p>
+        <ul class="list">
+          <li><b>운영 현황</b>: 전송률·데이터량·연결 상태·이벤트 로그와 라우터가 보고한 수신 상태.</li>
+          <li><b>모니터링</b>: 환자 목록(처방 일수·D+n·패치 착용일 포함), 환자 한 명의 실시간 ECG·Pleth·호흡 파형과 수치, 리듬·이벤트 주입, NEWS2.</li>
+          <li><b>병원</b>: 층별 건축 도면 위의 침대 점유, 이동 중 환자, 게이트웨이 상태와 커버리지·음영지역, 건물 측면도. 게이트웨이를 누르면 Central Station이 2×1부터 16×10까지 n-up으로 열립니다.</li>
+          <li><b>에뮬레이터 설정</b>: 시나리오 프리셋, 시그널 송출(실측 파형 파일 업로드), 메디컬 월드 생성(병원·환자·루프 은행).</li>
+          <li><b>테스트</b>: 특정 게이트웨이·환자에게 이벤트를 보내 뷰어의 표시와 경보음을 현장에서 확인.</li>
+          <li><b>EMR 연동</b>: 20곳 상태, 자체 시험, 예시 요청, 장애 주입, 요청 로그, 수신 바이탈, 연동 병원 선택.</li>
+          <li><b>시작 매뉴얼</b>: 101·201·301 단계별 안내와 T-01~T-14 시험 항목. 항목마다 [이 설정 적용] 버튼이 있습니다.</li>
+        </ul>
+      </section>
+
+      <!-- 성능 -->
+      <section class="sec" id="perf">
+        <h2>성능 · 요구사항</h2>
+        <p class="sub">패치당 파이썬 루프가 없습니다. 한 주기마다 전체 패치의 파형을 한 번의 인덱싱으로 모으고, 레코드를 구조체 배열로 한 번에 직렬화합니다.</p>
+        <div class="tbl">
+          <table>
+            <thead><tr><th>항목</th><th>값</th></tr></thead>
+            <tbody>
+              <tr><td>권장 장비</td><td>Raspberry Pi 5 (4코어, 8 GB 이상) · Pi 4 / reTerminal 동작 · 일반 Linux / macOS</td></tr>
+              <tr><td>소프트웨어</td><td class="m">Python 3.11 · FastAPI · NumPy · SQLite(WAL)</td></tr>
+              <tr><td>동시 패치 (Pi 5 실측)</td><td>2,050 패치 · 2,124 게이트웨이 · 3,350 패킷/초 · 2.0 MB/s · 주기 부하 ≈13 % · 오버런 0</td></tr>
+              <tr><td>전송 주기</td><td class="m">200 ms 프레임 · 수치 채널 1 s · META 25프레임 · 상태 5프레임</td></tr>
+              <tr><td>프로세스 구조</td><td>게이트웨이를 워커 프로세스에 라운드로빈 분배(기본 CPU−1개), 상태는 공유메모리로만 교환</td></tr>
+              <tr><td>메모리 상한</td><td>저장 후 전송 게이트웨이당 2 MB · 워커당 64 MB, 재전송 보관 워커당 64 MB, 정답 캡처 256 MB, 이력 보관 7일</td></tr>
+              <tr><td>설치</td><td>릴리스 tarball + <code>install.sh</code> → systemd 서비스, sysctl·파일 한도 조정, 키오스크 모드 선택</td></tr>
+              <tr><td>포트</td><td class="m">5445 웹·API · 9100 라우터 수신(대상) · 2575 HL7 MLLP</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 활용 -->
+      <section class="sec" id="uses">
+        <h2>활용 사례</h2>
+        <p class="sub">시험 대상에 따라 같은 에뮬레이터를 다르게 씁니다.</p>
+        <div class="cols">
+          <div class="cell"><h4>수집 서버 부하 · 장기 시험</h4><p>무장애 기준선으로 2,000명 규모를 며칠 동안 흘려 처리량과 메모리 누수를 확인하고, 드릴로 파서와 재접속 로직을 깨뜨려 봅니다.</p></div>
+          <div class="cell"><h4>중앙 모니터 · 경보 검증</h4><p>임상 악화·부정맥 에피소드를 주입하고 정답 라벨로 경보 지연과 누락을 채점합니다. 현장 테스트로 특정 게이트웨이 뷰어의 경보음을 확인합니다.</p></div>
+          <div class="cell"><h4>병동 설계 · 커버리지 검토</h4><p>도면 위 게이트웨이 도달거리와 음영지역, 검사 이동 경로의 핸드오버를 보고 배치를 조정합니다.</p></div>
+          <div class="cell"><h4>EMR 연동 개발</h4><p>국가·벤더 형식이 다른 20곳을 상대로 인증·식별자 매칭·바이탈 전송·ADT 수신을 구현하고, 연동 병원을 골라 실제 재원 환자로 끝까지 이어 봅니다.</p></div>
+          <div class="cell"><h4>장애 대응 훈련</h4><p>정전·스위치 장애·게이트웨이 교체를 걸어 운영 절차와 알림 체계를 점검합니다.</p></div>
+          <div class="cell"><h4>시연 · 교육</h4><p>실제 환자 데이터 없이 병원 규모의 살아 있는 화면을 보여 줍니다. 모든 환자·기관 정보는 합성입니다.</p></div>
+        </div>
+      </section>
+
+      <!-- 한계 -->
+      <section class="sec" id="limits">
+        <h2>한계 · 로드맵</h2>
+        <p class="sub">에뮬레이터가 아직 다루지 않는 부분입니다.</p>
+        <ul class="list">
+          <li>ECG는 1채널입니다. 2~3채널 벡터 ECG와 12유도 확장을 검토 중입니다.</li>
+          <li>BLE 끊김 동안 패치 내부에 저장했다가 재접속 후 채워 보내는 백필(back-fill)은 아직 손실로만 모델링합니다.</li>
+          <li>게이트웨이 클록 드리프트와 NTP 보정 이벤트는 모델링하지 않습니다.</li>
+          <li>전송 구간의 TLS와 게이트웨이 인증은 제외되어 있습니다(시험망 전제).</li>
+          <li>원외 환자는 GPS 좌표 없이 집·외출·음영 상태만 제공합니다.</li>
+          <li>EMR 시험 서버의 JWT는 형식과 클레임만 검사하고 서명은 검증하지 않으며, 받은 바이탈은 메모리에만 보관합니다.</li>
+        </ul>
+        <div class="note"><b>의료 용도 아님</b> — Bio-Signal Emulator는 시험·개발·교육용 소프트웨어입니다. 생성되는 신호와 환자 정보는 모두 합성이며 진단이나 치료 판단에 쓰일 수 없습니다.</div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    <span>Bio-Signal Emulator · 병원 규모 생체신호 · 게이트웨이 · EMR 연동 에뮬레이터</span>
+    <span class="mono">API <code>GET /api/v1</code> · 문서 README · docs/EMR_SIM.md · docs/ROUTER_FLOORPLAN.md</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('ecg'); if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  // 합성 PQRST (정상 동율동, 72 bpm) — 가우시안 합
+  const beat = t => { // t: 0..1 (한 박동)
+    const g = (m, s, a) => a * Math.exp(-((t - m) ** 2) / (2 * s * s));
+    return g(.18, .025, .12) + g(.30, .008, -.12) + g(.33, .010, 1.15) + g(.36, .009, -.28) + g(.58, .045, .30);
+  };
+  const W = cv.width, H = cv.height, secs = 1.2 /* 6프레임 × 200 ms */, bpm = 72;
+  const px = W / secs, mid = H * .6, amp = H * .42;
+  const val = s => beat(((s * bpm / 60) % 1 + 1) % 1);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let offset = 0, last = 0;
+  function grid() {
+    ctx.fillStyle = css('--paper'); ctx.fillRect(0, 0, W, H);
+    const mm = px * 0.04; // 1 mm = 40 ms (25 mm/s)
+    for (let i = 0, x = 0; x <= W; i++, x = i * mm) { ctx.strokeStyle = i % 5 ? css('--grid-minor') : css('--grid-major'); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let i = 0, y = 0; y <= H; i++, y = i * mm) { ctx.strokeStyle = i % 5 ? css('--grid-minor') : css('--grid-major'); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  }
+  function draw(ts) {
+    if (!reduce) { const dt = last ? (ts - last) / 1000 : 0; last = ts; offset = (offset + dt) % (60 / bpm * 100); }
+    grid();
+    ctx.strokeStyle = css('--ecg'); ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.beginPath();
+    for (let x = 0; x <= W; x += 2) { const s = x / px + offset; const y = mid - val(s) * amp; x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+    if (!reduce) requestAnimationFrame(draw);
+  }
+  draw(0);
+  if (reduce) { matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => draw(0)); }
+})();
+</script>
