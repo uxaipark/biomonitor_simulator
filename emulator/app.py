@@ -312,6 +312,13 @@ async def control_profiles_regenerate():
     return {"result": "profiles regenerated", "profiles": E().world.profile_params}
 
 
+@app.get("/api/v1/debug/memory")
+def debug_memory(trace: str | None = None, top: int = 30, trim: int = 0):
+    """메모리 진단 (RSS · glibc 힙(mallinfo2) · 구조 크기 · 타입별 객체 수 · tracemalloc 증분). ?trace=start|top|stop, ?trim=1 은 malloc_trim(0)"""
+    from . import diag
+    return diag.report(E(), chat, trace, top, trim=bool(trim))
+
+
 @app.get("/api/v1/world/invariants")
 def world_invariants(fresh: int = 0):
     """월드 불변식 검사 결과 (60 시뮬초마다 자동 검사, fresh=1 이면 지금 검사). 위반이 있으면 시나리오 로직 오류 신호."""

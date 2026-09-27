@@ -12,6 +12,11 @@ Environment=BIOSIM_DATA_DIR=/var/lib/biosim
 Environment=PYTHONUNBUFFERED=1
 Environment=OMP_NUM_THREADS=1
 Environment=OPENBLAS_NUM_THREADS=1
+# glibc 힙 조각화 방지 (2026-09-27): 스레드별 malloc 아레나가 큰 JSON 문자열을 할당·해제하며 조각나 70 시간에
+# RSS 259→585 MB 로 늘었다 (파이썬 객체 증가는 수 MB).  아레나를 2개로 묶고, 1 MB 이상은 항상 mmap 으로 받아
+# 해제 즉시 OS 에 돌려준다.  GET /api/v1/debug/memory 의 malloc 항목으로 확인한다.
+Environment=MALLOC_ARENA_MAX=2
+Environment=MALLOC_MMAP_THRESHOLD_=1048576
 ExecStartPre=+/opt/biosim/app/deploy/pi/shm-sweep.sh
 ExecStart=/opt/biosim/venv/bin/python run.py --host 0.0.0.0 --port 5445
 Restart=always

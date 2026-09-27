@@ -4,7 +4,8 @@ from emulator.signals import trend
 from emulator.hospital import layout as L
 
 TRIGGERS = {"gateway_fault", "gateway_replace", "network_event", "lead_off", "episode", "exam", "replace_patch", "patch_wear_expire", "patch_low_battery", "rx_expire", "discharge", "admit", "vfib",
-            "storm", "half_open", "dup_id", "capture", "lead_off_off", "episode_off", "exam_off"}
+            "storm", "half_open", "dup_id", "capture", "lead_off_off", "episode_off", "exam_off",
+            "config"}                                                 # 녹화 재생 항목: 설정 변경 (world.trigger 가 처리)
 
 
 def test_nibp_is_deterministic_and_plausible():
