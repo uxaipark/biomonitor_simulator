@@ -122,7 +122,7 @@ const TAB_GROUPS = [
   { id: 'dash', title: '운영 현황', show: ['dash'] },
   { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
   { id: 'hosp', title: '병원', show: ['hosp'] },
-  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'scn'] },          // 하위 메뉴: 시나리오 · 시그널 송출 · 메디컬 월드 생성 (show[1] 이 바뀜)
+  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'struct'] },       // 하위 메뉴 순서: ① 메디컬 월드 생성 · ② 시나리오 · ③ 시그널 송출 (show[1] 이 바뀜)
   { id: 'test', title: '테스트', show: ['test'] },
   { id: 'emr', title: 'EMR 연동', show: ['emr'] },
   { id: 'log', title: '로그', show: ['log'] },
@@ -154,10 +154,10 @@ function showLogView(v) {
   updateLinkPolling();
 }
 // 에뮬레이터 설정 하위 메뉴: 시나리오 / 시그널 송출 / 메디컬 월드 생성
-const EMU_VIEWS = ['scn', 'tx', 'struct'];
-let emuView = 'scn'; try { const v = localStorage.getItem('emuView'); if (EMU_VIEWS.includes(v)) emuView = v; } catch (e) { }
+const EMU_VIEWS = ['struct', 'scn', 'tx'];                       // 설정 순서: 메디컬 월드 생성 → 시나리오 → 시그널 송출
+let emuView = 'struct'; try { const v = localStorage.getItem('emuView'); if (EMU_VIEWS.includes(v)) emuView = v; } catch (e) { }
 function setEmuView(v) {
-  emuView = EMU_VIEWS.includes(v) ? v : 'scn';
+  emuView = EMU_VIEWS.includes(v) ? v : 'struct';
   TAB_GROUPS.find(x => x.id === 'emu').show[1] = emuView;
   try { localStorage.setItem('emuView', emuView); } catch (e) { }
   $$('#emuSeg button').forEach(b => b.classList.toggle('on', b.dataset.ev === emuView));

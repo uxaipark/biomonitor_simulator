@@ -173,9 +173,9 @@
   <div class="card"><h3><button class="fold" data-fold="wardBody" aria-expanded="true">▾</button>병동 <span class="sub" id="wardCount"></span></h3><div class="tbl" id="wardBody" style="max-height:40vh"><table id="wardTable"><thead><tr><th>병동</th><th>진료과</th><th>위치</th><th>병상</th><th>재원</th></tr></thead><tbody></tbody></table></div></div>
 </section>
 
-<!-- ================= 에뮬레이터 설정 (하위 메뉴: 시나리오 · 시그널 송출 · 메디컬 월드 생성) -->
+<!-- ================= 에뮬레이터 설정 (하위 메뉴, 설정 순서: ① 메디컬 월드 생성 · ② 시나리오 · ③ 시그널 송출) -->
 <section class="tab" data-tab="emunav" data-title="에뮬레이터 설정">
-  <div class="seg emuseg" id="emuSeg"><button data-ev="scn">시나리오</button><button data-ev="tx">시그널 송출</button><button data-ev="struct">메디컬 월드 생성</button></div>
+  <div class="seg emuseg" id="emuSeg"><button data-ev="struct" title="1단계: 병원·게이트웨이·환자 프로필·루프 은행을 만든다">① 메디컬 월드 생성</button><button data-ev="scn" title="2단계: 그 세계에서 무엇이 일어날지 정한다">② 시나리오</button><button data-ev="tx" title="3단계: 라우터 주소·채널을 정하고 내보낸다">③ 시그널 송출</button></div>
   <button class="small emufold" id="emuFoldAll" title="이 페이지의 접힌 카드를 모두 펼칩니다">⊞ 모두 펼치기</button>
   <button class="small emureset" id="btnReset" title="시나리오 · 시그널 송출 · 메디컬 월드의 모든 설정을 출고 기본값으로 되돌립니다 (라우터 주소는 유지)">전체 기본값 복원</button>
 </section>
