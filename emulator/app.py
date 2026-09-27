@@ -312,6 +312,12 @@ async def control_profiles_regenerate():
     return {"result": "profiles regenerated", "profiles": E().world.profile_params}
 
 
+@app.get("/api/v1/world/invariants")
+def world_invariants(fresh: int = 0):
+    """월드 불변식 검사 결과 (60 시뮬초마다 자동 검사, fresh=1 이면 지금 검사). 위반이 있으면 시나리오 로직 오류 신호."""
+    return E().world.invariants(fresh=bool(fresh))
+
+
 @app.get("/api/v1/world/status")
 def world_status():
     """메디컬 월드의 세 생성물이 지금 설정과 맞는지: 병원·게이트웨이(재구성), 환자 프로필(재생성), 파형 루프 은행(재생성)."""

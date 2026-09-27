@@ -29,6 +29,7 @@ from ..hospital.devices import DEVICES, assign_devices, devices_mask, spo2_sourc
 from ..hospital import monitoring as rx_model
 from ..signals.loops import LoopBank
 from ..signals.rhythms import RHYTHMS
+from . import invariants as invariants_mod
 from ..signals.accel import ACTIVITIES
 from ..signals.slow import TEMP_PROFILES, GLUCOSE_PROFILES
 from ..signals import trend as trend_model
@@ -143,6 +144,7 @@ class World:
         self.profile_params: dict | None = None                   # 지금 명단을 만든 프로필 값 (build 에서 채움)
         self.net_events: list[dict] = []
         self.script: dict | None = None          # scheduled scenario script (test drills replayed at fixed sim times)
+        self.step_while_stopped = False          # True 면 전송 정지 중에도 월드가 돈다 (기본: 정지 = 시나리오도 멈춤)
         self.rhythm_variants: dict[str, list[int]] = {}
         self.db = DB()
         self.build()
@@ -863,9 +865,10 @@ class World:
         h = self.hospital; c = self._ward_corridors(rec)
         shower = h.ward_room_of_kind(rec["ward_idx"], "shower") if rec["ward_idx"] >= 0 else -1
         shower = shower if shower >= 0 else rec["room_idx"]
-        self._start_trip(rec, [(c[0] if c else "shadow", self.rng.uniform(20, 50), "walking", 0.5), (shower, self.rng.uniform(400, 900), "shower", 0.9),
-                               (c[0] if c else "shadow", self.rng.uniform(20, 50), "walking", 0.5)], "샤워")
-        rec["spo2_off_until"] = self.sim_time + 1000
+        steps = [(c[0] if c else "shadow", self.rng.uniform(20, 50), "walking", 0.5), (shower, self.rng.uniform(400, 900), "shower", 0.9),
+                 (c[0] if c else "shadow", self.rng.uniform(20, 50), "walking", 0.5)]
+        self._start_trip(rec, steps, "샤워")
+        rec["spo2_off_until"] = self.sim_time + sum(float(st[1]) for st in steps) + 20.0     # 센서는 샤워 다녀오는 동안만 분리 (예전: 고정 1000초)
         self.st.patch["spo2_off"][rec["row"]] = 1
 
     def _trip_rehab(self, rec: dict) -> None:
@@ -1244,14 +1247,16 @@ class World:
         gw = rec["mobile_gw"]
         gs = self.gw_state[gw]
         # mobile gateway battery
-        drain = 100.0 / (14 * 3600) * (1.6 if rec["home_state"] == "outside" else 1.0)
+        dt_s = float(getattr(self, "_dt_last", 1.0) or 1.0)                 # 시뮬 초 단위: 배속을 올려도 단말 배터리는 시뮬 시간대로 닳는다
+        drain = 100.0 / (14 * 3600) * (1.6 if rec["home_state"] == "outside" else 1.0) * dt_s
+        p_evt = min(1.0, 0.01 * dt_s)
         if gs["charging"]:
-            gs["mobile_batt"] = min(100.0, gs["mobile_batt"] + 100.0 / 5400)
-            if gs["mobile_batt"] >= 99.5 and self.rng.random() < 0.01:
+            gs["mobile_batt"] = min(100.0, gs["mobile_batt"] + 100.0 / 5400 * dt_s)
+            if gs["mobile_batt"] >= 99.5 and self.rng.random() < p_evt:
                 gs["charging"] = False
         else:
             gs["mobile_batt"] = max(0.0, gs["mobile_batt"] - drain)
-            if gs["mobile_batt"] < 15 and rec["home_state"] == "home" and self.rng.random() < 0.01:
+            if gs["mobile_batt"] < 15 and rec["home_state"] == "home" and self.rng.random() < p_evt:
                 gs["charging"] = True
         G["battery"][gw] = int(gs["mobile_batt"])
         if gs["mobile_batt"] <= 0.5 and G["status"][gw] != 2:
@@ -1393,9 +1398,10 @@ class World:
                 rec["next_slow_hop"] = now + self.rng.uniform(1800, 5400)
 
     # ------------------------------------------------------------------ arrhythmia episodes
-    def _step_episodes(self) -> None:
+    def _step_episodes(self, dt_s: float = 1.0) -> None:
         if not self.rhythm_variants or not self.cfg.get("scenario", "rhythm_episodes", default=True):
             return
+        p_new = min(0.5, dt_s / 5400.0)                       # 환자당 시뮬 1.5시간에 한 번 — 배속·스텝 간격과 무관하게
         P = self.st.patch.arr
         now = self.sim_time
         tick = self._tick_now()
@@ -1408,7 +1414,7 @@ class World:
                 self._switch_variant(row, rec["base_variant"], tick)
                 self.log.add("rhythm", f"{self.by_id[pid]['name']} 리듬 에피소드 종료 → 기저 리듬 복귀", patient_id=pid)
                 continue
-            if rec["episode_until"] == 0.0 and self.rng.random() < 1 / 5400:       # ~ once per 1.5 h per patient
+            if rec["episode_until"] == 0.0 and self.rng.random() < p_new:
                 prof = self.by_id[pid]
                 base = prof["rhythm"]
                 cls = RHYTHMS[base]["cls"]
@@ -1493,7 +1499,7 @@ class World:
                 if gs["reason"].startswith("하드웨어"):
                     continue                                              # a dead unit only comes back through replacement
                 if fi == 0 and ni == 0 or (gs["reason"] == "게이트웨이 장애(무응답)" and fi == 0) or (gs["reason"] not in ("", "게이트웨이 장애(무응답)") and ni == 0):
-                    if G["status"][gw] == 2 and gs["fault_until"]:
+                    if G["status"][gw] in (2, 3) and gs["fault_until"]:
                         gs["fault_until"] = 0.0
                         gs["reason"] = ""
                         G["status"][gw] = 0
@@ -1512,14 +1518,11 @@ class World:
             if now > ev["until"]:
                 for gw in ev["gws"]:
                     gs = self.gw_state[gw]
-                    if ev["kind"] in ("wired", "power"):
+                    if ev["kind"] == "wired":
                         gs["fault_until"] = 0.0
-                        if G["status"][gw] == 2 and not gs["reason"].startswith("모바일"):
+                        if G["status"][gw] in (2, 3) and gs["reason"] == ev["label"].split(" - ")[0]:
                             G["status"][gw] = 0
                             gs["reason"] = ""
-                            if ev["kind"] == "power":
-                                G["uptime_s"][gw] = 0
-                                gs["boot_at"] = now
                     else:
                         gs["degraded_until"] = 0.0
                 self.net_events.remove(ev)
@@ -1629,15 +1632,13 @@ class World:
         fl = self.rng.choice(len(h.floors))
         floor = h.floors[int(fl)]
         gws = [g["idx"] for g in h.gateways if g["building_idx"] == floor["building_idx"] and g["floor"] == floor["floor"]]
-        if kind == "power":
-            gws = [g["idx"] for g in h.gateways if g["building_idx"] == floor["building_idx"]] if self.rng.random() < 0.3 else gws
-        label = {"wireless": "무선 노이즈/간섭", "wired": "유선 네트워크 장애", "latency": "네트워크 지연", "power": "순간 정전"}[kind]
-        dur = {"wireless": self.rng.uniform(15, 120), "wired": self.rng.uniform(10, 120), "latency": self.rng.uniform(10, 90), "power": self.rng.uniform(5, 40)}[kind]
+        label = {"wireless": "무선 노이즈/간섭", "wired": "유선 네트워크 장애 (업링크 단절)", "latency": "네트워크 지연"}[kind]
+        dur = {"wireless": self.rng.uniform(15, 120), "wired": self.rng.uniform(10, 120), "latency": self.rng.uniform(10, 90)}[kind]
         dur *= (0.5 + ni)
         for gw in gws:
             gs = self.gw_state[gw]
-            if kind in ("wired", "power"):
-                G["status"][gw] = 2
+            if kind == "wired":                                            # 유선 장애: 게이트웨이는 살아 있어 패치가 붙어 있고 프레임은 쌓였다 복구 때 올라간다
+                G["status"][gw] = 3                                        # (토폴로지 모델과 같은 의미. 예전엔 2 = 게이트웨이 다운으로 패치가 옮겨 갔다)
                 gs["fault_until"] = now + dur
                 gs["reason"] = label
             elif kind == "wireless":
@@ -1874,7 +1875,7 @@ class World:
             self._step_patches(dt_s)
             self._step_prescriptions()
             self._step_modulation()
-            self._step_episodes()
+            self._step_episodes(dt_s)
             self._step_gateways(dt_s)
             self.real.step(dt_s)                                           # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)
             self.rsig.step()                                               # 실제 시그널 송출 슬롯 (파일 재생 · 부정맥 순환)
@@ -1888,11 +1889,40 @@ class World:
                 if pid % 5 == k or (rec["gw"] >= 0 and G["status"][rec["gw"]] == 2) or (rec["gw"] < 0):
                     self._relink(rec)
             self.write_meta()
+            self._step_invariants()
             self._step_autotune(real_dt)
             if self.log.pending:
                 self.db.queue_events(self.log.pending)
                 self.log.pending = []
             self.db.flush()
+
+    # ------------------------------------------------------------------ 불변식 감시 (60 시뮬초마다)
+    INVARIANT_EVERY_S = 60.0
+
+    def _step_invariants(self) -> None:
+        if self.sim_time - getattr(self, "_inv_t", 0.0) < self.INVARIANT_EVERY_S:
+            return
+        self._inv_t = self.sim_time
+        try:
+            r = invariants_mod.check(self)
+        except Exception as e:                                             # 감시 자체가 월드를 멈추면 안 된다
+            r = {"ok": False, "violations": [{"kind": "checker_error", "count": 1, "sample": [str(e)], "detail": ""}], "checked_sim_time": self.sim_time, "checked_at": time.time(), "stats": {}}
+        prev = getattr(self, "invariants_last", None)
+        self.invariants_last = r
+        if not r["ok"]:
+            self.counters["invariant_violations"] += sum(v["count"] for v in r["violations"])
+            kinds = {v["kind"] for v in r["violations"]}
+            if not prev or kinds != {v["kind"] for v in prev.get("violations", [])}:      # 같은 위반이 계속되면 1분마다 되풀이하지 않는다
+                self.log.add("error", "월드 불변식 위반: " + " · ".join(f"{v['kind']} {v['count']}건" for v in r["violations"]))
+        elif prev and not prev.get("ok"):
+            self.log.add("system", "월드 불변식 정상 복귀")
+
+    def invariants(self, fresh: bool = False) -> dict:
+        if fresh or not getattr(self, "invariants_last", None):
+            with self.lock:
+                self.invariants_last = invariants_mod.check(self)
+                self._inv_t = self.sim_time
+        return self.invariants_last
 
     # ------------------------------------------------------------------ autotune
     def start_autotune(self, step: int = 100, window_s: float = 12.0) -> None:

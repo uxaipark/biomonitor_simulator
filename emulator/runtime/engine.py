@@ -206,7 +206,7 @@ class Engine:
         self.world.stop_autotune()
         S = st.stat.arr
         self.world.db.stop_run(getattr(self, "run_id", None), int(S["pkts"].sum()), int(S["bytes"].sum()), int(S["drop_emul"].sum() + S["drop_backlog"].sum() + S["drop_noconn"].sum()))
-        self.log.add("system", "전송 정지")
+        self.log.add("system", "전송 정지 — 시나리오 시계도 멈춤 (입퇴원·이동·장애·이벤트 생성 중단, 시작하면 이어서 진행)")
         return "stopped"
 
     def shutdown(self):
@@ -235,7 +235,8 @@ class Engine:
             t0 = time.perf_counter()
             try:
                 with self.rw.read():
-                    self.world.step(now - last)
+                    if self.running or self.world.step_while_stopped:      # 정지 상태에서는 시나리오 시계도 멈춘다 (입퇴원·이동·장애·이벤트 없음)
+                        self.world.step(now - last)
                     self._collect_stats()
             except Exception as e:  # keep the loop alive
                 self.log.add("error", f"world step error: {type(e).__name__}: {e}")
