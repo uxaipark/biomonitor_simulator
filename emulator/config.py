@@ -93,11 +93,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "resend_keep_mb": 64,          # ... bounded per worker
         "max_send_backlog_bytes": 262144,
         "reconnect_interval_s": 3.0,
-        # ---- 보안 백홀 (원격 라우터로 SSH 터널 경유 송출; emulator/runtime/backhaul.py)
-        "backhaul": {"mode": "direct",                              # direct | ssh_in (회사→집 -R 터널 감지) | ssh_out (에뮬레이터가 ssh -L 을 열고 감독)
-                     "local_port": 9100,                            # 터널 진입점 127.0.0.1:<local_port> — 터널 모드에서 워커의 실제 접속 대상
-                     "keepalive_s": 10,
-                     "ssh": {"host": "", "port": 22, "user": "", "key_path": "", "remote_target": "", "extra_args": ""}},   # ssh_out 전용; remote_target 비우면 target_ip:target_port
         "router_status_url": "",       # retired: the router pushes its status to POST /api/v1/router/status
         # ---- router test drills
         "store_forward": {"enabled": True, "max_bytes_per_gw": 2097152, "burst_frames_per_cycle": 40},   # buffer frames while down/offline, replay in bursts after reconnect
@@ -303,19 +298,8 @@ class Config:
         t["gw_status_every_n_frames"] = int(max(1, min(1000, t["gw_status_every_n_frames"])))
         t["workers"] = int(max(0, min(16, t["workers"])))
         t["target_port"] = int(max(1, min(65535, t["target_port"])))
-        # 게이트웨이당 1 소켓이 현장 구성(디지털 트윈 기본).  워커당 1 소켓(다중화)은 SSH 터널·WAN 실험용으로 2026-09-27 다시 열었다
-        # (게이트웨이마다 SSH 채널을 여는 것보다 훨씬 가볍다) — ③ 시그널 송출의 [소켓 모드].
-        if t.get("socket_mode") not in ("per_gateway", "shared"):
-            t["socket_mode"] = "per_gateway"
-        bh = t.setdefault("backhaul", {})
-        if bh.get("mode") not in ("direct", "ssh_in", "ssh_out"):
-            bh["mode"] = "direct"
-        bh["local_port"] = int(max(1, min(65535, bh.get("local_port") or t["target_port"])))
-        bh["keepalive_s"] = int(max(3, min(120, bh.get("keepalive_s") or 10)))
-        ssh = bh.setdefault("ssh", {})
-        for k in ("host", "user", "key_path", "remote_target", "extra_args"):
-            ssh[k] = str(ssh.get(k) or "").strip()
-        ssh["port"] = int(max(1, min(65535, ssh.get("port") or 22)))
+        # 워커당 1 소켓(다중화)은 현장에 없는 구성이라 UI에서 뺐다: 디지털 트윈은 게이트웨이당 1 소켓으로 고정
+        t["socket_mode"] = "per_gateway"
         sf = t.setdefault("store_forward", {})
         sf["enabled"] = bool(sf.get("enabled", True))
         sf["max_bytes_per_gw"] = int(max(65536, min(64 * 1024 * 1024, sf.get("max_bytes_per_gw", 2097152))))

@@ -106,7 +106,7 @@ def discovery():
                          "3. transport.target_ip/port 에 TCP 리스너 오픈 (에뮬레이터가 게이트웨이별로 접속)", "4. 프레임 수신: META 블록으로 채널 구성 갱신, 레코드를 패치 번호 파일로 저장",
                          "5. POST /api/v1/router/status 로 라우터 상태를 주기적으로 보고 (선택)"],
         "endpoints": {
-            "discovery": "/api/v1", "backhaul": "GET /api/v1/backhaul (보안 백홀: SSH 터널 상태·회사 쪽 명령 예시; 설정은 transport.backhaul)", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
+            "discovery": "/api/v1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
                         "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
@@ -865,8 +865,6 @@ def _tx_health_watch() -> None:
             e = E()
             if e is None:
                 continue
-            if getattr(e, "backhaul", None) is not None and e.backhaul.on_event is None:      # 백홀 연결·단절·복구를 채팅(link)에도 — RP5-2 가 원인을 바로 안다
-                e.backhaul.on_event = lambda level, msg: chat.post("link", msg, kind="system") if (level != "info" or "복구 완료" in msg or msg.startswith("백홀 연결")) else None
             for level, msg in h.update(e.stats(history=False), time.time()):
                 try:
                     e.world.log.add("tx", msg, level=level)
@@ -878,18 +876,6 @@ def _tx_health_watch() -> None:
 
 
 threading.Thread(target=_tx_health_watch, daemon=True, name="tx-health-watch").start()
-
-
-@app.get("/api/v1/backhaul")
-def backhaul_status():
-    """보안 백홀(SSH 터널) 상태: 모드·연결 여부·단절 횟수/누적 시간·복구 뒤 SAF 소진 시간·ssh 프로세스, ssh_in 이면 회사 쪽에서 실행할 명령 예시."""
-    e = E()
-    bh = e.backhaul.status()
-    bh["socket_mode"] = cfg.snapshot()["transport"]["socket_mode"]
-    bh["advice"] = ("터널 경유 시 socket_mode=shared(워커당 연결 1개) 권장" if bh["mode"] != "direct" and bh["socket_mode"] == "per_gateway" else "")
-    return bh
-
-
 
 
 @app.websocket("/ws/chat")

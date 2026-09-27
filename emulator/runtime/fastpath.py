@@ -607,11 +607,9 @@ class Sender:
         if v != self.cfg_version:
             self.cfg_version = v
             new = (self.st.get_target(), int(self.st.ctl[CTL["target_port"]]))
-            mode = int(self.st.ctl[CTL["socket_mode"]])
-            if new != self.target or mode != getattr(self, "_sock_mode", mode):   # 소켓 모드가 바뀌면 키 체계가 달라지니 전부 다시 연다
+            if new != self.target:
                 self.close_all()
                 self.target = new
-            self._sock_mode = mode
 
     def close_all(self):
         for k, s in list(self.socks.items()):

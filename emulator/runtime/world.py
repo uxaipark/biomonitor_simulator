@@ -308,7 +308,6 @@ class World:
 
     def apply_config(self) -> None:
         """Push transport/signal config into the control array (safe at runtime)."""
-        from .backhaul import effective_target
         cfg = self.cfg.snapshot()
         s, t = cfg["signals"], cfg["transport"]
         c = self.st.ctl
@@ -320,14 +319,13 @@ class World:
         c[CTL["accel_fs"]] = s["accel_fs"]
         c[CTL["meta_every"]] = t["meta_every_n_frames"]
         c[CTL["gwstat_every"]] = t["gw_status_every_n_frames"]
-        eff_ip, eff_port, gen_only = effective_target(t)           # 터널 모드면 127.0.0.1:<local_port> (backhaul.py)
-        c[CTL["target_port"]] = eff_port
+        c[CTL["target_port"]] = t["target_port"]
         c[CTL["socket_mode"]] = 0 if t["socket_mode"] == "per_gateway" else 1
         c[CTL["crossfade_ticks"]] = max(1, 1000 // t["bundle_ms"])
         c[CTL["loop_seconds"]] = s["loop_seconds"]
         c[CTL["max_backlog"]] = t["max_send_backlog_bytes"]
         c[CTL["reconnect_s"]] = t["reconnect_interval_s"]
-        c[CTL["generate_only"]] = 1 if gen_only else 0
+        c[CTL["generate_only"]] = 0 if t["target_ip"] else 1
         sf, fz = t.get("store_forward", {}), t.get("fuzz", {})
         c[CTL["saf_enabled"]] = 1 if sf.get("enabled", True) else 0
         c[CTL["saf_max_bytes"]] = sf.get("max_bytes_per_gw", 2097152)
@@ -336,7 +334,7 @@ class World:
         c[CTL["fuzz_mask"]] = sum(1 << FUZZ_KINDS.index(k) for k in fz.get("kinds", []) if k in FUZZ_KINDS)
         c[CTL["connect_budget"]] = 3 if t.get("storm_smoothing", True) else 100000
         c[CTL["tap"]] = 1 if t.get("capture", {}).get("enabled") else 0
-        self.st.set_target(eff_ip)                  # cfg_version 도 올린다 → 워커가 대상·소켓 모드 변화를 보고 재접속
+        self.st.set_target(t["target_ip"])
         P = self.st.patch.arr
         rs = RESP_SOURCES.index(s["resp_source"])
         P["resp_src"][:] = rs                       # SpO2 source is per patient (device set)

@@ -348,9 +348,7 @@ const B = {  // element id -> config path
   rf_en: ['scenario', 'rf_noise', 'enabled'], rf_lvl: ['scenario', 'rf_noise', 'level'],
   g_fstart: ['general', 'fixed_start'], g_fstep: ['general', 'fixed_step'],
   t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
-  t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], t_sock: ['transport', 'socket_mode'],
-  bh_mode: ['transport', 'backhaul', 'mode'], bh_port: ['transport', 'backhaul', 'local_port'], bh_keep: ['transport', 'backhaul', 'keepalive_s'], bh_host: ['transport', 'backhaul', 'ssh', 'host'],
-  bh_sshport: ['transport', 'backhaul', 'ssh', 'port'], bh_user: ['transport', 'backhaul', 'ssh', 'user'], bh_key: ['transport', 'backhaul', 'ssh', 'key_path'], bh_remote: ['transport', 'backhaul', 'ssh', 'remote_target'], bh_extra: ['transport', 'backhaul', 'ssh', 'extra_args'],
+  t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
   sf_en: ['transport', 'store_forward', 'enabled'], sf_max: ['transport', 'store_forward', 'max_bytes_per_gw'], sf_burst: ['transport', 'store_forward', 'burst_frames_per_cycle'],
   fz_en: ['transport', 'fuzz', 'enabled'], fz_rate: ['transport', 'fuzz', 'rate_per_1000'], t_storm: ['transport', 'storm_smoothing'], cap_en: ['transport', 'capture', 'enabled'],
   selRespSrc: ['signals', 'resp_source'], selEcgFs: ['signals', 'ecg_fs'], s_vpr: ['signals', 'variants_per_rhythm'], s_pm: ['signals', 'pacemaker_ratio'],
@@ -436,7 +434,6 @@ function fillForm() {
   const fk = $('#fz_kinds'); if (fk) fk.value = ((SV.transport.fuzz || {}).kinds || []).join(',');
   renderChips(); renderPresets(); syncDropdowns(); mixNote(); scnMark();
 }
-{ const bm = $('#bh_mode'); if (bm) bm.addEventListener('change', () => { $$('.bh-out').forEach(x => x.hidden = bm.value !== 'ssh_out'); }); }
 $('#fz_kinds').addEventListener('change', () => { const kinds = $('#fz_kinds').value.split(',').map(x => x.trim()).filter(Boolean); scnEdit(['transport', 'fuzz', 'kinds'], kinds); });
 $('#capClear').onclick = async () => { const r = await post('/capture', { clear: true }); toast('캡처 파일 삭제'); renderCapture(r); };
 function renderCapture(r) { const el = $('#capInfo'); if (!el || !r) return; const mb = r.files.reduce((a, f) => a + f.bytes, 0) / 1e6; el.textContent = `${r.enabled ? '기록 중 · ' : ''}${r.files.length}개 파일 · ${mb.toFixed(1)} MB`; }
@@ -629,9 +626,7 @@ function renderTxHealth(s, L, T) {
   $('#linkTxt').textContent = !s.running ? '송출 정지' : !tgt ? '송출 대상 없음' : `송출 ${word} · ${cnum(con)}/${cnum(act)}`;
   $('#pillLink').title = tgt ? `송신 대상 ${tgt}` : '송신 대상 없음 (생성만)';
   const ht = $('#txHealthTarget'); if (!ht) return;
-  const via = s.backhaul && s.backhaul.mode !== 'direct' ? ` (${s.backhaul.mode === 'ssh_in' ? 'SSH 역방향 터널' : 'SSH 터널'}${s.backhaul.up ? '' : ' 끊김'})` : '';
-  ht.textContent = tgt ? `→ ${tgt}${via} · ${word}` : '송신 대상 없음 (생성만)';
-  try { renderBackhaul(s); } catch (e) { console.error('backhaul card', e); }   // 카드 오류가 대시보드 갱신을 멈추지 않게
+  ht.textContent = tgt ? `→ ${tgt} · ${word}` : '송신 대상 없음 (생성만)';
   $('#txHealthKpis').innerHTML =
     kpi('연결 게이트웨이', `${cnum(con)} / ${cnum(act)}`, { ok: 'ok', warn: 'warn', err: 'err' }[st] || '', `${exact(con)} / ${exact(act)} (전체 ${exact(s.gateways)})`) +
     kpi('유실 프레임', cnum(loss), loss ? 'err' : 'ok', `미연결 ${exact(T.drop_noconn)} · 적체 ${exact(T.drop_backlog)} · SAF 초과 ${exact(T.drop_saf)}`) +
@@ -639,26 +634,10 @@ function renderTxHealth(s, L, T) {
     kpi('저장 후 전송', T.saf_bytes ? `${cbytes(T.saf_bytes)} · ${cnum(T.saf_gateways)} GW` : '없음', T.saf_bytes ? 'warn' : '') +
     kpi('틱 오버런', cnum(T.overruns), T.overruns ? 'warn' : '', exact(T.overruns));
 }
-// 보안 백홀 카드: 상태 한 줄 + 지표. ssh_in 이면 회사 쪽에서 칠 명령을 그대로 보여준다.
-function renderBackhaul(s) {
-  const b = s.backhaul, el = $('#bhState'); if (!b || !el) return;
-  const mode = b.mode, up = b.up;
-  const word = mode === 'direct' ? '사용 안 함' : up ? `연결됨 (${fmt(b.since_s / 60, 0)}분)` : `끊김 (${fmt(b.since_s / 60, 0)}분)`;
-  el.textContent = mode === 'direct' ? '' : `· ${word}`; el.className = 'sub ' + (mode === 'direct' ? '' : up ? 'ok' : 'err');
-  $$('.bh-out').forEach(x => x.hidden = mode !== 'ssh_out');
-  const help = $('#bhHelp');
-  if (mode === 'ssh_in') help.innerHTML = `회사 PC에서 (아웃바운드 SSH 하나면 됩니다; 끊기면 autossh 로 다시 잇게): <code>${esc(b.inbound_hint)}</code><br>터널이 서면 워커는 <b>${esc(b.effective_target)}</b> 로 보내고, 이 장비의 sshd 가 회사 라우터까지 전달합니다. 위 [소켓 모드]를 <b>워커당 1개</b>로 두면 SSH 채널 3개로 끝납니다.`;
-  else if (mode === 'ssh_out') help.innerHTML = `이 장비가 점프호스트로 <code>${esc(b.command || 'ssh -N -L 127.0.0.1:' + b.local_port + ':<원격 라우터> <계정>@<점프호스트>')}</code> 를 띄우고 감독합니다 (끊기면 3→60초 백오프로 재시작). 키는 비밀번호 없는 개인키, known_hosts 는 데이터 폴더에 자동 저장.${b.last_error ? `<br><span class="err">마지막 오류: ${esc(b.last_error)}</span>` : ''}`;
-  else help.textContent = '라우터가 다른 망(회사)에 있으면 SSH 터널을 골라 원격 전송을 실험할 수 있습니다. 터널이 끊긴 동안은 저장 후 전송이 프레임을 보관했다가 복구 뒤 재전송합니다.';
-  $('#bhKpis').innerHTML = mode === 'direct' ? '' :
-    kpi('터널', up ? '연결' : '끊김', up ? 'ok' : 'err', b.effective_target) + kpi('단절 횟수', cnum(b.downs), b.downs ? 'warn' : '') +
-    kpi('누적 단절', `${fmt(b.down_total_s, 0)} s`, '', `마지막 ${fmt(b.last_down_s, 0)}초`) + kpi('복구→버퍼 소진', b.recover_s == null ? '-' : `${fmt(b.recover_s, 0)} s`, '', '복구 뒤 저장분 재전송이 끝나기까지') +
-    (mode === 'ssh_out' ? kpi('ssh 재시작', cnum(b.restarts), '', b.ssh_pid ? `pid ${b.ssh_pid}` : '프로세스 없음') : '');
-}
 function renderTxHealthEvents() {
   const box = $('#txHealthEvents'); if (!box) return;
-  const ev = evAll.filter(e => e.kind === 'tx' || e.kind === 'backhaul').slice(-6).reverse();
-  box.innerHTML = ev.length ? ev.map(e => `<div class="ev tx lvl-${e.level || ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${e.kind === 'backhaul' ? '백홀' : ({ error: '오류', warn: '경고', info: '복구' }[e.level] || e.kind)}</span><span>${esc(e.msg)}</span></div>`).join('')
+  const ev = evAll.filter(e => e.kind === 'tx').slice(-6).reverse();
+  box.innerHTML = ev.length ? ev.map(e => `<div class="ev tx lvl-${e.level || ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${{ error: '오류', warn: '경고', info: '복구' }[e.level] || e.kind}</span><span>${esc(e.msg)}</span></div>`).join('')
     : '<div class="sub">기록 없음 — 송출이 끊기거나 유실이 생기면 여기에 남습니다</div>';
 }
 // 값 뒤의 단위(KB/s, GB, %)는 작게 — 숫자는 크게 보이고 칸은 넘지 않게
@@ -719,7 +698,7 @@ async function pollEvents() {
   } catch (e) { }
 }
 const evKindLabel = (e) => e.kind === 'tx' ? ({ error: '송출 오류', warn: '송출 경고', info: '송출 복구' }[e.level] || '송출') : (EVKIND_KO[e.kind] || e.kind);   // 로그 종류 한글 (함수 선언이 아니라 아래 상수를 쓰므로 호출 시점에만 참조)
-const EVKIND_KO = { clinical: '임상', tx: '송출', backhaul: '백홀', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트', test: '현장 테스트' };
+const EVKIND_KO = { clinical: '임상', tx: '송출', adt: '입퇴원', patch: '패치', gateway: '게이트웨이', network: '네트워크', link: '연결', rhythm: '리듬', exam: '검사', autotune: '성능시험', system: '시스템', error: '오류', script: '스크립트', test: '현장 테스트' };
 function renderLog() {
   const f = $('#logFilter').value, list = evAll.slice().reverse().filter(e => !f || e.kind === f);
   $('#logEvents').innerHTML = list.length ? list.map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${esc(e.msg)}</span></div>`).join('')

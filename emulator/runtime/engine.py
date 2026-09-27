@@ -80,9 +80,6 @@ class Engine:
         if self.bank.is_ready():
             self.bank.load()
         self._init_world()
-        from .backhaul import Backhaul                         # 보안 백홀(SSH 터널) 감시·감독 — 월드와 무관하게 프로세스당 하나
-        from ..config import BASE_DIR
-        self.backhaul = Backhaul(self.cfg, self.log, state_dir=str(BASE_DIR), stats_fn=lambda: self.stats(history=False))
 
     # ---------------------------------------------------------------- setup
     def _make_bank(self) -> LoopBank:
@@ -214,10 +211,6 @@ class Engine:
 
     def shutdown(self):
         self._stop.set()
-        try:
-            self.backhaul.stop()
-        except Exception:
-            pass
         self.stop()
         try:
             self.world.db.close()
@@ -284,8 +277,7 @@ class Engine:
         w = self.world
         st = w.st
         return {"running": self.running, "uptime_s": (time.time() - self.started_at) if self.running else 0, "generate_only": bool(st.ctl[CTL["generate_only"]] > 0),
-                "target": {"ip": st.get_target(), "port": int(st.ctl[CTL["target_port"]]), "via": self.backhaul.mode if getattr(self, "backhaul", None) else "direct"},
-                "backhaul": self.backhaul.status() if getattr(self, "backhaul", None) else None, "last": last,
+                "target": {"ip": st.get_target(), "port": int(st.ctl[CTL["target_port"]])}, "last": last,
                 "history": [{"t": e["t"], "pkts_ps": e["pkts_ps"], "bytes_ps": e["bytes_ps"], "drop_backlog_ps": e["drop_backlog_ps"], "drop_emul_ps": e["drop_emul_ps"]} for e in self._stats_hist[-120:]] if history else [],
                 "world_step_ms": round(getattr(self, "world_step_ms", 0.0), 2), "world_step_max_ms": round(getattr(self, "world_step_max_ms", 0.0), 2),
                 "counters": dict(w.counters), "admitted": len(w.admitted), "inpatients": sum(1 for r in w.admitted.values() if not r["outpatient"]),
