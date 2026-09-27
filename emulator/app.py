@@ -973,7 +973,7 @@ def emr_floor_map(building_idx: int, floor: int):
     S = w.st.stat.arr
     pats = []
     now = w.sim_time
-    for pid, rec in w.admitted.items():
+    for pid, rec in list(w.admitted.items()):                     # 월드 스레드가 입퇴원 중일 수 있다
         loc = rec["location"]
         if loc < 0:
             continue
@@ -1044,7 +1044,7 @@ def emr_gateway_patients(idx: int):
     g = h.gateways[idx]
     out = []
     with w.lock:
-        for pid, rec in w.admitted.items():
+        for pid, rec in list(w.admitted.items()):
             if rec["gw"] != idx:
                 continue
             prof = w.by_id[pid]
@@ -1169,7 +1169,7 @@ def emr_admissions():
     w = E().world
     h = w.hospital
     out = []
-    for pid, rec in w.admitted.items():
+    for pid, rec in list(w.admitted.items()):
         p = w.by_id[pid]
         patch = w.patches.get(rec["row"])
         out.append({"patient_id": rec.get("patient_no"), "profile_id": pid, "mrn": p["mrn"], "name": p["name"], "patch_id": patch.patch_id if patch else None, "patch_serial": patch.serial if patch else None,
@@ -1217,7 +1217,7 @@ def control_devices_apply(body: dict | None = None):
 @app.get("/api/v1/emr/schedules")
 def emr_schedules():
     w = E().world
-    return {"schedules": [{"patient_id": pid, "name": w.by_id[pid]["name"], "exams": rec["exams"]} for pid, rec in w.admitted.items() if rec["exams"]]}
+    return {"schedules": [{"patient_id": pid, "name": w.by_id[pid]["name"], "exams": rec["exams"]} for pid, rec in list(w.admitted.items()) if rec["exams"]]}
 
 
 @app.get("/api/v1/emr/patches")

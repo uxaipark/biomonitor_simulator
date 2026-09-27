@@ -1036,7 +1036,10 @@ class World:
         prof = self.by_id[rec["id"]]
         now = self.sim_time
         # exam schedule
-        if rec["trip"] or rec["trip_step_until"] > now:
+        # 마지막 단계가 끝난 이동도 여기서 마무리한다(stage_label 이 남아 있음): 예전에는 남은 단계가 없고 시간이 지나면
+        # 조건이 거짓이라 정리(병실 복귀·메모 지움·게이트웨이 재연결)가 영영 안 돼, 화장실·복도 보행·샤워를 다녀온 환자가
+        # 복도 1 에 계속 쌓였다 (도면의 큰 인원 배지, 복도 게이트웨이 32/32 포화).
+        if rec["trip"] or rec["trip_step_until"] > now or rec.get("stage_label"):
             if now >= rec["trip_step_until"]:
                 self._next_trip_step(rec)
             return
