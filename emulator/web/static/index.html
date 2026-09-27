@@ -369,7 +369,18 @@
       <div class="row"><div class="field"><span>번들 주기 (ms)</span><input type="number" id="t_bundle" min="50" max="2000" step="50"></div></div>
       <div class="row"><div class="field"><span>META 전송 주기 (프레임)</span><input type="number" id="t_meta" min="1" max="1000"></div><div class="field"><span>GW 상태 주기 (프레임)</span><input type="number" id="t_gws" min="1" max="1000"></div></div>
       <div class="row"><div class="field"><span>워커 프로세스 (0=자동)</span><input type="number" id="t_workers" min="0" max="16"></div><div class="field"><span>송신 백로그 한도 (bytes)</span><input type="number" id="t_backlog" min="4096" step="4096"></div></div>
+      <div class="row"><div class="field"><span>소켓 모드</span><select id="t_sock"><option value="per_gateway">게이트웨이마다 TCP 1개 (현실적, 기본)</option><option value="shared">워커당 TCP 1개로 다중화 (터널·WAN 권장)</option></select></div></div>
       <div class="help">전송 설정은 즉시 반영됩니다 (워커가 소켓을 재연결).</div>
+    </div></div>
+    <div class="card tx-backhaul" data-apply="now"><h3><button class="fold" data-fold="txb-3" aria-expanded="true">▾</button>보안 백홀 (원격 라우터로 SSH 터널 경유) <span class="sub" id="bhState"></span></h3><div class="scnb" id="txb-3">
+      <div class="row"><div class="field" style="flex:2"><span>경로</span><select id="bh_mode"><option value="direct">직접 접속 — 라우터가 같은 망에 있음</option><option value="ssh_in">SSH 역방향 터널 — 회사에서 이 장비로 ssh -R 로 들어옴</option><option value="ssh_out">SSH 아웃바운드 터널 — 이 장비가 점프호스트로 ssh -L 을 엶</option></select></div><div class="field"><span>터널 진입 포트 (127.0.0.1)</span><input type="number" id="bh_port" min="1" max="65535"></div><div class="field"><span>keepalive (초)</span><input type="number" id="bh_keep" min="3" max="120"></div></div>
+      <div class="bh-out" hidden>
+        <div class="row"><div class="field" style="flex:2"><span>점프호스트</span><input type="text" id="bh_host" placeholder="예: jump.company.com"></div><div class="field"><span>SSH 포트</span><input type="number" id="bh_sshport" min="1" max="65535"></div><div class="field"><span>계정</span><input type="text" id="bh_user" placeholder="예: biosig"></div></div>
+        <div class="row"><div class="field" style="flex:2"><span>개인키 경로 (biosim 계정이 읽을 수 있어야)</span><input type="text" id="bh_key" placeholder="/var/lib/biosim/backhaul_key"></div><div class="field" style="flex:2"><span>원격 대상 host:port (비우면 위 라우터 주소)</span><input type="text" id="bh_remote" placeholder="예: 10.0.0.5:9100"></div></div>
+        <div class="row"><div class="field" style="flex:2"><span>추가 ssh 옵션</span><input type="text" id="bh_extra" placeholder="예: -o ProxyJump=bastion"></div></div>
+      </div>
+      <div class="help" id="bhHelp"></div>
+      <div class="kpis" id="bhKpis"></div>
     </div></div>
     <div class="card tx-stats"><h3><button class="fold" data-fold="txb-2" aria-expanded="true">▾</button>전송 통계</h3><div class="scnb" id="txb-2"><div class="kpis" id="txKpis"></div>
       <h3 style="margin-top:10px">워커</h3><div class="tbl" style="max-height:30vh"><table id="wTable"><thead><tr><th>#</th><th>alive</th><th>패치</th><th>GW</th><th>ticks</th><th>overrun</th><th>build µs</th><th>send µs</th></tr></thead><tbody></tbody></table></div>
