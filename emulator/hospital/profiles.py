@@ -5,7 +5,7 @@ import datetime as dt
 
 import numpy as np
 
-from .names import korean_name, foreign_name, NATION_LABEL
+from .names import korean_name, foreign_name, overseas_name, NATION_LABEL
 
 # name, icd10, ward specialty, rhythm weights, temp weights, glucose weights, resp kind weights, pacemaker prob
 HEART_DISEASES = [
@@ -174,10 +174,60 @@ def make_address(rng: np.random.Generator) -> dict:
     return {"sido": sido, "sigungu": sigungu, "dong": dong, "label": f"{sido} {sigungu} {dong}"}
 
 
+# 해외 체류 MCOT 환자의 거주지 (지역, 도시, 시간대) · 국가번호 · 현지 통신사 — 주요 고객국 13개국
+RESIDENCE = {
+    "US": {"dial": "+1", "carriers": ["Verizon", "AT&T", "T-Mobile"],
+           "places": [("New York", "Brooklyn", "America/New_York"), ("New Jersey", "Fort Lee", "America/New_York"), ("California", "Los Angeles", "America/Los_Angeles"),
+                      ("California", "San Jose", "America/Los_Angeles"), ("Texas", "Houston", "America/Chicago"), ("Illinois", "Chicago", "America/Chicago"),
+                      ("Florida", "Miami", "America/New_York"), ("Washington", "Seattle", "America/Los_Angeles"), ("Georgia", "Atlanta", "America/New_York")]},
+    "JP": {"dial": "+81", "carriers": ["NTT docomo", "au", "SoftBank"],
+           "places": [("東京都", "新宿区", "Asia/Tokyo"), ("東京都", "世田谷区", "Asia/Tokyo"), ("大阪府", "大阪市", "Asia/Tokyo"), ("神奈川県", "横浜市", "Asia/Tokyo"),
+                      ("愛知県", "名古屋市", "Asia/Tokyo"), ("福岡県", "福岡市", "Asia/Tokyo")]},
+    "GB": {"dial": "+44", "carriers": ["EE", "Vodafone", "O2", "Three"],
+           "places": [("Greater London", "Camden", "Europe/London"), ("Greater London", "Croydon", "Europe/London"), ("Greater Manchester", "Manchester", "Europe/London"),
+                      ("West Midlands", "Birmingham", "Europe/London"), ("West Yorkshire", "Leeds", "Europe/London"), ("Scotland", "Edinburgh", "Europe/London")]},
+    "DE": {"dial": "+49", "carriers": ["Telekom", "Vodafone", "O2"],
+           "places": [("Berlin", "Berlin", "Europe/Berlin"), ("Bayern", "München", "Europe/Berlin"), ("Hamburg", "Hamburg", "Europe/Berlin"), ("Hessen", "Frankfurt am Main", "Europe/Berlin"),
+                      ("Nordrhein-Westfalen", "Köln", "Europe/Berlin"), ("Nordrhein-Westfalen", "Düsseldorf", "Europe/Berlin")]},
+    "FR": {"dial": "+33", "carriers": ["Orange", "SFR", "Bouygues", "Free"],
+           "places": [("Île-de-France", "Paris", "Europe/Paris"), ("Auvergne-Rhône-Alpes", "Lyon", "Europe/Paris"), ("Provence-Alpes-Côte d'Azur", "Marseille", "Europe/Paris"), ("Occitanie", "Toulouse", "Europe/Paris")]},
+    "NL": {"dial": "+31", "carriers": ["KPN", "Vodafone", "Odido"],
+           "places": [("Noord-Holland", "Amsterdam", "Europe/Amsterdam"), ("Zuid-Holland", "Rotterdam", "Europe/Amsterdam"), ("Utrecht", "Utrecht", "Europe/Amsterdam"), ("Noord-Brabant", "Eindhoven", "Europe/Amsterdam")]},
+    "ES": {"dial": "+34", "carriers": ["Movistar", "Vodafone", "Orange"],
+           "places": [("Madrid", "Madrid", "Europe/Madrid"), ("Cataluña", "Barcelona", "Europe/Madrid"), ("Valencia", "Valencia", "Europe/Madrid"), ("Andalucía", "Sevilla", "Europe/Madrid")]},
+    "IT": {"dial": "+39", "carriers": ["TIM", "Vodafone", "WindTre"],
+           "places": [("Lazio", "Roma", "Europe/Rome"), ("Lombardia", "Milano", "Europe/Rome"), ("Campania", "Napoli", "Europe/Rome"), ("Piemonte", "Torino", "Europe/Rome")]},
+    "BR": {"dial": "+55", "carriers": ["Vivo", "Claro", "TIM"],
+           "places": [("São Paulo", "São Paulo", "America/Sao_Paulo"), ("Rio de Janeiro", "Rio de Janeiro", "America/Sao_Paulo"), ("Minas Gerais", "Belo Horizonte", "America/Sao_Paulo"), ("Paraná", "Curitiba", "America/Sao_Paulo")]},
+    "MX": {"dial": "+52", "carriers": ["Telcel", "AT&T", "Movistar"],
+           "places": [("Ciudad de México", "Ciudad de México", "America/Mexico_City"), ("Jalisco", "Guadalajara", "America/Mexico_City"), ("Nuevo León", "Monterrey", "America/Monterrey")]},
+    "CL": {"dial": "+56", "carriers": ["Entel", "Movistar", "WOM"],
+           "places": [("Región Metropolitana", "Santiago", "America/Santiago"), ("Valparaíso", "Viña del Mar", "America/Santiago")]},
+    "CO": {"dial": "+57", "carriers": ["Claro", "Movistar", "Tigo"],
+           "places": [("Bogotá D.C.", "Bogotá", "America/Bogota"), ("Antioquia", "Medellín", "America/Bogota"), ("Valle del Cauca", "Cali", "America/Bogota")]},
+    "AR": {"dial": "+54", "carriers": ["Personal", "Claro", "Movistar"],
+           "places": [("Buenos Aires", "Buenos Aires", "America/Argentina/Buenos_Aires"), ("Córdoba", "Córdoba", "America/Argentina/Cordoba"), ("Santa Fe", "Rosario", "America/Argentina/Cordoba")]},
+}
+
+
+def make_overseas_residence(rng: np.random.Generator, code: str) -> tuple[dict, str]:
+    """해외 체류 환자의 거주지(국가·지역·도시·시간대·현지 통신사)와 국제 전화번호.  address 와 같은 키(sido/sigungu/dong/label)를 유지해
+    거주지를 보는 모든 화면·API 가 그대로 동작하고, overseas/country/tz/carrier 가 덧붙는다."""
+    r = RESIDENCE[code]
+    region, city, tz = r["places"][int(rng.integers(len(r["places"])))]
+    carrier = r["carriers"][int(rng.integers(len(r["carriers"])))]
+    label = NATION_LABEL[code]
+    addr = {"sido": label, "sigungu": region, "dong": city, "label": f"{label} · {region} {city}" if code == "JP" else f"{label} · {city}, {region}",
+            "overseas": True, "country": code, "country_label": label, "region": region, "city": city, "tz": tz, "carrier": carrier}
+    phone = f"{r['dial']} {rng.integers(200, 999)}-{rng.integers(100, 999)}-{rng.integers(1000, 9999)}"
+    return addr, phone
+
+
 def make_profiles(n: int, seed: int, heart_ratio: float = 0.7, korean_ratio: float = 0.9,
-                  pacemaker_ratio: float = 0.06, today: dt.date | None = None) -> list[dict]:
+                  pacemaker_ratio: float = 0.06, today: dt.date | None = None, overseas_pool: float = 0.08) -> list[dict]:
     rng = np.random.default_rng(seed)
     addr_rng = np.random.default_rng(seed ^ 0xADD2E55)       # addresses draw from their own stream: the roster for a seed stays byte-identical
+    ovs_rng = np.random.default_rng(seed ^ 0x0BE55EA5)       # 해외 체류자(MCOT 전용 풀)도 별도 난수열: 나머지 프로필은 그대로
     today = today or dt.date.today()
     out = []
     for i in range(n):
@@ -215,6 +265,12 @@ def make_profiles(n: int, seed: int, heart_ratio: float = 0.7, korean_ratio: flo
             resp_k = "copd"
         mobility = _pick(rng, {"bedridden": 1 + (age > 80) * 2 + (dis["name"].startswith("고관절")) * 4,
                                "limited": 4 + (age > 70) * 2, "ambulatory": 5 - (age > 75) * 2})
+        phone = f"010-{rng.integers(1000, 9999):04d}-{rng.integers(1000, 9999):04d}"
+        address = make_address(addr_rng)
+        overseas = ovs_rng.random() < overseas_pool             # 해외 체류 외국인: 원외 MCOT 로만 부착된다 (world.admit)
+        if overseas:
+            name, nat = overseas_name(ovs_rng, sex)
+            address, phone = make_overseas_residence(ovs_rng, nat)
         out.append({
             "id": i + 1,
             "mrn": f"MRN-{(seed % 97) * 100000 + 10000000 + i:08d}",
@@ -227,8 +283,7 @@ def make_profiles(n: int, seed: int, heart_ratio: float = 0.7, korean_ratio: flo
             "ward_specialty": dis["ward"], "comorbidities": comorb,
             "pacemaker": bool(pacemaker), "pacemaker_info": pm_info, "rhythm": rhythm,
             "temp_profile": temp_p, "glucose_profile": gluc_p, "resp_kind": resp_k, "mobility": mobility,
-            "phone": f"010-{rng.integers(1000, 9999):04d}-{rng.integers(1000, 9999):04d}",
-            "address": make_address(addr_rng),
+            "phone": phone, "address": address, "overseas": overseas,
             "emergency_contact": ("배우자" if age > 40 else "부모") if rng.random() < 0.7 else "자녀",
             "avatar": None,          # filled by avatars.assign
         })

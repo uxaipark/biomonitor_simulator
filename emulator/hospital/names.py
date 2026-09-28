@@ -78,7 +78,40 @@ FOREIGN = {
     "ID": {"w": 0.03, "surn": ["Santoso", "Wijaya", "Putra", "Saputra", "Hidayat"], "M": ["Budi", "Agus", "Andi", "Dedi", "Rizky"], "F": ["Siti", "Dewi", "Sri", "Ayu", "Putri"]},
 }
 NATION_LABEL = {"KR": "대한민국", "CN": "중국", "VN": "베트남", "US": "미국", "TH": "태국", "UZ": "우즈베키스탄",
-                "PH": "필리핀", "JP": "일본", "RU": "러시아", "NP": "네팔", "ID": "인도네시아"}
+                "PH": "필리핀", "JP": "일본", "RU": "러시아", "NP": "네팔", "ID": "인도네시아",
+                "GB": "영국", "DE": "독일", "FR": "프랑스", "NL": "네덜란드", "ES": "스페인", "IT": "이탈리아",
+                "BR": "브라질", "MX": "멕시코", "CL": "칠레", "CO": "콜롬비아", "AR": "아르헨티나"}
+
+# 해외 체류 MCOT 환자(주요 고객국).  한국 거주 외국인(FOREIGN: 중국·베트남 중심)과는 다른 분포 — 미국·일본·영국·독일·유럽·남미.
+# 가중치는 고객 비중 순: 미국 30 · 일본 20 · 영국 10 · 독일 10 · 유럽 기타 15 · 남미 15.
+OVERSEAS = {
+    "US": {**FOREIGN["US"], "w": 0.30},
+    "JP": {**FOREIGN["JP"], "w": 0.20},
+    "GB": {"w": 0.10, "surn": ["Smith", "Jones", "Taylor", "Williams", "Brown", "Davies", "Evans", "Wilson", "Thomas", "Roberts"],
+           "M": ["Oliver", "George", "Harry", "Jack", "James", "William", "Thomas", "Charlie"], "F": ["Olivia", "Amelia", "Isla", "Emily", "Sophie", "Grace", "Charlotte", "Lily"]},
+    "DE": {"w": 0.10, "surn": ["Müller", "Schmidt", "Schneider", "Fischer", "Weber", "Meyer", "Wagner", "Becker"],
+           "M": ["Lukas", "Leon", "Paul", "Jonas", "Felix", "Maximilian", "Hans", "Thomas"], "F": ["Anna", "Lena", "Laura", "Julia", "Sophie", "Marie", "Katharina", "Sabine"]},
+    "FR": {"w": 0.05, "surn": ["Martin", "Bernard", "Dubois", "Thomas", "Robert", "Richard", "Petit", "Durand"],
+           "M": ["Jean", "Pierre", "Louis", "Lucas", "Hugo", "Nicolas", "Julien", "Michel"], "F": ["Marie", "Camille", "Léa", "Chloé", "Manon", "Sophie", "Isabelle", "Nathalie"]},
+    "NL": {"w": 0.03, "surn": ["de Jong", "Jansen", "de Vries", "van den Berg", "Bakker", "Visser"],
+           "M": ["Daan", "Sem", "Lucas", "Jan", "Pieter", "Thomas"], "F": ["Emma", "Julia", "Sophie", "Anna", "Lotte", "Sanne"]},
+    "ES": {"w": 0.04, "surn": ["García", "Fernández", "González", "Rodríguez", "López", "Martínez", "Sánchez"],
+           "M": ["Antonio", "José", "Manuel", "Javier", "Carlos", "Alejandro"], "F": ["María", "Carmen", "Ana", "Laura", "Lucía", "Isabel"]},
+    "IT": {"w": 0.03, "surn": ["Rossi", "Russo", "Ferrari", "Esposito", "Bianchi", "Romano", "Colombo"],
+           "M": ["Francesco", "Alessandro", "Andrea", "Marco", "Giuseppe", "Luca"], "F": ["Giulia", "Sofia", "Francesca", "Chiara", "Anna", "Sara"]},
+    "BR": {"w": 0.06, "surn": ["Silva", "Santos", "Oliveira", "Souza", "Pereira", "Costa", "Ferreira"],
+           "M": ["João", "José", "Pedro", "Lucas", "Gabriel", "Rafael"], "F": ["Maria", "Ana", "Juliana", "Fernanda", "Camila", "Beatriz"]},
+    "MX": {"w": 0.04, "surn": ["Hernández", "García", "Martínez", "López", "González", "Pérez", "Ramírez"],
+           "M": ["José", "Juan", "Luis", "Carlos", "Miguel", "Jorge"], "F": ["María", "Guadalupe", "Juana", "Verónica", "Lucía", "Fernanda"]},
+    "CL": {"w": 0.02, "surn": ["González", "Muñoz", "Rojas", "Díaz", "Pérez", "Soto"],
+           "M": ["Benjamín", "Matías", "Sebastián", "Juan", "Cristóbal"], "F": ["Sofía", "Martina", "Catalina", "Isidora", "Valentina"]},
+    "CO": {"w": 0.02, "surn": ["Rodríguez", "Gómez", "González", "Martínez", "García", "Ramírez"],
+           "M": ["Santiago", "Andrés", "Juan", "Carlos", "Camilo"], "F": ["Valentina", "Mariana", "Daniela", "Laura", "Camila"]},
+    "AR": {"w": 0.01, "surn": ["González", "Rodríguez", "Gómez", "Fernández", "López", "Díaz"],
+           "M": ["Mateo", "Santiago", "Juan", "Martín", "Nicolás"], "F": ["Sofía", "Valentina", "Martina", "Lucía", "Camila"]},
+}
+_ovs_codes = list(OVERSEAS.keys())
+_ovs_w = np.array([OVERSEAS[c]["w"] for c in _ovs_codes]); _ovs_w /= _ovs_w.sum()
 
 _sur_names = [s for s, _ in KO_SURNAMES]
 _sur_w = np.array([w for _, w in KO_SURNAMES], dtype=np.float64)
@@ -113,6 +146,15 @@ def foreign_name(rng: np.random.Generator, sex: str) -> tuple[str, str]:
     else:
         name = f"{given} {sur}"
     return name, code
+
+
+def overseas_name(rng: np.random.Generator, sex: str) -> tuple[str, str]:
+    """해외 체류 MCOT 환자 이름 + 국적 코드 (OVERSEAS 분포)."""
+    code = _ovs_codes[int(rng.choice(len(_ovs_codes), p=_ovs_w))]
+    d = OVERSEAS[code]
+    sur = d["surn"][int(rng.integers(len(d["surn"])))]
+    given = d[sex][int(rng.integers(len(d[sex])))]
+    return (f"{sur} {given}" if code == "JP" else f"{given} {sur}"), code
 
 
 def staff_name(rng: np.random.Generator, sex: str) -> str:

@@ -337,7 +337,7 @@ function linkStop() { if (linkTimer) { clearInterval(linkTimer); linkTimer = nul
 
 // ---------------------------------------------------------------- config binding
 const B = {  // element id -> config path
-  g_active: ['general', 'active_patients'], g_out: ['general', 'outpatient_count'], g_adm: ['general', 'admissions_per_hour'], g_dis: ['general', 'discharges_per_hour'],
+  g_active: ['general', 'active_patients'], g_out: ['general', 'outpatient_count'], g_ovs: ['general', 'overseas_ratio'], g_adm: ['general', 'admissions_per_hour'], g_dis: ['general', 'discharges_per_hour'],
   g_speed: ['general', 'sim_speed'], g_beds: ['general', 'bed_capacity'], g_prof: ['general', 'profile_count'], g_seed: ['general', 'seed'], g_pseed: ['general', 'profile_seed'], s_bseed: ['signals', 'bank_seed'], g_heart: ['general', 'heart_disease_ratio'], g_kr: ['general', 'korean_ratio'],
   s_ep: ['scenario', 'rhythm_episodes'], s_hop: ['scenario', 'variant_hopping'], s_devpol: ['scenario', 'devices', 'policy'], d_mf: ['scenario', 'devices', 'spo2_mix', 'fingertip'], d_mr: ['scenario', 'devices', 'spo2_mix', 'ring'], d_mw: ['scenario', 'devices', 'spo2_mix', 'wrist_ptt'], n_en: ['scenario', 'network', 'enabled'], n_int: ['scenario', 'network', 'intensity'], n_wl: ['scenario', 'network', 'wireless_noise'], n_wd: ['scenario', 'network', 'wired_failure'], n_lat: ['scenario', 'network', 'latency'], n_pw: ['scenario', 'network', 'power_outage'],
   x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_tr: ['scenario', 'artifacts', 'transfer'], a_hm: ['scenario', 'artifacts', 'home_interference'],
@@ -634,6 +634,9 @@ function renderTxHealth(s, L, T) {
     kpi('저장 후 전송', T.saf_bytes ? `${cbytes(T.saf_bytes)} · ${cnum(T.saf_gateways)} GW` : '없음', T.saf_bytes ? 'warn' : '') +
     kpi('틱 오버런', cnum(T.overruns), T.overruns ? 'warn' : '', exact(T.overruns));
 }
+// 해외 체류 MCOT: 현지 시각(시간대)·통신사 표시
+function localClock(tz) { try { return new Intl.DateTimeFormat('ko-KR', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); } catch (e) { return ''; } }
+function abroadTitle(ab) { return ab ? `${ab.country_label || ''} ${ab.region || ''} ${ab.city || ''} · 현지 ${localClock(ab.tz)} (${ab.tz || ''}) · ${ab.carrier || ''}` : ''; }
 function renderTxHealthEvents() {
   const box = $('#txHealthEvents'); if (!box) return;
   const ev = evAll.filter(e => e.kind === 'tx').slice(-6).reverse();
@@ -874,7 +877,7 @@ async function loadPatCard() {
     applySwitches(r);
     const chs = new Set(r.channels || []); if (r.channels) { $('#boxPpg').style.display = chs.has('ppg') ? '' : 'none'; $('#boxResp').style.display = chs.has('resp_wave') ? '' : 'none'; $('#boxAcc').style.display = chs.has('accel') ? '' : 'none'; }
     $('#patInfo').innerHTML = `<div class="patbody"><div class="patient"><img src="/api/v1/emr/patients/${p.id}/avatar.svg" alt=""><div class="info"><b>${p.name}</b> <span class="sub">${p.sex === 'M' ? '남' : '여'} ${p.age}세 · ${p.nationality_label} · ${p.weight_kg}kg</span>
-      <div>${p.disease} (${p.icd10})</div><div>환자번호 #${r.patient_no ?? '-'} · ${p.mrn} · ${a.ward_name || ''} ${a.bed || ''}</div><div class="sub">거주지 ${p.address ? p.address.label : '-'}</div></div></div>
+      <div>${p.disease} (${p.icd10})</div><div>환자번호 #${r.patient_no ?? '-'} · ${p.mrn} · ${a.ward_name || ''} ${a.bed || ''}</div><div class="sub">거주지 ${p.address ? p.address.label : '-'}${p.overseas ? ` · <span class="tag warn">해외 체류</span>${r.abroad ? ` 현지 ${localClock(r.abroad.tz)} · ${esc(r.abroad.carrier || '')} ${esc(r.abroad.tz || '')}` : ''}` : ''}</div></div></div>
       <table class="info" style="margin-top:8px"><tr><td>현재 리듬</td><td>${r.rhythm_now || '-'} ${r.episode ? '<span class="tag warn">에피소드</span>' : ''}</td></tr>
       ${a.monitoring ? `<tr><td>모니터링 처방</td><td><b>${a.monitoring.tier_ko} ${a.monitoring.days}일</b>${a.monitoring.extended_days ? ` <span class="tag warn">연장 +${a.monitoring.extended_days}일</span>` : ''} · D+${r.rx_day ?? '-'} · 남은 ${fmtLeftH(r.rx_left_h)} · 위중도 ${a.monitoring.acuity}<div class="sub">패치 착용 ${r.patch_wear_days ?? '-'}일 / 최대 14일 · ${a.monitoring.start.replace('T', ' ').slice(5, 16)} ~ ${a.monitoring.end.replace('T', ' ').slice(5, 16)}</div></td></tr>` : ''}
       <tr><td>기저 리듬</td><td>${META && META.rhythms[p.rhythm] ? META.rhythms[p.rhythm].label : p.rhythm}</td></tr>
@@ -907,10 +910,11 @@ async function loadPatients(force = false) {
   const st = $('#patStatus').value, q = $('#patQ').value.trim(), ck = st + '|' + q;
   if (force || patCache.key !== ck) {
     // 입원만/MCOT만은 모니터링 중 목록을 받아 outpatient 플래그로 거른다 (서버 버전과 무관하게 동작)
-    const qs = st === 'inpatient' || st === 'mcot' ? 'admitted' : st;
+    const qs = st === 'inpatient' || st === 'mcot' || st === 'overseas' ? 'admitted' : st;
     const r = await api(`/emr/patients?status=${qs}&q=${encodeURIComponent(q)}&offset=0&limit=20000`);
     const src = st === 'inpatient' ? r.patients.filter(p => !p.outpatient)
-              : st === 'mcot' ? r.patients.filter(p => p.outpatient) : r.patients;
+              : st === 'mcot' ? r.patients.filter(p => p.outpatient)
+              : st === 'overseas' ? r.patients.filter(p => p.outpatient && p.overseas) : r.patients;
     patCache = { key: ck, items: src.map(p => ({ ...p, devn: (p.devices || []).length, rhythm_label: p.rhythm_label || (META && META.rhythms[p.rhythm] ? META.rhythms[p.rhythm].label : p.rhythm),
       bed: p.bed || (p.admission ? p.admission.bed : '') || '', gateway: p.gateway || '', activity: p.activity || p.status || '', battery: p.battery ?? -1, rssi: p.rssi ?? -999, patch_id: (p.patch_id ?? (p.admission ? p.admission.patch_id : 0)) || 0, patient_no: p.patient_no ?? (p.admission ? p.admission.patient_no : null) ?? -1, rx_days: p.rx_days ?? 0, rx_left_h: p.rx_left_h ?? 1e9, patch_wear_days: p.patch_wear_days ?? -1, ward: p.ward || (p.admission ? p.admission.ward_name : '') || '', specialty: p.specialty || p.ward_specialty || '' })) };
   }
@@ -923,7 +927,7 @@ async function loadPatients(force = false) {
   $('#patBody').innerHTML = items.slice(patPage * PAGE, (patPage + 1) * PAGE).map(p => `<div class="prow" data-id="${p.id}" data-row="${p.row ?? -1}">
     <div class="who"><img src="/api/v1/emr/patients/${p.id}/avatar.svg" loading="lazy" alt=""><div><div class="l1">${esc(p.name)} <span class="sub">${p.sex}/${p.age}</span></div><div class="l2">환자번호 #${p.patient_no ?? '-'} · 프로필 #${p.id} · ${esc(p.mrn || '')}</div></div></div>
     <div><div class="l1">${esc(p.disease)}${p.pacemaker ? ` <span class="tag warn">⚡${(p.pacemaker_type || (p.pacemaker_info && p.pacemaker_info.type)) === 'icd' ? 'ICD' : (p.pacemaker_mode || (p.pacemaker_info && p.pacemaker_info.mode) || 'PM')}</span>` : ''}</div><div class="l2">${esc(p.rhythm_label)}</div></div>
-    <div><div class="l1">${esc(p.bed || '-')}${p.ward ? ` <span class="sub">${esc(p.ward)}</span>` : ''}</div><div class="l2">${esc(p.specialty || '')}${p.specialty ? ' · ' : ''}${esc(p.gateway || (p.status === 'admitted' || p.status === 'outpatient' ? '연결 없음' : p.status || '-'))}</div></div>
+    <div><div class="l1">${esc(p.bed || '-')}${p.overseas ? ` <span class="tag warn" title="${esc(abroadTitle(p.abroad))}">해외 · ${esc((p.abroad && p.abroad.country_label) || '')}</span>` : ''}${p.ward ? ` <span class="sub">${esc(p.ward)}</span>` : ''}</div><div class="l2">${esc(p.specialty || '')}${p.specialty ? ' · ' : ''}${esc(p.gateway || (p.status === 'admitted' || p.status === 'outpatient' ? '연결 없음' : p.status || '-'))}</div></div>
     <div><div class="l1">${p.patch ? `${esc(p.patch)} <span class="sub">#${p.patch_id}</span>` : '-'}</div><div class="l2">${(p.devices || []).filter(x => x !== 'ecg_patch').map(x => DEV && DEV.devices[x] ? DEV.devices[x].short : x).join(' · ') || (p.devices ? 'ECG만' : '-')}</div></div>
     <div><div class="l1">${esc(p.activity || '-')}${p.note ? ` <span class="sub">${esc(p.note)}</span>` : ''}</div><div class="l2">${p.battery >= 0 ? battIcon(p.battery) : '-'} · RSSI ${p.rssi > -999 ? p.rssi : '-'}</div></div>
     <div title="${p.rx_days ? `모니터링 처방 ${esc(p.rx_tier)} ${p.rx_days}일${p.rx_extended ? ` (연장 ${p.rx_extended}일 포함)` : ''} · 위중도 ${p.rx_acuity} · 남은 ${fmtLeftH(p.rx_left_h)} · 패치 착용 ${p.patch_wear_days}일` : ''}">${p.rx_days ? `<div class="l1"><b>${p.rx_days}일</b> <span class="sub">${esc(p.rx_tier)}${p.rx_extended ? ' +연장' : ''}</span></div><div class="l2">D+${p.rx_day} · 남은 ${fmtLeftH(p.rx_left_h)}${p.patch_wear_days != null ? ` · 착용 ${p.patch_wear_days}일` : ''}</div>` : '<div class="l1">-</div>'}</div>

@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import bisect
 import collections
+import functools
 import datetime as dt
 import json
 import math
 import os
 import threading
 import time
+import zoneinfo
 from pathlib import Path
 
 import numpy as np
@@ -66,6 +68,17 @@ _MCOT_W = [w / w.sum() for w in _MCOT_W]
 
 MCOT_UPLINK = {"LTE": ((40.0, 90.0), (15.0, 40.0)), "5G": ((20.0, 45.0), (5.0, 20.0))}
 MCOT_OUTSIDE_EXTRA = ((20.0, 80.0), (20.0, 60.0))
+# 해외 체류 MCOT: 현지 이동통신망 → 국제 구간 → 한국 라우터까지 더해지는 왕복 지연(ms) 범위 (국가별)
+OVERSEAS_TRANSIT = {"US": (110.0, 170.0), "JP": (30.0, 60.0), "GB": (200.0, 260.0), "DE": (190.0, 250.0), "FR": (200.0, 260.0), "NL": (190.0, 250.0),
+                    "ES": (210.0, 270.0), "IT": (210.0, 270.0), "BR": (260.0, 340.0), "MX": (150.0, 220.0), "CL": (270.0, 350.0), "CO": (220.0, 300.0), "AR": (280.0, 360.0)}
+
+
+@functools.lru_cache(maxsize=64)
+def _tz(name: str):
+    try:
+        return zoneinfo.ZoneInfo(name)
+    except Exception:
+        return None
 META_DELTA_KEEP = 3          # delta file = union of the last N delta writes (tolerates a worker stall of ~2N s)
 META_FULL_S = 600.0          # full meta.json rewrite (reconciliation) at most this often unless forced
 PATCH_FW = "bp-fw 3.2.0"
@@ -503,20 +516,24 @@ class World:
                 counts[d] += 1
         return {"patients": len(self.admitted), "counts": counts}
 
-    def _pick_pool_patient(self, want_ward: bool = True) -> dict | None:
+    def _pick_pool_patient(self, want_ward: bool = True, overseas: bool = False) -> dict | None:
+        """대기 풀에서 다음 환자.  해외 체류 프로필(overseas)은 원외 MCOT 부착 때만 뽑히고, 입원 병상에는 절대 쓰이지 않는다."""
         n = len(self.profiles)
         for _ in range(n):
             p = self.profiles[self.pool_cursor % n]
             self.pool_cursor += 1
-            if p["status"] == "pool":
+            if p["status"] == "pool" and bool(p.get("overseas")) == overseas:
                 return p
         return None
 
     # ------------------------------------------------------------------ admissions
     def admit(self, prof: dict | None = None, outpatient: bool = False) -> dict | None:
         h = self.hospital
-        prof = prof or self._pick_pool_patient()
-        if prof is None or not self.free_rows:
+        if prof is None:
+            # 원외 부착의 일부는 해외 체류 외국인(general.overseas_ratio); 해외 풀이 비면 국내 환자로 대신한다
+            want_ovs = outpatient and self.rng.random() < float(self.cfg.get("general").get("overseas_ratio", 0.0) or 0.0)
+            prof = self._pick_pool_patient(overseas=want_ovs) or (self._pick_pool_patient(overseas=False) if want_ovs else None)
+        if prof is None or not self.free_rows or (prof.get("overseas") and not outpatient):
             return None
         row = self.free_rows.pop()
         patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착")
@@ -537,6 +554,13 @@ class World:
             self.st.gw["active"][free[0]] = 1
             self.gw_state[free[0]]["mobile_batt"] = float(self.rng.uniform(40, 100))
             self.st.gw["status"][free[0]] = 0
+            mg = h.gateways[free[0]]
+            if prof.get("overseas"):                                       # 해외 체류: 현지 망·시간대·통신사 (META abroad, 업링크 지연, 하루 생활 시각)
+                a = prof.get("address") or {}
+                mg["abroad"] = {"country": a.get("country"), "country_label": a.get("country_label"), "region": a.get("region"), "city": a.get("city"),
+                                "tz": a.get("tz"), "carrier": a.get("carrier")}
+            else:
+                mg.pop("abroad", None)
             self._mcot_uplink(free[0])
             rec["location"] = -1
             prof["status"] = "outpatient"
@@ -600,6 +624,8 @@ class World:
         self._unlink(rec)
         if rec["outpatient"] and rec["mobile_gw"] >= 0:
             self.st.gw["active"][rec["mobile_gw"]] = 0
+            self.gw_state[rec["mobile_gw"]]["base_lat"] = 0.0             # 다음 환자는 자기 망(국내/해외)의 기본 지연을 새로 뽑는다
+            self.hospital.gateways[rec["mobile_gw"]].pop("abroad", None)
         self.st.patch["active"][row] = 0
         self.st.patch["patient_id"][row] = 0
         if rec["bed_idx"] >= 0:
@@ -1233,6 +1259,11 @@ class World:
         if not gs["base_lat"]:
             lat, jit = MCOT_UPLINK.get(self.hospital.gateways[gw].get("radio", "LTE"), MCOT_UPLINK["LTE"])
             gs["base_lat"], gs["base_jit"] = float(self.rng.uniform(*lat)), float(self.rng.uniform(*jit))
+            ab = self.hospital.gateways[gw].get("abroad")
+            if ab:                                                         # 해외 체류: 현지 망 뒤에 국제 구간이 붙는다
+                tl = OVERSEAS_TRANSIT.get(ab.get("country"), (200.0, 280.0))
+                gs["base_lat"] += float(self.rng.uniform(*tl))
+                gs["base_jit"] += float(self.rng.uniform(8.0, 30.0))
         extra_l, extra_j = (self.rng.uniform(*MCOT_OUTSIDE_EXTRA[0]), self.rng.uniform(*MCOT_OUTSIDE_EXTRA[1])) if outside else (0.0, 0.0)
         pid = next((p for p, r in list(self.admitted.items()) if r.get("mobile_gw") == gw), None)
         if pid is not None and getattr(self, "real", None) and self.real.region_factor(self.by_id[pid]) > 1:
@@ -1271,7 +1302,9 @@ class World:
             return
         # 하루 생활 모델: 움직임은 아티팩트 시나리오와 무관한 이 환자군의 기본 성질이라 강도 설정과 관계없이 적용한다.
         # (아티팩트 강도는 움직임의 유무가 아니라 ECG에 실리는 잡음의 세기와 전파 간섭 빈도만 조절한다.)
-        hour = dt.datetime.fromtimestamp(now).hour
+        ab = self.hospital.gateways[gw].get("abroad")
+        tz = _tz(ab["tz"]) if ab and ab.get("tz") else None
+        hour = dt.datetime.fromtimestamp(now, tz).hour                       # 해외 체류자는 현지 시각으로 하루를 산다 (밤·아침·낮·저녁 대역)
         band = 0 if (hour >= 23 or hour < 6) else 1 if hour < 11 else 2 if hour < 18 else 3
         act, posture, art_rng, dur_rng, out_p, _ = MCOT_DAY[int(self.rng.choice(len(MCOT_DAY), p=_MCOT_W[band]))]
         art = float(self.rng.uniform(*art_rng)) * (0.45 + 0.55 * intensity)      # 움직이는 사람의 ECG는 시나리오와 무관하게 흔들린다
@@ -1773,6 +1806,8 @@ class World:
                      "bundle_ms": bundle, "channels_enabled": en, "patches": patches}
                 if g.get("radio"):                                  # MCOT mobile gateway: cellular uplink type
                     d["uplink"] = g["radio"]
+                    if g.get("abroad"):                             # 해외 체류: 국가·지역·시간대·현지 통신사 (추가 필드, 라우터는 무시해도 됨)
+                        d["abroad"] = g["abroad"]
                 elif getattr(self, "real", None) and self.real.meta_net(gw):   # 병원 GW: 유선/무선, 층 스위치·AP, 전원 계통
                     d["net"] = self.real.meta_net(gw)
                 ent = (sig, f'"{gw}":' + json.dumps(d, ensure_ascii=False, separators=(",", ":")))
@@ -2028,7 +2063,8 @@ class World:
                               "attach_tick": int(P["attach_tick"]), "tick_now": self._tick_now(),
                               "sim_speed": self.cfg.get("general", "sim_speed"),
                               "clinical": self._clinical_view(rec),
-                              "phone": (rec.get("phone") or {}).get("state") if rec["outpatient"] else None, **self._rx_row(rec)}
+                              "phone": (rec.get("phone") or {}).get("state") if rec["outpatient"] else None,
+                              "abroad": (h.gateways[rec["mobile_gw"]].get("abroad") if rec["outpatient"] and rec["mobile_gw"] >= 0 else None), **self._rx_row(rec)}
         return out
 
     def _clinical_view(self, rec: dict) -> dict | None:
@@ -2085,6 +2121,7 @@ class World:
                         "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "activity": rec["activity"], "note": rec["note"],
                         "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]),
                         "patch": self.patches[row].serial if row in self.patches else None, "row": row, "outpatient": rec["outpatient"],
+                        "overseas": bool(prof.get("overseas")), "abroad": (h.gateways[rec["mobile_gw"]].get("abroad") if rec["outpatient"] and rec["mobile_gw"] >= 0 else None),
                         "episode": bool(rec["episode_until"]), **self._rx_row(rec)})
         return out
 

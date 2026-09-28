@@ -122,7 +122,7 @@
     <div class="card">
       <h3>환자 목록 <span class="right" id="patCount"></span></h3>
       <div class="row">
-        <div class="field"><span>상태</span><select id="patStatus"><option value="admitted">입원/MCOT (모니터링 중)</option><option value="inpatient">입원만</option><option value="mcot">MCOT만 (원외)</option><option value="pool">대기 프로필</option><option value="discharged">퇴원</option><option value="all">전체 (1만명)</option></select></div>
+        <div class="field"><span>상태</span><select id="patStatus"><option value="admitted">입원/MCOT (모니터링 중)</option><option value="inpatient">입원만</option><option value="mcot">MCOT만 (원외)</option><option value="overseas">해외 체류 MCOT만</option><option value="pool">대기 프로필</option><option value="discharged">퇴원</option><option value="all">전체 (1만명)</option></select></div>
         <div class="field" style="flex:2"><span>검색</span><input type="text" id="patQ" placeholder="이름, 환자번호, MRN, 질환, 리듬(심방세동/afib), 병동(6A), 진료과(심장내과), 패치, 병상, 게이트웨이"></div>
       </div>
       <div class="plist">
@@ -203,6 +203,8 @@
       <div class="field"><span>원외 MCOT 환자 수 (모바일 게이트웨이 1대당 1명)</span><div class="rv"><input type="range" id="g_out" min="0" max="500" step="1"><output id="g_out_o"></output></div></div>
       <div class="presets" id="outPresets"></div>
       <div class="help">1명 이상이면 장소가 자동으로 <b>혼합</b>(입원이 0명이면 <b>원외 MCOT</b>)이 됩니다.</div>
+      <div class="field"><span>해외 체류 외국인 비율 (MCOT 부착 중)</span><div class="rv"><input type="range" id="g_ovs" min="0" max="1" step="0.05"><output id="g_ovs_o"></output></div></div>
+      <div class="help">주요 고객국 거주자 — 미국 30% · 일본 20% · 영국 10% · 독일 10% · 유럽(프랑스·네덜란드·스페인·이탈리아) 15% · 남미(브라질·멕시코·칠레·콜롬비아·아르헨티나) 15%. 현지 시간대로 하루를 살고, 현지 통신사 + 국제 구간 지연이 업링크에 붙습니다. 입원 병상에는 배정되지 않습니다.</div>
       <label class="chk" title="단말 동작 (앱 강제 종료 · 절전 모드 일괄 업로드 · 야간 OS 업데이트 · 비행기 모드 · 지방 커버리지)"><input type="checkbox" id="md_en"> 단말 동작 (앱 종료 · 절전 등)</label>
       
     </div></div>

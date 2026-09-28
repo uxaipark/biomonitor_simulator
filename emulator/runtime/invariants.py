@@ -86,8 +86,11 @@ def check(w) -> dict:
         alive = {pid for pid, _ in admitted}
         open_bad = [k for k, o in real.labels_open.items() if o.get("patient_id") is not None and o["patient_id"] not in alive]
         add("open_label_for_discharged", open_bad)
+    # 7. 해외 체류 프로필은 원외 MCOT 로만 — 입원 병상에 있으면 안 된다
+    add("overseas_inpatient", [pid for pid, rec in admitted if not rec["outpatient"] and w.by_id[pid].get("overseas")], "해외 체류 환자가 입원 병상에 있음")
     moving = sum(1 for _, rec in admitted if not rec["outpatient"] and (rec["trip"] or rec["trip_step_until"] > now))
     n_in = sum(1 for _, rec in admitted if not rec["outpatient"])
     return {"ok": not viol, "violations": viol, "checked_sim_time": now, "checked_at": time.time(),
             "stats": {"inpatients": n_in, "outpatients": len(admitted) - n_in, "moving": moving, "linked": sum(linked.values()),
-                      "moving_pct": round(100.0 * moving / n_in, 1) if n_in else 0.0}}
+                      "moving_pct": round(100.0 * moving / n_in, 1) if n_in else 0.0,
+                      "overseas_outpatients": sum(1 for pid, rec in admitted if rec["outpatient"] and w.by_id[pid].get("overseas"))}}

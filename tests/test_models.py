@@ -40,3 +40,22 @@ def test_scenario_scripts_reference_known_triggers():
         assert items == sorted(items, key=lambda x: x.get("at", 0))
         for it in items:
             assert it["what"] in TRIGGERS, (fp, it["what"])
+
+
+def test_overseas_profiles_for_mcot():
+    """해외 체류 외국인(주요 고객국) 프로필: 풀의 일정 비율, 거주국 주소·시간대·통신사·국제 번호가 일관되고 국내 프로필은 그대로."""
+    import zoneinfo
+    from emulator.hospital.profiles import make_profiles, RESIDENCE
+    from emulator.hospital.names import NATION_LABEL, OVERSEAS
+    ps = make_profiles(3000, 20240905)
+    ovs = [p for p in ps if p.get("overseas")]
+    assert 0.05 < len(ovs) / len(ps) < 0.12
+    codes = {p["nationality"] for p in ovs}
+    assert {"US", "JP", "GB", "DE", "BR"} <= codes <= set(RESIDENCE) == set(OVERSEAS)
+    for p in ovs[:300]:
+        a = p["address"]
+        assert a["overseas"] and a["country"] == p["nationality"] and a["carrier"] and a["label"].startswith(NATION_LABEL[p["nationality"]])
+        assert zoneinfo.ZoneInfo(a["tz"]) is not None and p["phone"].startswith("+") and p["nationality_label"] == NATION_LABEL[p["nationality"]]
+    dom = [p for p in ps if not p.get("overseas")]
+    assert all(not p["address"].get("overseas") and p["phone"].startswith("010") for p in dom[:300])
+    assert [p["name"] for p in make_profiles(200, 7)] == [p["name"] for p in make_profiles(200, 7)]      # 시드 결정적

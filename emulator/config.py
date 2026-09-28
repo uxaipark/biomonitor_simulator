@@ -57,6 +57,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "outpatient_count": 10,        # MCOT (home) patients
         "heart_disease_ratio": 0.70,
         "korean_ratio": 0.90,
+        "overseas_ratio": 0.25,        # 원외 MCOT 부착 중 해외 체류 외국인 비율 (미국·일본·영국·독일·유럽·남미 고객국; 입원에는 쓰이지 않음)
         "sim_speed": 1.0,              # scenario clock multiplier (battery drain, admissions...)
         "db_retention_days": 7,        # history older than this is pruned from emulator.db at startup (retired patches, closed admissions, events)
         "admissions_per_hour": 4,      # new admissions / discharges per (sim) hour
@@ -273,6 +274,7 @@ class Config:
         g["profile_count"] = int(max(g["bed_capacity"] + g["outpatient_count"] + 100, min(50000, g["profile_count"])))
         g["heart_disease_ratio"] = float(min(1.0, max(0.0, g["heart_disease_ratio"])))
         g["korean_ratio"] = float(min(1.0, max(0.0, g["korean_ratio"])))
+        g["overseas_ratio"] = float(min(1.0, max(0.0, g.get("overseas_ratio", 0.25))))
         g["sim_speed"] = float(min(1000.0, max(0.1, g["sim_speed"])))
         g["census_mode"] = g.get("census_mode") if g.get("census_mode") in ("fixed", "weekly") else "fixed"
         g["fixed_step"] = bool(g.get("fixed_step", False))

@@ -244,7 +244,9 @@ class LinkedSim(S.SiteSim):
             p.update(family=fam, given=[giv], text=prof["name"])
             a = prof.get("address") or {}
             fill_contact(p, loc, r, "서울특별시")
-            if a:
+            if a.get("overseas"):                              # 해외 체류 MCOT: 거주국 주소 그대로
+                p["address"] = {"line": [], "city": a.get("city", ""), "district": None, "state": a.get("region", ""), "postal": None, "country": a.get("country", "")}
+            elif a:
                 p["address"] = {**p["address"], "state": {"서울": "서울특별시", "경기": "경기도", "인천": "인천광역시", "부산": "부산광역시", "대구": "대구광역시", "대전": "대전광역시",
                                                            "광주": "광주광역시", "울산": "울산광역시", "세종": "세종특별자치시", "제주": "제주특별자치도"}.get(a.get("sido"), a.get("sido")),
                                 "city": a.get("sigungu", ""), "district": a.get("dong", "")}

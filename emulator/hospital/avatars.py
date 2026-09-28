@@ -15,7 +15,10 @@ HAIR_F_YOUNG = ["BOB", "BUN", "LONG_NOT_TOO_LONG", "STRAIGHT_1", "STRAIGHT_2", "
 HAIR_F_OLD = ["BOB", "BUN", "SHORT_ROUND", "SHORT_CURLY", "CURLY", "FRIZZLE", "PIXIE"]
 SKIN_BY_NAT = {"KR": ["LIGHT", "PALE", "YELLOW"], "CN": ["LIGHT", "YELLOW", "PALE"], "JP": ["LIGHT", "PALE"], "VN": ["TANNED", "LIGHT", "BROWN"],
                "TH": ["TANNED", "BROWN"], "PH": ["TANNED", "BROWN"], "ID": ["BROWN", "TANNED"], "NP": ["BROWN", "TANNED", "DARK_BROWN"],
-               "UZ": ["LIGHT", "TANNED"], "RU": ["PALE", "LIGHT"], "US": ["PALE", "LIGHT", "TANNED", "BROWN", "DARK_BROWN", "BLACK"]}
+               "UZ": ["LIGHT", "TANNED"], "RU": ["PALE", "LIGHT"], "US": ["PALE", "LIGHT", "TANNED", "BROWN", "DARK_BROWN", "BLACK"],
+               "GB": ["PALE", "LIGHT", "TANNED", "BROWN"], "DE": ["PALE", "LIGHT"], "FR": ["PALE", "LIGHT", "TANNED"], "NL": ["PALE", "LIGHT"],
+               "ES": ["LIGHT", "TANNED"], "IT": ["LIGHT", "TANNED"], "BR": ["LIGHT", "TANNED", "BROWN", "DARK_BROWN"], "MX": ["TANNED", "BROWN", "LIGHT"],
+               "CL": ["LIGHT", "TANNED"], "CO": ["TANNED", "BROWN", "LIGHT"], "AR": ["PALE", "LIGHT", "TANNED"]}
 CLOTHES = ["SHIRT_CREW_NECK", "SHIRT_V_NECK", "SHIRT_SCOOP_NECK", "HOODIE", "COLLAR_SWEATER", "BLAZER_SHIRT"]
 CLOTH_COLORS = ["PASTEL_BLUE", "PASTEL_GREEN", "HEATHER", "GRAY_01", "BLUE_02", "WHITE", "PASTEL_YELLOW", "PINK"]
 
