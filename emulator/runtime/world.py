@@ -558,7 +558,7 @@ class World:
             if prof.get("overseas"):                                       # 해외 체류: 현지 망·시간대·통신사 (META abroad, 업링크 지연, 하루 생활 시각)
                 a = prof.get("address") or {}
                 mg["abroad"] = {"country": a.get("country"), "country_label": a.get("country_label"), "region": a.get("region"), "city": a.get("city"),
-                                "tz": a.get("tz"), "carrier": a.get("carrier")}
+                                "district": a.get("district"), "postal": a.get("postal"), "lat": a.get("lat"), "lon": a.get("lon"), "tz": a.get("tz"), "carrier": a.get("carrier")}
             else:
                 mg.pop("abroad", None)
             self._mcot_uplink(free[0])

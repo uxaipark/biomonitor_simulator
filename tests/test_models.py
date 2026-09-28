@@ -56,6 +56,8 @@ def test_overseas_profiles_for_mcot():
         a = p["address"]
         assert a["overseas"] and a["country"] == p["nationality"] and a["carrier"] and a["label"].startswith(NATION_LABEL[p["nationality"]])
         assert zoneinfo.ZoneInfo(a["tz"]) is not None and p["phone"].startswith("+") and p["nationality_label"] == NATION_LABEL[p["nationality"]]
+        assert -56 < a["lat"] < 72 and -125 < a["lon"] < 145 and a["postal"] and a["district"] and a["city"] and a["region"]     # 지도에 찍을 좌표 + 실제 주소 체계
+        assert a["text"].endswith(RESIDENCE[a["country"]]["en"]) and a["label"] == f"{NATION_LABEL[a['country']]} · {a['text']}"
     dom = [p for p in ps if not p.get("overseas")]
     assert all(not p["address"].get("overseas") and p["phone"].startswith("010") for p in dom[:300])
     assert [p["name"] for p in make_profiles(200, 7)] == [p["name"] for p in make_profiles(200, 7)]      # 시드 결정적

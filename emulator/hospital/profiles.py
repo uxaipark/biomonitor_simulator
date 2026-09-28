@@ -174,51 +174,77 @@ def make_address(rng: np.random.Generator) -> dict:
     return {"sido": sido, "sigungu": sigungu, "dong": dong, "label": f"{sido} {sigungu} {dong}"}
 
 
-# 해외 체류 MCOT 환자의 거주지 (지역, 도시, 시간대) · 국가번호 · 현지 통신사 — 주요 고객국 13개국
+# 해외 체류 MCOT 환자의 거주지 — 주요 고객국 13개국.  라우터 MCOT 지도가 거주지를 찍을 수 있게 실제 해외 주소 체계(동네·도시·주/지역·우편번호·국가)와
+# 좌표(lat/lon, 동네 중심 ±0.9 km 흔들림)를 준다.  국내 주소처럼 동네(district) 수준까지만이고 번지는 만들지 않는다.
+# places: (region, city, district, postal, lat, lon, tz)
 RESIDENCE = {
-    "US": {"dial": "+1", "carriers": ["Verizon", "AT&T", "T-Mobile"],
-           "places": [("New York", "Brooklyn", "America/New_York"), ("New Jersey", "Fort Lee", "America/New_York"), ("California", "Los Angeles", "America/Los_Angeles"),
-                      ("California", "San Jose", "America/Los_Angeles"), ("Texas", "Houston", "America/Chicago"), ("Illinois", "Chicago", "America/Chicago"),
-                      ("Florida", "Miami", "America/New_York"), ("Washington", "Seattle", "America/Los_Angeles"), ("Georgia", "Atlanta", "America/New_York")]},
-    "JP": {"dial": "+81", "carriers": ["NTT docomo", "au", "SoftBank"],
-           "places": [("東京都", "新宿区", "Asia/Tokyo"), ("東京都", "世田谷区", "Asia/Tokyo"), ("大阪府", "大阪市", "Asia/Tokyo"), ("神奈川県", "横浜市", "Asia/Tokyo"),
-                      ("愛知県", "名古屋市", "Asia/Tokyo"), ("福岡県", "福岡市", "Asia/Tokyo")]},
-    "GB": {"dial": "+44", "carriers": ["EE", "Vodafone", "O2", "Three"],
-           "places": [("Greater London", "Camden", "Europe/London"), ("Greater London", "Croydon", "Europe/London"), ("Greater Manchester", "Manchester", "Europe/London"),
-                      ("West Midlands", "Birmingham", "Europe/London"), ("West Yorkshire", "Leeds", "Europe/London"), ("Scotland", "Edinburgh", "Europe/London")]},
-    "DE": {"dial": "+49", "carriers": ["Telekom", "Vodafone", "O2"],
-           "places": [("Berlin", "Berlin", "Europe/Berlin"), ("Bayern", "München", "Europe/Berlin"), ("Hamburg", "Hamburg", "Europe/Berlin"), ("Hessen", "Frankfurt am Main", "Europe/Berlin"),
-                      ("Nordrhein-Westfalen", "Köln", "Europe/Berlin"), ("Nordrhein-Westfalen", "Düsseldorf", "Europe/Berlin")]},
-    "FR": {"dial": "+33", "carriers": ["Orange", "SFR", "Bouygues", "Free"],
-           "places": [("Île-de-France", "Paris", "Europe/Paris"), ("Auvergne-Rhône-Alpes", "Lyon", "Europe/Paris"), ("Provence-Alpes-Côte d'Azur", "Marseille", "Europe/Paris"), ("Occitanie", "Toulouse", "Europe/Paris")]},
-    "NL": {"dial": "+31", "carriers": ["KPN", "Vodafone", "Odido"],
-           "places": [("Noord-Holland", "Amsterdam", "Europe/Amsterdam"), ("Zuid-Holland", "Rotterdam", "Europe/Amsterdam"), ("Utrecht", "Utrecht", "Europe/Amsterdam"), ("Noord-Brabant", "Eindhoven", "Europe/Amsterdam")]},
-    "ES": {"dial": "+34", "carriers": ["Movistar", "Vodafone", "Orange"],
-           "places": [("Madrid", "Madrid", "Europe/Madrid"), ("Cataluña", "Barcelona", "Europe/Madrid"), ("Valencia", "Valencia", "Europe/Madrid"), ("Andalucía", "Sevilla", "Europe/Madrid")]},
-    "IT": {"dial": "+39", "carriers": ["TIM", "Vodafone", "WindTre"],
-           "places": [("Lazio", "Roma", "Europe/Rome"), ("Lombardia", "Milano", "Europe/Rome"), ("Campania", "Napoli", "Europe/Rome"), ("Piemonte", "Torino", "Europe/Rome")]},
-    "BR": {"dial": "+55", "carriers": ["Vivo", "Claro", "TIM"],
-           "places": [("São Paulo", "São Paulo", "America/Sao_Paulo"), ("Rio de Janeiro", "Rio de Janeiro", "America/Sao_Paulo"), ("Minas Gerais", "Belo Horizonte", "America/Sao_Paulo"), ("Paraná", "Curitiba", "America/Sao_Paulo")]},
-    "MX": {"dial": "+52", "carriers": ["Telcel", "AT&T", "Movistar"],
-           "places": [("Ciudad de México", "Ciudad de México", "America/Mexico_City"), ("Jalisco", "Guadalajara", "America/Mexico_City"), ("Nuevo León", "Monterrey", "America/Monterrey")]},
-    "CL": {"dial": "+56", "carriers": ["Entel", "Movistar", "WOM"],
-           "places": [("Región Metropolitana", "Santiago", "America/Santiago"), ("Valparaíso", "Viña del Mar", "America/Santiago")]},
-    "CO": {"dial": "+57", "carriers": ["Claro", "Movistar", "Tigo"],
-           "places": [("Bogotá D.C.", "Bogotá", "America/Bogota"), ("Antioquia", "Medellín", "America/Bogota"), ("Valle del Cauca", "Cali", "America/Bogota")]},
-    "AR": {"dial": "+54", "carriers": ["Personal", "Claro", "Movistar"],
-           "places": [("Buenos Aires", "Buenos Aires", "America/Argentina/Buenos_Aires"), ("Córdoba", "Córdoba", "America/Argentina/Cordoba"), ("Santa Fe", "Rosario", "America/Argentina/Cordoba")]},
+    "US": {"dial": "+1", "carriers": ["Verizon", "AT&T", "T-Mobile"], "en": "USA",
+           "places": [("New York", "Brooklyn", "Park Slope", "11215", 40.671, -73.977, "America/New_York"), ("New York", "Queens", "Flushing", "11354", 40.766, -73.826, "America/New_York"),
+                      ("New York", "New York", "Upper West Side", "10024", 40.787, -73.975, "America/New_York"), ("New Jersey", "Fort Lee", "Palisade", "07024", 40.851, -73.970, "America/New_York"),
+                      ("California", "Los Angeles", "Koreatown", "90005", 34.058, -118.301, "America/Los_Angeles"), ("California", "Irvine", "Woodbury", "92618", 33.669, -117.767, "America/Los_Angeles"),
+                      ("California", "San Jose", "North San Jose", "95131", 37.386, -121.893, "America/Los_Angeles"), ("Texas", "Houston", "Westchase", "77042", 29.740, -95.560, "America/Chicago"),
+                      ("Texas", "Carrollton", "Old Downtown", "75007", 32.975, -96.890, "America/Chicago"), ("Illinois", "Chicago", "Lincoln Park", "60614", 41.921, -87.648, "America/Chicago"),
+                      ("Florida", "Miami", "Brickell", "33131", 25.766, -80.191, "America/New_York"), ("Washington", "Seattle", "South Lake Union", "98109", 47.627, -122.343, "America/Los_Angeles"),
+                      ("Washington", "Bellevue", "Downtown", "98004", 47.616, -122.204, "America/Los_Angeles"), ("Georgia", "Duluth", "Sugarloaf", "30096", 33.995, -84.146, "America/New_York")]},
+    "JP": {"dial": "+81", "carriers": ["NTT docomo", "au", "SoftBank"], "en": "Japan",
+           "places": [("東京都", "新宿区", "大久保", "169-0072", 35.701, 139.700, "Asia/Tokyo"), ("東京都", "世田谷区", "三軒茶屋", "154-0024", 35.643, 139.669, "Asia/Tokyo"),
+                      ("東京都", "港区", "麻布十番", "106-0045", 35.656, 139.735, "Asia/Tokyo"), ("大阪府", "大阪市", "生野区", "544-0034", 34.651, 135.540, "Asia/Tokyo"),
+                      ("神奈川県", "横浜市", "中区", "231-0023", 35.444, 139.643, "Asia/Tokyo"), ("愛知県", "名古屋市", "中区", "460-0008", 35.166, 136.906, "Asia/Tokyo"),
+                      ("福岡県", "福岡市", "博多区", "812-0011", 33.590, 130.420, "Asia/Tokyo")]},
+    "GB": {"dial": "+44", "carriers": ["EE", "Vodafone", "O2", "Three"], "en": "United Kingdom",
+           "places": [("Greater London", "London", "Camden", "NW1 8QL", 51.539, -0.143, "Europe/London"), ("Greater London", "New Malden", "Kingston upon Thames", "KT3 4DE", 51.401, -0.256, "Europe/London"),
+                      ("Greater London", "Croydon", "Central Croydon", "CR0 1LB", 51.376, -0.098, "Europe/London"), ("Greater Manchester", "Manchester", "Northern Quarter", "M1 1JQ", 53.483, -2.236, "Europe/London"),
+                      ("West Midlands", "Birmingham", "Jewellery Quarter", "B1 3HN", 52.486, -1.911, "Europe/London"), ("West Yorkshire", "Leeds", "City Centre", "LS1 4AP", 53.798, -1.549, "Europe/London"),
+                      ("Scotland", "Edinburgh", "New Town", "EH1 3SB", 55.955, -3.196, "Europe/London")]},
+    "DE": {"dial": "+49", "carriers": ["Telekom", "Vodafone", "O2"], "en": "Deutschland",
+           "places": [("Berlin", "Berlin", "Mitte", "10115", 52.531, 13.385, "Europe/Berlin"), ("Bayern", "München", "Schwabing", "80801", 48.161, 11.581, "Europe/Berlin"),
+                      ("Hamburg", "Hamburg", "Altona", "22767", 53.551, 9.935, "Europe/Berlin"), ("Hessen", "Frankfurt am Main", "Westend", "60323", 50.119, 8.660, "Europe/Berlin"),
+                      ("Nordrhein-Westfalen", "Köln", "Ehrenfeld", "50823", 50.951, 6.916, "Europe/Berlin"), ("Nordrhein-Westfalen", "Düsseldorf", "Oberkassel", "40545", 51.232, 6.752, "Europe/Berlin")]},
+    "FR": {"dial": "+33", "carriers": ["Orange", "SFR", "Bouygues", "Free"], "en": "France",
+           "places": [("Île-de-France", "Paris", "15e arrondissement", "75015", 48.841, 2.300, "Europe/Paris"), ("Île-de-France", "Paris", "13e arrondissement", "75013", 48.829, 2.363, "Europe/Paris"),
+                      ("Auvergne-Rhône-Alpes", "Lyon", "Part-Dieu", "69003", 45.760, 4.860, "Europe/Paris"), ("Provence-Alpes-Côte d'Azur", "Marseille", "Prado", "13008", 43.270, 5.383, "Europe/Paris"),
+                      ("Occitanie", "Toulouse", "Capitole", "31000", 43.604, 1.444, "Europe/Paris")]},
+    "NL": {"dial": "+31", "carriers": ["KPN", "Vodafone", "Odido"], "en": "Nederland",
+           "places": [("Noord-Holland", "Amsterdam", "Zuid", "1077 XV", 52.347, 4.877, "Europe/Amsterdam"), ("Noord-Holland", "Amstelveen", "Stadshart", "1181 ZL", 52.303, 4.863, "Europe/Amsterdam"),
+                      ("Zuid-Holland", "Rotterdam", "Centrum", "3011 AD", 51.922, 4.479, "Europe/Amsterdam"), ("Utrecht", "Utrecht", "Binnenstad", "3511 LX", 52.091, 5.121, "Europe/Amsterdam"),
+                      ("Noord-Brabant", "Eindhoven", "Centrum", "5611 AZ", 51.441, 5.478, "Europe/Amsterdam")]},
+    "ES": {"dial": "+34", "carriers": ["Movistar", "Vodafone", "Orange"], "en": "España",
+           "places": [("Madrid", "Madrid", "Chamberí", "28010", 40.434, -3.700, "Europe/Madrid"), ("Cataluña", "Barcelona", "Eixample", "08009", 41.394, 2.164, "Europe/Madrid"),
+                      ("Comunidad Valenciana", "Valencia", "Ruzafa", "46004", 39.462, -0.372, "Europe/Madrid"), ("Andalucía", "Sevilla", "Casco Antiguo", "41001", 37.389, -5.994, "Europe/Madrid")]},
+    "IT": {"dial": "+39", "carriers": ["TIM", "Vodafone", "WindTre"], "en": "Italia",
+           "places": [("Lazio", "Roma", "Prati", "00192", 41.909, 12.464, "Europe/Rome"), ("Lombardia", "Milano", "Porta Nuova", "20124", 45.484, 9.191, "Europe/Rome"),
+                      ("Campania", "Napoli", "Vomero", "80129", 40.845, 14.228, "Europe/Rome"), ("Piemonte", "Torino", "Centro", "10121", 45.070, 7.682, "Europe/Rome")]},
+    "BR": {"dial": "+55", "carriers": ["Vivo", "Claro", "TIM"], "en": "Brasil",
+           "places": [("São Paulo", "São Paulo", "Liberdade", "01503-000", -23.558, -46.635, "America/Sao_Paulo"), ("São Paulo", "São Paulo", "Bom Retiro", "01123-000", -23.526, -46.640, "America/Sao_Paulo"),
+                      ("Rio de Janeiro", "Rio de Janeiro", "Copacabana", "22070-000", -22.970, -43.184, "America/Sao_Paulo"), ("Minas Gerais", "Belo Horizonte", "Savassi", "30140-000", -19.936, -43.933, "America/Sao_Paulo"),
+                      ("Paraná", "Curitiba", "Batel", "80420-000", -25.440, -49.288, "America/Sao_Paulo")]},
+    "MX": {"dial": "+52", "carriers": ["Telcel", "AT&T", "Movistar"], "en": "México",
+           "places": [("Ciudad de México", "Ciudad de México", "Polanco", "11560", 19.433, -99.199, "America/Mexico_City"), ("Ciudad de México", "Ciudad de México", "Roma Norte", "06700", 19.419, -99.163, "America/Mexico_City"),
+                      ("Jalisco", "Guadalajara", "Providencia", "44630", 20.700, -103.383, "America/Mexico_City"), ("Nuevo León", "San Pedro Garza García", "Del Valle", "66220", 25.657, -100.402, "America/Monterrey")]},
+    "CL": {"dial": "+56", "carriers": ["Entel", "Movistar", "WOM"], "en": "Chile",
+           "places": [("Región Metropolitana", "Santiago", "Providencia", "7500000", -33.431, -70.610, "America/Santiago"), ("Región Metropolitana", "Santiago", "Las Condes", "7550000", -33.410, -70.567, "America/Santiago"),
+                      ("Valparaíso", "Viña del Mar", "Reñaca", "2520000", -32.978, -71.545, "America/Santiago")]},
+    "CO": {"dial": "+57", "carriers": ["Claro", "Movistar", "Tigo"], "en": "Colombia",
+           "places": [("Bogotá D.C.", "Bogotá", "Chapinero", "110221", 4.649, -74.062, "America/Bogota"), ("Antioquia", "Medellín", "El Poblado", "050021", 6.209, -75.568, "America/Bogota"),
+                      ("Valle del Cauca", "Cali", "Granada", "760020", 3.460, -76.531, "America/Bogota")]},
+    "AR": {"dial": "+54", "carriers": ["Personal", "Claro", "Movistar"], "en": "Argentina",
+           "places": [("Buenos Aires", "Buenos Aires", "Palermo", "C1425", -34.588, -58.430, "America/Argentina/Buenos_Aires"), ("Buenos Aires", "Buenos Aires", "Belgrano", "C1426", -34.563, -58.456, "America/Argentina/Buenos_Aires"),
+                      ("Córdoba", "Córdoba", "Nueva Córdoba", "X5000", -31.425, -64.185, "America/Argentina/Cordoba"), ("Santa Fe", "Rosario", "Centro", "S2000", -32.947, -60.640, "America/Argentina/Cordoba")]},
 }
 
 
 def make_overseas_residence(rng: np.random.Generator, code: str) -> tuple[dict, str]:
-    """해외 체류 환자의 거주지(국가·지역·도시·시간대·현지 통신사)와 국제 전화번호.  address 와 같은 키(sido/sigungu/dong/label)를 유지해
-    거주지를 보는 모든 화면·API 가 그대로 동작하고, overseas/country/tz/carrier 가 덧붙는다."""
+    """해외 체류 환자의 거주지: 실제 해외 주소 체계(동네·도시·주/지역·우편번호·국가) + 좌표 + 시간대 + 현지 통신사, 그리고 국제 전화번호.
+    address 의 기존 키(sido/sigungu/dong/label)는 그대로 두어 거주지를 보는 화면·API 가 동작하고, 라우터 MCOT 지도는 lat/lon 을 쓴다."""
     r = RESIDENCE[code]
-    region, city, tz = r["places"][int(rng.integers(len(r["places"])))]
+    region, city, district, postal, lat, lon, tz = r["places"][int(rng.integers(len(r["places"])))]
     carrier = r["carriers"][int(rng.integers(len(r["carriers"])))]
+    lat, lon = round(lat + float(rng.uniform(-0.008, 0.008)), 4), round(lon + float(rng.uniform(-0.008, 0.008)), 4)
     label = NATION_LABEL[code]
-    addr = {"sido": label, "sigungu": region, "dong": city, "label": f"{label} · {region} {city}" if code == "JP" else f"{label} · {city}, {region}",
-            "overseas": True, "country": code, "country_label": label, "region": region, "city": city, "tz": tz, "carrier": carrier}
+    text = f"{district}, {city}, {region} {postal}, {r['en']}" if code != "JP" else f"〒{postal} {region}{city}{district}, {r['en']}"
+    addr = {"sido": label, "sigungu": region, "dong": district, "label": f"{label} · {text}",
+            "overseas": True, "country": code, "country_label": label, "country_en": r["en"], "region": region, "city": city, "district": district, "postal": postal,
+            "lat": lat, "lon": lon, "text": text, "tz": tz, "carrier": carrier}
     phone = f"{r['dial']} {rng.integers(200, 999)}-{rng.integers(100, 999)}-{rng.integers(1000, 9999)}"
     return addr, phone
 
