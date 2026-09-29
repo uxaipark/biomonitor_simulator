@@ -150,12 +150,14 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 | 일반 `standard` | 32 | 위에 더해 AFib RVR · 이단맥 · NSVT · 1도/2도(M-I, M-II) AVB · RBBB · STEMI · 허혈 · VVI 페이싱 · 페이스메이커 오작동 · 동정지 (25종) |
 | 정밀 `precise` | 64 | 27종 전부, 임상적으로 중요한 부정맥에 2~5개 (AFib 5 · PVC 4 · NSR 4 · AFib RVR/조동/PAC/NSVT/SVT 3 …) |
 
-* `hop_s`(기본 120~480 초)마다 같은 리듬의 다른 변형으로, `switch_rhythm_pct`(35 %)면 다른 리듬으로 바꾼다 — 전환은 프레임 단위로 정확하고 크로스페이드 동안 정답에 `rhythm_prev`·`switching`이 붙는다.
+* `hop_s`(기본 120~480 초)마다 같은 리듬의 다른 변형으로, `switch_rhythm_pct`(35 %)면 다른 리듬으로 바꾼다 — 전환은 프레임 경계 절체(정답 패치는 크로스페이드를 쓰지 않고 새 변형을 이완기 중간에서 시작, 첫 프레임 40 ms만 이어 붙임)라 정답이 모호한 구간이 없고, 절체 프레임 하나에만 `rhythm_prev`·`switching`이 붙는다.
 * 시간당 패치당 `artifact_pct`/`noise_pct`/`lead_off_pct`(15/10/6 %) 확률로 동작 아티팩트(10~60 초)·잡음(10~40 초)·리드 오프(10~40 초)가 들어가고, **그 동안에도 정답은 계속 나간다**(플래그·수준, 리드오프면 HR 0, 재부착 뒤 `settling`).
 * 페이싱 리듬 패치는 **모든** 스파이크 위치·챔버를 정답에 싣는다(채널 10 하드웨어 검출 손실과 무관). 단극(mV급)/양극(sub-mV) 스파이크를 번갈아 배치.
 * 정답 블록(v1): `u8 ver | u8 rhythm(RHYTHM_CODES) | u8 rhythm_prev(255 없음) | u8 flags | u8 art_level(×0.01) | u8 noise_level(×0.001) | u16 hr | u8 n_beats + n×(u16 offset, u8 kind) | u8 n_pace + n×u16(bits 0-13 offset, 14-15 chamber)`. 오프셋은 같은 프레임 ECG 블록 안 표본 인덱스, 레코드 seq 는 ECG 레코드와 같다. flags: 0x01 lead_off 0x02 artifact 0x04 noise 0x08 paced 0x10 switching 0x20 settling 0x40 beats_unavailable. 코드표는 `GET /api/v1` 의 채널 11 항목.
 * R-peak·박동 종류 주석은 루프 은행에 들어 있다(2026-09-29 이후 생성분). 옛 은행이면 `beats_unavailable` 플래그가 서고 박동 목록이 비니 [루프 은행 재생성]이 필요하다.
 * 정답 패치는 환자 목록·병상·패치 레지스트리·라벨 API 에 나타나지 않는다(`patch_id` 0xF0000+, `patient_id` 900001+, 시리얼 `TR-xxxx`).
+* 박동 종류 14 (N·A·a·V·FV·J·E·S·Vp·AVp·Ap·AsVp·CRT·F) 와 **ANSI/AAMI EC57 5 등급(N/S/V/F/Q)** 매핑이 정답에 붙는다(`parse_truth` 의 `aami`, `/truth/beats` 의 `aami`, 채점의 `by_aami`). 매핑: N·J→N, A·a·S→S, V·E→V, FV→F, 페이싱(Vp·AVp·Ap·AsVp·CRT·F)→Q.
+* 부정맥 생성 (2026-09-29 개선): PVC 는 환자별 결합 간격 일정(±20 ms)·30 % 다초점(두 형태·극성·폭)·커플릿·삽입성(서맥)·삼단맥/사단맥 패턴·완전 보상휴지; PAC 는 결합 간격 일정, 15 % 변행전도(a, RBBB 형), 10 % 차단된 PAC(P 만 + 휴지), 심방 커플릿, 비보상휴지; AFib 은 AV 결절 불응기(≥0.30 s) 있는 RR 분포 + Ashman 변행전도 + 가끔 PVC; VT 는 단형 + capture(N)/fusion(FV) 박동; Wenckebach 는 PR 증가폭 감소·RR 단축 패턴; 동정지 뒤 접합부/심실 이탈.
 
 **QRS 검출 채점 (민감도·정밀도)**: 워커가 프레임에 실은 정답 R-peak 를 절대 시각(프레임 `ts_ms` + 오프셋)으로 공유 링버퍼에 남기고 메인이 최근 100만 박동(약 2.5 시간)을 보관한다.
 * `GET /api/v1/truth/beats?patch_id=&since_ms=&until_ms=&pace=` — 정답 박동 목록(종류·리듬·조건).

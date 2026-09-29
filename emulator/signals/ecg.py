@@ -56,12 +56,24 @@ class Morphology:
         return m
 
 
-def beat_waves(m: Morphology, rr_prev: float, kind: str = "N", has_p: bool = True) -> list[Wave]:
-    """Return waves for one beat.  kind: N, A(PAC), V(PVC), Vp(paced vent),
-    AVp(dual paced), J(junctional escape), E(vent escape), P(p-only), S(SVT beat)."""
+def beat_waves(m: Morphology, rr_prev: float, kind: str = "N", has_p: bool = True, extra: dict | None = None) -> list[Wave]:
+    """Return waves for one beat.  kind: N, A(PAC), a(aberrant PAC), V(PVC), FV(vent. fusion), Vp(paced vent),
+    AVp(dual paced), J(junctional escape), E(vent escape), P(p-only), S(SVT beat).
+    extra: focus(0/1 PVC 초점 → 형태·극성), aberr(True → 변행전도 RBBB 형 QRS)."""
+    extra = extra or {}
     qt = m.qtc * math.sqrt(max(0.3, min(1.6, rr_prev)))
     t_c = -0.04 + 0.72 * qt            # T peak relative to R
     waves: list[Wave] = []
+    if kind == "FV":                   # 심실 융합: 정상 전도와 심실 초점이 반씩 — 중간 폭, 약간 이형, T 부분 불일치
+        pol = m.extra.get("pvc_pol", 1.0)
+        if has_p:
+            waves.append((-m.pr, m.p_amp * 0.8, m.p_sigma, m.p_sigma))
+        waves.append((-0.028, m.q_amp * 1.5, 0.009, 0.009))
+        waves.append((0.0, 0.95 * m.r_amp, 0.016, 0.019))
+        waves.append((0.036, 0.35 * pol * m.r_amp, 0.016, 0.018))
+        waves.append((0.07, -0.4 * m.r_amp, 0.014, 0.016))
+        waves.append((t_c + 0.01, -0.3 * pol * abs(m.t_amp), 0.06, 0.045))
+        return waves
     if kind == "P":                    # non-conducted P wave (AV block)
         return [(0.0, m.p_amp, m.p_sigma, m.p_sigma * 1.1)]
     if kind == "Sp":                   # pacing spike without capture: no waves
@@ -83,12 +95,17 @@ def beat_waves(m: Morphology, rr_prev: float, kind: str = "N", has_p: bool = Tru
         return waves
     if kind == "AsVp":                 # intrinsic P sensed, ventricle paced (P-synchronous)
         kind = "AVp"
-    if kind in ("V", "E"):             # wide, bizarre; discordant T
-        pol = m.extra.get("pvc_pol", 1.0)
-        waves.append((-0.02, 0.35 * pol * m.r_amp, 0.020, 0.018))
-        waves.append((0.02, 1.35 * pol * m.r_amp, 0.028, 0.030))
-        waves.append((0.075, -0.55 * pol * m.r_amp, 0.020, 0.022))
-        waves.append((0.30, -0.55 * pol * m.r_amp * 0.6, 0.075, 0.055))
+    if kind in ("V", "E"):             # wide, bizarre; discordant T.  focus 0/1 = 다초점 PVC 의 두 형태 (극성·폭·노치가 다름)
+        f = int(extra.get("focus", 0))
+        pol = m.extra.get("pvc_pol2" if f else "pvc_pol", m.extra.get("pvc_pol", 1.0))
+        wd = m.extra.get("pvc_w2" if f else "pvc_w", 1.0)              # QRS 폭 배율 (0.85~1.3 → 120~170 ms)
+        amp = 1.35 * (0.8 if f else 1.0) * (0.85 if kind == "E" else 1.0)
+        waves.append((-0.022 * wd, 0.35 * pol * m.r_amp, 0.020 * wd, 0.018 * wd))
+        waves.append((0.018 * wd, amp * pol * m.r_amp, 0.028 * wd, 0.030 * wd))
+        if f:                                                            # 두 번째 초점: 노치(rSR' 유사)
+            waves.append((0.052 * wd, 0.45 * pol * m.r_amp, 0.012, 0.014))
+        waves.append((0.078 * wd, -0.55 * pol * m.r_amp, 0.020 * wd, 0.022 * wd))
+        waves.append((0.30 + 0.04 * (wd - 1), -0.55 * pol * m.r_amp * 0.6, 0.075, 0.055))
         return waves
     if kind in ("Vp", "AVp"):          # paced ventricular (RV apical, LBBB-like) beat
         if kind == "AVp" and has_p:
@@ -98,7 +115,8 @@ def beat_waves(m: Morphology, rr_prev: float, kind: str = "N", has_p: bool = Tru
         waves.append((0.30, -0.35 * m.r_amp, 0.070, 0.050))
         return waves
     # --- supraventricular family: P (unless J/S) + narrow QRS + T
-    if kind == "A":                    # PAC: abnormal, earlier & peaked P
+    aberr = kind == "a" or bool(extra.get("aberr"))                       # 변행전도: 이 박동만 RBBB 형 (Ashman, aberrant PAC)
+    if kind in ("A", "a"):             # PAC: abnormal, earlier & peaked P
         waves.append((-m.pr * 0.85, m.p_amp * 1.3 * (1 if m.extra.get("pac_p", 1) > 0 else -1), m.p_sigma * 0.8, m.p_sigma * 0.8))
     elif kind == "N" and has_p:
         waves.append((-m.pr, m.p_amp, m.p_sigma, m.p_sigma * 1.1))
@@ -115,7 +133,7 @@ def beat_waves(m: Morphology, rr_prev: float, kind: str = "N", has_p: bool = Tru
         return waves
     waves.append((-0.033, m.q_amp, 0.0075, 0.0075))
     waves.append((0.0, m.r_amp, m.r_sigma, m.r_sigma))
-    if m.bbb == "rbbb":
+    if m.bbb == "rbbb" or aberr:
         waves.append((0.028, m.s_amp * 1.2, 0.012, 0.014))
         waves.append((0.062, 0.45 * m.r_amp, 0.014, 0.016))   # R'
         waves.append((t_c + 0.02, -abs(m.t_amp) * 0.6, m.t_sigma_l, m.t_sigma_r))

@@ -42,10 +42,15 @@ RHYTHMS: dict[str, dict] = {
     "vfib":         {"label": "심실세동 (VFib)", "cls": "lethal", "w_heart": 0.3, "w_other": 0.05, "hr": (0, 0)},
 }
 PACED_RHYTHMS = ("paced_vvi", "paced_aai", "paced_ddd", "paced_crt", "paced_malfunction")
-CONDUCTED = {"N", "A", "V", "Vp", "AVp", "J", "E", "S", "Ap", "AsVp", "CRT", "F"}
+CONDUCTED = {"N", "A", "V", "Vp", "AVp", "J", "E", "S", "Ap", "AsVp", "CRT", "F", "a", "FV"}
 # 정답(TRUTH) 레코드의 박동 종류 코드 (append-only): N 정상, A 심방조기, V 심실조기, Vp 심실페이싱, AVp 방실페이싱, J 접합부, E 이탈, S 상심실, Ap 심방페이싱, AsVp 심방감지-심실페이싱, CRT 양심실, F 융합
-BEAT_KINDS = ["N", "A", "V", "Vp", "AVp", "J", "E", "S", "Ap", "AsVp", "CRT", "F"]
+# 12 a 변행전도 심방조기(aberrant PAC, RBBB 형), 13 FV 심실 융합(심실 박동 + 정상 전도의 융합; VT 중 capture/fusion)
+BEAT_KINDS = ["N", "A", "V", "Vp", "AVp", "J", "E", "S", "Ap", "AsVp", "CRT", "F", "a", "FV"]
 BEAT_KIND_ID = {k: i for i, k in enumerate(BEAT_KINDS)}
+# ANSI/AAMI EC57 5 등급: N 정상(정상·각차단·접합부 이탈), S 상심실 이소성, V 심실 이소성(심실 이탈 포함), F 융합(심실+정상), Q 분류불가/페이싱
+AAMI = {"N": "N", "J": "N", "A": "S", "a": "S", "S": "S", "V": "V", "E": "V", "FV": "F",
+        "Vp": "Q", "AVp": "Q", "Ap": "Q", "AsVp": "Q", "CRT": "Q", "F": "Q"}
+AAMI_CLASSES = ["N", "S", "V", "F", "Q"]
 SPIKE_A, SPIKE_V, SPIKE_LV = 0, 1, 2
 
 
@@ -94,10 +99,21 @@ def generate_beats(rhythm: str, rng: np.random.Generator, seconds: float, hr_mea
     if rhythm in ("afib", "afib_rvr"):
         info["overlay"] = {"type": "fwave", "freq": float(rng.uniform(5.5, 8.5)), "amp": float(rng.uniform(0.02, 0.09))}
         sigma = rng.uniform(0.18, 0.30)
+        refr = rng.uniform(0.30, 0.38)                   # AV 결절 불응기: 그보다 짧은 RR 은 나오지 않는다
+        pvc_af = rng.uniform(0.0, 0.03)
+        rr_prev = hrm.rr(t)
+        rr_med = 60.0 / hr_mean
         while t < seconds:
-            beats.append(_beat(t, "N", nop=True))
             rr = hrm.rr(t) * float(np.exp(rng.normal(0, sigma)))
-            t += float(np.clip(rr, 0.32, 2.2))
+            rr = float(np.clip(rr, refr, 2.2))
+            # Ashman 현상: 긴 RR 뒤의 짧은 RR 은 우각 불응으로 변행전도(RBBB 형) — 라벨은 N(AAMI N), 파형만 넓다
+            aberr = rr_prev > 1.25 * rr_med and rr < 0.72 * rr_med and rng.random() < 0.7
+            if pvc_af and rng.random() < pvc_af:
+                beats.append(_beat(t, "V", nop=True, focus=0))
+            else:
+                beats.append(_beat(t, "N", nop=True, aberr=aberr))
+            t += rr
+            rr_prev = rr
         return beats, info
 
     if rhythm == "aflutter":
@@ -124,17 +140,33 @@ def generate_beats(rhythm: str, rng: np.random.Generator, seconds: float, hr_mea
     if rhythm == "vt":
         rr_v = 60.0 / hr_mean
         while t < seconds:
-            beats.append(_beat(t, "V", nop=True))
+            u = rng.random()
+            if u < 0.02:
+                beats.append(_beat(t, "N", nop=True))                       # capture beat: 동방 자극이 잠깐 심실을 잡음 (좁은 QRS)
+            elif u < 0.05:
+                beats.append(_beat(t, "FV", nop=True))                      # fusion beat: 심실 박동 + 정상 전도의 융합
+            else:
+                beats.append(_beat(t, "V", nop=True, focus=0))              # 단형(monomorphic) VT: 한 초점
             t += rr_v * (1 + rng.normal(0, 0.025))
         return beats, info
 
     # ------------ sinus-based rhythms with state machines
     pvc_p = 0.0
     pac_p = 0.0
+    # 심실조기수축: 환자마다 결합 간격(coupling)이 거의 일정(단초점), 30 % 는 다초점(두 형태·두 결합 간격), 커플릿·삽입성 PVC·삼단맥/사단맥 패턴
+    pvc_coup = float(rng.uniform(0.45, 0.65)); pvc_coup2 = float(rng.uniform(0.40, 0.70))
+    multifocal = rng.random() < 0.30
+    couplet_p = float(rng.uniform(0.03, 0.12))
+    interp_p = 0.20 if hr_mean < 70 else 0.04                     # 서맥이면 보상휴지 없는 삽입성 PVC 가 흔하다
+    pvc_pattern = "random"
     if rhythm == "pvc":
         pvc_p = rng.uniform(0.03, 0.15)
+        pvc_pattern = str(rng.choice(["random", "trigeminy", "quadrigeminy"], p=[0.7, 0.2, 0.1]))
     elif rhythm == "pac":
         pac_p = rng.uniform(0.04, 0.15)
+    # 심방조기수축: 결합 간격 일정, 15 % 변행전도(a), 10 % 차단된 PAC(QRS 없는 P + 휴지), 가끔 심방 커플릿
+    pac_coup = float(rng.uniform(0.55, 0.75)); pac_aberr_p = 0.15; pac_block_p = 0.10; pac_couplet_p = 0.05
+    n_since_pvc = 0
     pause_p = rng.uniform(0.004, 0.012) if rhythm == "sinus_pause" else 0.0
     wenck_len = int(rng.integers(3, 7)) if rhythm == "avb2_m1" else 0
     m2_drop_p = rng.uniform(0.10, 0.30) if rhythm == "avb2_m2" else 0.0
@@ -164,7 +196,8 @@ def generate_beats(rhythm: str, rng: np.random.Generator, seconds: float, hr_mea
             continue
         # ---- Wenckebach
         if wenck_len:
-            pr_ext = 0.16 + 0.05 * wenck_i
+            incs = [0.0, 0.08, 0.05, 0.03, 0.02, 0.015, 0.01]  # PR 증가폭이 점점 줄어(전형적 Wenckebach) RR 은 점점 짧아진다
+            pr_ext = 0.16 + sum(incs[: min(wenck_i, len(incs) - 1) + 1])
             if wenck_i >= wenck_len:
                 beats.append(_beat(t, "P"))                   # dropped QRS
                 wenck_i = 0
@@ -172,7 +205,8 @@ def generate_beats(rhythm: str, rng: np.random.Generator, seconds: float, hr_mea
                 continue
             beats.append(_beat(t, "N", pr=pr_ext))
             wenck_i += 1
-            t += rr
+            step = incs[min(wenck_i, len(incs) - 1)] - incs[min(wenck_i - 1, len(incs) - 1)] if wenck_i >= 2 else 0.0
+            t += rr + step                                    # PR 이 늘어난 만큼 RR 이 늘고, 증가폭이 줄면 RR 이 짧아진다
             continue
         # ---- Mobitz II
         if m2_drop_p:
@@ -181,28 +215,55 @@ def generate_beats(rhythm: str, rng: np.random.Generator, seconds: float, hr_mea
             beats.append(_beat(t, "P" if drop else "N", pr=0.20))
             t += rr
             continue
-        # ---- bigeminy
+        # ---- bigeminy: 결합 간격 일정(±20 ms), 완전 보상휴지
         if rhythm == "pvc_bigeminy":
             beats.append(_beat(t, "N"))
-            coup = rr * rng.uniform(0.50, 0.62)
-            beats.append(_beat(t + coup, "V"))
+            coup = rr * pvc_coup + rng.normal(0, 0.02)
+            beats.append(_beat(t + coup, "V", focus=0))
             t += 2 * rr * 1.02
             continue
-        # ---- PVC / PAC / pause
-        if pvc_p and rng.random() < pvc_p:
-            coup = rr * rng.uniform(0.48, 0.70)
-            beats.append(_beat(t + coup, "V"))
-            t += 2 * rr                                       # compensatory pause
+        # ---- PVC: 패턴(삼단맥/사단맥) 또는 확률, 단초점/다초점, 커플릿, 삽입성
+        n_since_pvc += 1
+        fire = (pvc_pattern == "trigeminy" and n_since_pvc >= 2) or (pvc_pattern == "quadrigeminy" and n_since_pvc >= 3) or \
+               (pvc_pattern == "random" and pvc_p and rng.random() < pvc_p)
+        if pvc_p and fire:
+            beats.append(_beat(t, "N"))                       # 선행 동조율 박동
+            focus = 1 if (multifocal and rng.random() < 0.4) else 0
+            coup = rr * (pvc_coup2 if focus else pvc_coup) + rng.normal(0, 0.02)
+            beats.append(_beat(t + coup, "V", focus=focus))
+            n_since_pvc = 0
+            if rng.random() < couplet_p:                      # 커플릿: 두 번째 심실 박동이 짧은 간격으로
+                beats.append(_beat(t + coup + rr * rng.uniform(0.40, 0.55), "V", focus=focus))
+                t += 2 * rr + rr * 0.45
+            elif rng.random() < interp_p and coup < 0.55 * rr: # 삽입성: 동조율은 흔들리지 않고 다음 박동이 제때 온다
+                t += rr
+            else:
+                t += 2 * rr                                   # 완전 보상휴지
             continue
         if pac_p and rng.random() < pac_p:
-            coup = rr * rng.uniform(0.55, 0.75)
-            beats.append(_beat(t + coup, "A"))
-            t += coup + rr * 1.08                              # non-compensatory
+            beats.append(_beat(t, "N"))
+            coup = rr * pac_coup + rng.normal(0, 0.02)
+            u = rng.random()
+            if u < pac_block_p:                               # 차단된 PAC: 조기 P 만 있고 QRS 없음 → 휴지
+                beats.append(_beat(t + coup, "P"))
+                t += coup + rr * 1.15
+            else:
+                kind = "a" if u < pac_block_p + pac_aberr_p else "A"   # 변행전도(RBBB 형) 또는 정상 전도
+                beats.append(_beat(t + coup, kind))
+                if rng.random() < pac_couplet_p:
+                    beats.append(_beat(t + coup + rr * rng.uniform(0.55, 0.7), "A"))
+                    t += coup + rr * 0.62 + rr * 1.08
+                else:
+                    t += coup + rr * 1.08                     # 비보상휴지
             continue
         if pause_p and rng.random() < pause_p:
             t += rr * rng.uniform(1.8, 3.5)                    # sinus pause
-            if rng.random() < 0.5:
+            u = rng.random()
+            if u < 0.45:
                 beats.append(_beat(t, "J"))                    # junctional escape
+                t += rr
+            elif u < 0.6:
+                beats.append(_beat(t, "E", focus=0))           # ventricular escape (넓은 QRS)
                 t += rr
             continue
         pr_override = rng.uniform(0.22, 0.32) if rhythm == "avb1" else None

@@ -5,7 +5,9 @@
   python tools/qrs_detect.py DIR [--truth-only] [--out detections.json]
 
 출력 JSON: {"detections": {"<patch_id>": [ts_ms, ...]}, "patches": n, "fs": 250}  → POST /api/v1/truth/score 또는 tools/qrs_score.py 입력.
---truth-only : 정답 레코드가 있는(벤치마크) 패치만 (기본).  프레임 ts_ms + 표본 오프셋으로 절대 시각을 만든다(라우터도 같은 시계).
+--truth-only : 정답 레코드가 있는(벤치마크) 패치만 (기본).  검출 시각 = 그 표본이 속한 프레임의 ts_ms + 프레임 내 오프셋 — 정답과 같은 규칙.
+프레임 ts_ms 는 200 ms 격자가 아니라 지터가 있으므로(워커 시계) 표본 수로 시간을 세지 말고 반드시 프레임 ts 를 기준으로 해야 한다.
+재전송으로 중복된 프레임은 패치 seq 로 걸러낸다.
 """
 from __future__ import annotations
 
@@ -82,19 +84,25 @@ def main() -> int:
     for pid, lst in segs.items():
         if not a.all and pid not in truth_pids:
             continue
-        lst.sort(key=lambda t: (t[0], t[1]))
-        # 연속 구간으로 이어 붙이되(프레임 ts 가 200 ms 간격), 끊긴 곳은 따로
-        chunks: list[tuple[int, list]] = []
+        # 패치 seq 로 중복(재전송) 제거 후 seq 순으로; seq 가 1 씩 이어지는 프레임만 한 구간으로 붙인다
+        uniq = {}
         for ts, pseq, x in lst:
-            if chunks and ts - chunks[-1][0] - (sum(len(v) for v in chunks[-1][1]) * 1000) // a.fs <= 250:
-                chunks[-1][1].append(x)
+            uniq.setdefault(pseq, (ts, x))
+        seqs = sorted(uniq)
+        chunks: list[list[tuple[int, int, np.ndarray]]] = []
+        for q in seqs:
+            ts, x = uniq[q]
+            if chunks and q == chunks[-1][-1][0] + 1:
+                chunks[-1].append((q, ts, x))
             else:
-                chunks.append((ts, [x]))
+                chunks.append([(q, ts, x)])
         out = []
-        for t0, parts in chunks:
-            x = np.concatenate(parts)
+        for ch in chunks:
+            x = np.concatenate([c[2] for c in ch])
+            starts = np.cumsum([0] + [len(c[2]) for c in ch[:-1]])          # 각 프레임의 시작 표본 인덱스
             for i in detect(x, a.fs):
-                out.append(int(t0 + (int(i) * 1000) // a.fs))
+                k = int(np.searchsorted(starts, i, side="right") - 1)      # 검출 표본이 속한 프레임
+                out.append(int(ch[k][1] + ((int(i) - int(starts[k])) * 1000) // a.fs))   # 그 프레임 ts_ms + 프레임 내 오프셋 (정답과 같은 규칙)
         det[str(pid)] = sorted(out)
     doc = {"detections": det, "patches": len(det), "fs": a.fs, "n": sum(len(v) for v in det.values())}
     if a.out:

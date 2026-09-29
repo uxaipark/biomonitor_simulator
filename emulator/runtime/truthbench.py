@@ -2,8 +2,8 @@
 파형과 정답(TRUTH 레코드, 채널 11)을 같은 프레임에 실어 보낸다.
 
   * 다양한 부정맥을 골고루 배치한다(PLAN: 리듬 종류마다 최소 1개, 임상적으로 중요한 부정맥에 더 많이).
-  * hop_s 간격마다 같은 리듬의 다른 변형으로, 또는(switch_rhythm_pct) 다른 리듬으로 바꾼다 — 전환은 프레임 단위로 정확하고
-    크로스페이드 동안 정답에 이전 리듬(rhythm_prev)과 switching 플래그가 붙는다.
+  * hop_s 간격마다 같은 리듬의 다른 변형으로, 또는(switch_rhythm_pct) 다른 리듬으로 바꾼다 — 전환은 프레임 경계 절체(크로스페이드 없음,
+    새 변형은 이완기 중간에서 시작, 첫 프레임 40 ms 만 이어 붙임)라 정답이 모호한 구간이 없다; 절체 프레임에만 rhythm_prev·switching 이 붙는다.
   * 가끔 동작 아티팩트·잡음·리드 오프가 들어가고, 그 동안에도 정답(플래그·수준·R-peak)은 계속 나간다.
   * 페이싱 리듬 패치는 스파이크 위치(모든 스파이크, 챔버)를 정답에 싣는다 — 채널 10(하드웨어 검출)은 그대로 손실이 있다.
 
@@ -19,7 +19,7 @@ import time
 import numpy as np
 
 from ..config import CH_ECG, CH_HR, CH_PACE, CH_TRUTH
-from ..signals.rhythms import RHYTHMS, BEAT_KINDS
+from ..signals.rhythms import RHYTHMS, BEAT_KINDS, AAMI
 from .state import CTL, FLAG_PACED, TRUTH_RING
 from .protocol import RHYTHM_CODES, T_LEAD_OFF, T_ARTIFACT, T_NOISE, T_SWITCH, T_SETTLING
 
@@ -51,6 +51,8 @@ def score_beats(truth: list, detections: dict, tol_ms: int = 150, exclude=EXCLUD
     by_rhythm: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0, "fp": 0})
     by_cond: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0, "fp": 0})
     by_kind: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0})
+    by_aami: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0})
+    kname = lambda k: BEAT_KINDS[k] if k < len(BEAT_KINDS) else "?"
     per_patch: dict = {}
     fn_ex: list = []
     fp_ex: list = []
@@ -70,7 +72,7 @@ def score_beats(truth: list, detections: dict, tol_ms: int = 150, exclude=EXCLUD
                     else:
                         c["tp"] += 1
                         rname = RHYTHM_CODES[t[3]] if t[3] < len(RHYTHM_CODES) else "?"
-                        by_rhythm[rname]["tp"] += 1; by_cond[condition_of(t[4])]["tp"] += 1; by_kind[BEAT_KINDS[t[2]] if t[2] < len(BEAT_KINDS) else "?"]["tp"] += 1
+                        by_rhythm[rname]["tp"] += 1; by_cond[condition_of(t[4])]["tp"] += 1; by_kind[kname(t[2])]["tp"] += 1; by_aami[AAMI.get(kname(t[2]), "Q")]["tp"] += 1
                     last_cond = condition_of(t[4]); i += 1; j += 1
                     continue
                 if dt < 0:                                               # 검출이 먼저: FP (근처 제외 박동이면 무시)
@@ -90,7 +92,7 @@ def score_beats(truth: list, detections: dict, tol_ms: int = 150, exclude=EXCLUD
                 else:
                     c["fn"] += 1
                     rname = RHYTHM_CODES[t[3]] if t[3] < len(RHYTHM_CODES) else "?"
-                    by_rhythm[rname]["fn"] += 1; by_cond[condition_of(t[4])]["fn"] += 1; by_kind[BEAT_KINDS[t[2]] if t[2] < len(BEAT_KINDS) else "?"]["fn"] += 1
+                    by_rhythm[rname]["fn"] += 1; by_cond[condition_of(t[4])]["fn"] += 1; by_kind[kname(t[2])]["fn"] += 1; by_aami[AAMI.get(kname(t[2]), "Q")]["fn"] += 1
                     if len(fn_ex) < examples:
                         fn_ex.append({"patch_id": pid, "ts_ms": t[0], "kind": BEAT_KINDS[t[2]] if t[2] < len(BEAT_KINDS) else t[2], "rhythm": rname, "condition": condition_of(t[4])})
                 last_cond = condition_of(t[4]); i += 1
@@ -112,7 +114,7 @@ def score_beats(truth: list, detections: dict, tol_ms: int = 150, exclude=EXCLUD
     def fin(d):
         return {k: {**v, **_rates(v)} for k, v in d.items()}
     return {"tolerance_ms": tol_ms, "exclude": list(exclude or ()), "overall": {**tot, **_rates(tot)}, "patches": per_patch,
-            "by_rhythm": fin(by_rhythm), "by_condition": fin(by_cond), "by_beat_kind": fin(by_kind), "fn_examples": fn_ex, "fp_examples": fp_ex}
+            "by_rhythm": fin(by_rhythm), "by_condition": fin(by_cond), "by_beat_kind": fin(by_kind), "by_aami": fin(by_aami), "fn_examples": fn_ex, "fp_examples": fp_ex}
 
 
 def _rates(c: dict) -> dict:
@@ -297,6 +299,7 @@ class TruthBench:
             if until_ms and ts > until_ms:
                 continue
             out.append({"ts_ms": ts, "patch_id": pid, ("chamber" if pace else "kind"): (kind if pace else (BEAT_KINDS[kind] if kind < len(BEAT_KINDS) else kind)),
+                        **({} if pace else {"aami": AAMI.get(BEAT_KINDS[kind], "Q") if kind < len(BEAT_KINDS) else "Q"}),
                         "rhythm": RHYTHM_CODES[rh] if rh < len(RHYTHM_CODES) else None, "flags": fl, "condition": condition_of(fl)})
             if len(out) >= limit:
                 break
@@ -344,7 +347,7 @@ class TruthBench:
                     self.counters["rhythm_switches"] += 1
                 else:
                     v = w._similar_variant(st["rhythm"], int(P["variant"][row]), tol=1e9)
-                w._switch_variant(row, v, tick)
+                self._cut_switch(row, v, tick)
                 self.counters["hops"] += 1
                 st["hop_at"] = now + float(self.rng.uniform(*self._hop()))
             # 이벤트: 아티팩트 · 잡음 · 리드 오프 (겹치지 않게 하나씩)
@@ -356,6 +359,24 @@ class TruthBench:
                     if self.rng.random() < p_hour[kind] * dt_s / 3600.0:
                         self._start_event(row, st, kind, float(self.rng.uniform(lo, hi)), tick)
                         break
+
+    def _cut_switch(self, row: int, v: int, tick: int) -> None:
+        """경계 절체: 새 변형이 다음 프레임에서 이완기 중간(R-R 의 45 % 지점)에서 시작하도록 offset 을 맞춘 뒤 변형을 바꾼다.
+        워커는 정답 패치에 크로스페이드를 쓰지 않고 첫 프레임 40 ms 만 이어 붙이므로, 전환 뒤 정답(새 변형 박동)이 파형과 그대로 맞는다."""
+        w = self.w
+        P = w.st.patch.arr
+        bank = w.bank
+        rp = getattr(bank, "rpeaks", None)
+        if bank.loaded and rp is not None and 0 <= v < len(rp) and rp[v] is not None and len(rp[v]) >= 2:
+            fs = int(w.st.ctl[CTL["ecg_fs"]]) or 250
+            spt = fs * (int(w.st.ctl[CTL["bundle_ms"]]) or 200) // 1000
+            n = int(bank.ecg.shape[1])
+            r = rp[v]
+            k = int(self.rng.integers(0, len(r) - 1))
+            target = (int(r[k]) + int(0.45 * (int(r[k + 1]) - int(r[k])))) % n        # 이완기 중간
+            off_samples = (target - (tick + 1) * spt) % n
+            P["offset_ms"][row] = int(off_samples * 1000 // fs)
+        w._switch_variant(row, v, tick)
 
     def _start_event(self, row: int, st: dict, kind: str, dur: float, tick: int) -> None:
         from .world import ACT_ID

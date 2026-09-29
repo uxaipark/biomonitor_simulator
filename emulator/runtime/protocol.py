@@ -21,7 +21,7 @@ from functools import lru_cache
 import numpy as np
 
 from ..config import CHANNELS, CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE, CH_TRUTH
-from ..signals.rhythms import RHYTHMS, BEAT_KINDS
+from ..signals.rhythms import RHYTHMS, BEAT_KINDS, AAMI, AAMI_CLASSES
 
 MAGIC = 0x4742
 VERSION = 3                      # v3: CRC-32 trailer on every frame + control frames (router -> gateway NACK); v2 added the per-patch seq
@@ -119,7 +119,8 @@ def parse_truth(b: bytes) -> dict:
             "lead_off": bool(fl & T_LEAD_OFF), "artifact": bool(fl & T_ARTIFACT), "noise": bool(fl & T_NOISE), "paced": bool(fl & T_PACED),
             "switching": bool(fl & T_SWITCH), "settling": bool(fl & T_SETTLING), "beats_unavailable": bool(fl & T_NO_BEATS),
             "art_level": art / 100.0, "noise_level": nz / 1000.0, "hr": hr,
-            "beats": [{"offset": o, "kind": BEAT_KINDS[k] if k < len(BEAT_KINDS) else k} for o, k in beats], "pace": [{"offset": o, "chamber": c} for o, c in pace]}
+            "beats": [{"offset": o, "kind": BEAT_KINDS[k] if k < len(BEAT_KINDS) else k, "aami": AAMI.get(BEAT_KINDS[k], "Q") if k < len(BEAT_KINDS) else "Q"} for o, k in beats],
+            "pace": [{"offset": o, "chamber": c} for o, c in pace]}
 
 
 def truth_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, blob: bytes) -> bytes:
@@ -184,6 +185,10 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                          "(loop bank without annotations). All pacing spikes are listed (no detection loss), unlike channel 10.")
             d["rhythm_codes"] = RHYTHM_CODES
             d["beat_kinds"] = BEAT_KINDS
+            d["beat_kind_labels"] = {"N": "normal", "A": "atrial premature (PAC)", "a": "aberrated PAC (RBBB-like)", "V": "ventricular premature (PVC)", "FV": "ventricular fusion",
+                                     "J": "junctional escape", "E": "ventricular escape", "S": "supraventricular tachy beat", "Vp": "ventricular paced", "AVp": "AV sequential paced",
+                                     "Ap": "atrial paced", "AsVp": "atrial sensed, ventricular paced", "CRT": "biventricular paced", "F": "paced fusion / pseudofusion"}
+            d["aami"] = {"classes": AAMI_CLASSES, "map": AAMI, "note": "ANSI/AAMI EC57 classes: N normal (incl. BBB, junctional escape), S supraventricular ectopic, V ventricular ectopic (incl. escape), F fusion of V and N, Q paced/unclassifiable"}
         else:
             d["note"] = ("uint16 per detected pacing spike: bits 0-13 = sample offset within this frame's ECG block, bits 14-15 = chamber "
                          "(0 atrial, 1 ventricular/RV, 2 LV for CRT). Emulates hardware pace detection: bipolar/leadless spikes are tiny in the "

@@ -143,12 +143,21 @@ class Gather:
         x = self._stretched(self.bank.ecg, self.n_ecg, rows, start, spt, 1.0).astype(np.float32)
         # crossfade from previous variant
         age = tick - p["switch_tick"]
-        cf = np.where((age >= 0) & (age < crossfade_ticks) & (p["variant_prev"] >= 0) & (p["variant_prev"] != var))[0]
+        is_truth = p["truth"] > 0
+        cf = np.where((age >= 0) & (age < crossfade_ticks) & (p["variant_prev"] >= 0) & (p["variant_prev"] != var) & ~is_truth)[0]
         if cf.size:
             idx = np.rint(start[cf][:, None] + np.arange(spt)[None, :]).astype(np.int64) % self.n_ecg
             xprev = self.bank.ecg[p["variant_prev"][cf][:, None], idx].astype(np.float32)
             w = (age[cf][:, None] + np.arange(spt)[None, :] / spt) / crossfade_ticks
             x[cf] = x[cf] * w + xprev * (1 - w)
+        # 정답 전용 패치: 크로스페이드 대신 경계 절체 — 새 변형의 첫 프레임 처음 40 ms 만 이전 파형과 이어 붙여 계단만 없앤다 (정답은 새 변형 그대로)
+        ct = np.where((age == 0) & (p["variant_prev"] >= 0) & (p["variant_prev"] != var) & is_truth)[0]
+        if ct.size:
+            nb = max(2, int(0.04 * fs))
+            idx = np.rint(start[ct][:, None] + np.arange(nb)[None, :]).astype(np.int64) % self.n_ecg
+            xprev = self.bank.ecg[p["variant_prev"][ct][:, None], idx].astype(np.float32)
+            w = np.linspace(0.0, 1.0, nb, dtype=np.float32)[None, :]
+            x[ct, :nb] = x[ct, :nb] * w + xprev * (1 - w)
         x *= p["gain"][:, None]
         # motion artefact from the activity template + generic noise
         ag = p["art_gain"]
@@ -359,7 +368,7 @@ class Gather:
         v, vp = int(p["variant"]), int(p["variant_prev"])
         code = lambda x: int(self._var_rhythm[x]) if 0 <= x < self._var_rhythm.size else 255
         age = tick - int(p["switch_tick"])
-        switching = (0 <= age < crossfade_ticks) and vp >= 0 and vp != v
+        switching = age == 0 and vp >= 0 and vp != v                   # 절체 프레임 하나만 (처음 40 ms 이어붙임)
         lead_off = int(p["lead_off"]) > 0
         ticks_per_s = 1000.0 / bundle_ms
         age_a = tick - int(p["attach_tick"])

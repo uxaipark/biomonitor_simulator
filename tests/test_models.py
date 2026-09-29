@@ -61,3 +61,48 @@ def test_overseas_profiles_for_mcot():
     dom = [p for p in ps if not p.get("overseas")]
     assert all(not p["address"].get("overseas") and p["phone"].startswith("010") for p in dom[:300])
     assert [p["name"] for p in make_profiles(200, 7)] == [p["name"] for p in make_profiles(200, 7)]      # 시드 결정적
+
+
+def test_arrhythmia_beat_generation_quality():
+    """부정맥 박동열: PVC 결합 간격 일정, 다양한 박동 종류(N/S/V/F/Q 모두 도달), AFib 불응기, VT 의 capture/fusion, Wenckebach PR 패턴."""
+    import numpy as np
+    from emulator.signals.rhythms import generate_beats, pick_hr, BEAT_KINDS, AAMI, AAMI_CLASSES, RHYTHMS
+    seen = set()
+    for rhythm in RHYTHMS:
+        for seed in (1, 2, 3):
+            rng = np.random.default_rng(seed)
+            hr = pick_hr(rhythm, rng)
+            beats, info = generate_beats(rhythm, rng, 600, hr or 70, lambda t: 0.0)
+            for b in beats:
+                assert b["kind"] in BEAT_KINDS or b["kind"] in ("P", "Sp"), b["kind"]
+                if b["kind"] in BEAT_KINDS:
+                    seen.add(AAMI[b["kind"]])
+            ts = [b["t"] for b in beats if b["kind"] in BEAT_KINDS]
+            assert all(t2 - t1 >= 0.25 for t1, t2 in zip(ts, ts[1:])), rhythm      # 어떤 리듬도 250 ms 보다 짧은 RR 은 없다
+    assert seen == set(AAMI_CLASSES)                                                 # N, S, V, F, Q 모두 생성된다
+    # PVC: 선행 동조율 박동 대비 결합 간격의 산포가 작다 (단초점)
+    rng = np.random.default_rng(11)
+    beats, _ = generate_beats("pvc", rng, 1800, 72, lambda t: 0.0)
+    coup = [beats[i]["t"] - beats[i - 1]["t"] for i in range(1, len(beats)) if beats[i]["kind"] == "V" and beats[i - 1]["kind"] == "N" and beats[i]["extra"].get("focus", 0) == 0]
+    assert len(coup) >= 10 and np.std(coup) < 0.06, (len(coup), np.std(coup))
+    # AFib: 최소 RR 이 AV 결절 불응기(≥0.30 s) 이상, 가끔 변행전도(aberr) 표시
+    rng = np.random.default_rng(5)
+    beats, _ = generate_beats("afib", rng, 1800, 100, lambda t: 0.0)
+    rr = np.diff([b["t"] for b in beats])
+    assert rr.min() >= 0.30 and any(b["extra"].get("aberr") for b in beats)
+    # VT: 대부분 V, capture(N)·fusion(FV) 이 섞인다
+    rng = np.random.default_rng(7)
+    beats, _ = generate_beats("vt", rng, 1800, 160, lambda t: 0.0)
+    kinds = [b["kind"] for b in beats]
+    assert kinds.count("V") > 0.85 * len(kinds) and "FV" in kinds and "N" in kinds
+    # Wenckebach: 탈락 전까지 PR 이 점점 늘되 증가폭은 줄어든다
+    rng = np.random.default_rng(3)
+    beats, _ = generate_beats("avb2_m1", rng, 600, 70, lambda t: 0.0)
+    prs = []
+    for b in beats:
+        if b["kind"] == "N":
+            prs.append(b["extra"]["pr"])
+        elif b["kind"] == "P":
+            break
+    incs = np.diff(prs)
+    assert len(prs) >= 3 and all(x > 0 for x in incs) and all(incs[i + 1] <= incs[i] + 1e-9 for i in range(len(incs) - 1))

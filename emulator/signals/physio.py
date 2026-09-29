@@ -115,6 +115,9 @@ def generate_bundle(rhythm: str, seed: int, ecg_fs: int = 250, ppg_fs: int = 100
     if spec["cls"] == "afib":
         morph.edr_gain *= 1.3
     morph.extra["pvc_pol"] = 1.0 if rng.random() < 0.6 else -1.0
+    morph.extra["pvc_pol2"] = -morph.extra["pvc_pol"] if rng.random() < 0.7 else morph.extra["pvc_pol"]   # 다초점 PVC 두 번째 형태
+    morph.extra["pvc_w"] = float(rng.uniform(0.9, 1.25))
+    morph.extra["pvc_w2"] = float(rng.uniform(0.85, 1.3))
     morph.extra["pac_p"] = 1 if rng.random() < 0.6 else -1
 
     # ---- respiration
@@ -153,9 +156,9 @@ def generate_bundle(rhythm: str, seed: int, ecg_fs: int = 250, ppg_fs: int = 100
         if pr_ov:
             m2 = Morphology(**{**morph.__dict__})
             m2.pr = pr_ov
-            waves = beat_waves(m2, rr_prev[i], k, has_p)
+            waves = beat_waves(m2, rr_prev[i], k, has_p, b["extra"])
         else:
-            waves = beat_waves(morph, rr_prev[i], k, has_p)
+            waves = beat_waves(morph, rr_prev[i], k, has_p, b["extra"])
         # EDR: respiratory amplitude modulation of QRS
         rp = resp_phase(b["t"] % seconds)
         edr = 1.0 + morph.edr_gain * math.sin(rp)

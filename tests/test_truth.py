@@ -14,7 +14,7 @@ def test_truth_block_roundtrip():
     d = P.parse_truth(b)
     assert d["ver"] == 1 and d["rhythm"] == "afib" and d["rhythm_prev"] == "nsr" and d["switching"] and d["artifact"] and d["paced"] and not d["lead_off"]
     assert d["hr"] == 88 and abs(d["art_level"] - 0.73) < 1e-9 and abs(d["noise_level"] - 0.12) < 1e-9
-    assert [(x["offset"], x["kind"]) for x in d["beats"]] == [(12, "N"), (140, "V"), (300, "Vp")]
+    assert [(x["offset"], x["kind"], x["aami"]) for x in d["beats"]] == [(12, "N", "N"), (140, "V", "V"), (300, "Vp", "Q")]
     assert [(x["offset"], x["chamber"]) for x in d["pace"]] == [(11, 1), (139, 1)]
     e = P.parse_truth(P.truth_block(P.RHYTHM_CODE_ID["vfib"], 255, P.T_LEAD_OFF | P.T_NO_BEATS, 0, 0, 0, [], []))
     assert e["rhythm"] == "vfib" and e["rhythm_prev"] is None and e["lead_off"] and e["beats_unavailable"] and e["beats"] == [] and e["pace"] == []
@@ -47,7 +47,7 @@ def test_grade_sets_are_consistent():
         assert set(PLANS[g]) <= set(RHYTHMS) and all(k >= 1 for k in PLANS[g].values())
     assert set(PLANS["precise"]) == set(RHYTHMS)                                  # 정밀: 모든 리듬 종류
     assert set(PLANS["basic"]) <= set(PLANS["standard"]) <= set(PLANS["precise"])    # 등급이 오를수록 포함 관계
-    assert len(P.RHYTHM_CODES) == len(RHYTHMS) and len(BEAT_KINDS) == 12
+    assert len(P.RHYTHM_CODES) == len(RHYTHMS) and len(BEAT_KINDS) == 14 and set(P.AAMI.values()) == {"N", "S", "V", "F", "Q"} and set(P.AAMI) == set(BEAT_KINDS)
 
 
 def test_score_beats_se_ppv_and_exclusions():
