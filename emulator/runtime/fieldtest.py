@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from .state import CTL
+from .state import CTL, FLAG_MOTION
 
 # prio: high(위급) · medium(주의) · low(권고·기술).  expect 는 뷰어에서 확인할 것.
 EVENTS = {
@@ -122,8 +122,15 @@ class FieldTest:
         elif ev == "asystole":
             rec["episode_until"] = self._sim_until(until, time.time())
             rec["ft_flat"] = True
+            rec["ft_saved"] = {"noise": float(P["noise"][row]), "paced": int(P["paced"][row])}
             P["gain"][row] = 0.0
             P["hr_override"][row] = 255                                     # 255 = HR 0 으로 보냄
+            self._flatten(row)                                              # 동작 아티팩트·잡음·페이싱 스파이크까지 끈다 (심정지 환자는 움직이지 않는다)
+            real = getattr(w, "real", None)
+            if real is not None:                                            # 정답 라벨: 무수축 구간 (리듬 변형이 바뀌지 않아 자동 라벨이 안 생긴다)
+                real._close(("rhythm", pid), int(time.time() * 1000))
+                real._open(("ft_asystole", pid), "rhythm_episode", "asystole", int(time.time() * 1000), patient_id=pid,
+                           patch_id=real._patch_id(rec), meta={"source": "fieldtest", "base": prof["rhythm"]})
         elif ev == "spo2_low":
             m = int(P["chan_mask"][row]); gm = int(w.st.ctl[CTL["chan_mask"]])
             from ..config import CH_SPO2
@@ -142,6 +149,16 @@ class FieldTest:
             rec["ft_nolink"] = True                                         # _relink 가 도달 불가로 본다 (음영 표시는 건드리지 않음)
             w._relink(rec, force=True)
         return True
+
+    def _flatten(self, row: int) -> None:
+        """무수축 파형 = 평탄선: 게인 0 만으로는 뒤에 더해지는 동작 아티팩트(재활·보행 중이면 0.3~0.6 mV p-p)·잡음·페이싱 스파이크가
+        남아 뷰어·라우터에는 '노이즈 낀 파형'으로 보이고 동작 플래그 때문에 알람도 억제됐다 (2026-09-30 재활치료실 게이트웨이 사례)."""
+        P = self.w.st.patch.arr
+        P["gain"][row] = 0.0
+        P["art_gain"][row] = 0.0
+        P["noise"][row] = 0.0
+        P["paced"][row] = 0                                                 # 스파이크·페이스 마커 끔 (포착 없는 페이싱이 아니라 무수축)
+        P["flags"][row] = int(P["flags"][row]) & ~FLAG_MOTION
 
     # ---------------------------------------------------------------- 풀기
     def _end(self, a: dict, note: str = "") -> None:
@@ -178,8 +195,15 @@ class FieldTest:
                 w._switch_variant(row, rec["base_variant"], w._tick_now())
         if ev == "asystole":
             rec.pop("ft_flat", None)
+            sv = rec.pop("ft_saved", None) or {}
             P["gain"][row] = rec.get("gain0", 1.0)
             P["hr_override"][row] = 0
+            P["noise"][row] = sv.get("noise", 0.0)
+            P["paced"][row] = sv.get("paced", 1 if w.by_id[a["pid"]].get("pacemaker") else 0)
+            real = getattr(w, "real", None)
+            if real is not None:
+                real._close(("ft_asystole", a["pid"]), int(time.time() * 1000))
+                real.label_seen.get(a["pid"], {}).pop("rhythm", None)        # 다음 라벨 단계가 기저 리듬 구간을 다시 판단
         elif ev == "spo2_low":
             if rec.pop("ft_spo2", None):                                    # 표시가 있으면 -12 가 걸려 있다 (모듈레이션이 다시 계산해도 hold 가 유지)
                 P["spo2_add"][row] = float(P["spo2_add"][row]) + 12.0
@@ -230,6 +254,8 @@ class FieldTest:
                 if not rec["episode_until"] and rh in w.rhythm_variants:    # 그래도 먼저 풀려 기저 리듬으로 갔으면 테스트 리듬을 다시
                     w._switch_variant(rec["row"], w._variant_for(rh, w.by_id[a["pid"]]["age"]), w._tick_now())
                 rec["episode_until"] = self._sim_until(a["until"], t)
+            if a["ev"] == "asystole":                                        # 이동·활동 단계가 아티팩트를 다시 걸어도 평탄선 유지
+                self._flatten(rec["row"])
             elif a["ev"] == "lead_off":
                 patch = w.patches.get(rec["row"])
                 if patch is not None:                                       # 테스트 중 패치를 갈아도 리드 오프 유지
@@ -240,7 +266,7 @@ class FieldTest:
         """10초마다 재계산되는 값(gain·SpO2 보정)이 테스트 중에는 테스트 값을 유지하도록.  표시(ft_*)는 테스트가 풀 때 지운다."""
         P = self.w.st.patch.arr
         if rec.get("ft_flat"):
-            P["gain"][row] = 0.0
+            self._flatten(row)
         if rec.get("ft_spo2"):
             P["spo2_add"][row] = float(P["spo2_add"][row]) - 12.0
 

@@ -304,7 +304,7 @@ class Gather:
         v = int(p["variant"])
         marks = self.bank.pace[v]
         empty = (np.zeros(0, dtype=np.uint16), np.zeros(0, dtype=np.uint8))
-        if marks.size == 0:
+        if marks.size == 0 or int(p["paced"]) == 0:                     # 기기 없음 · 현장 테스트 무수축: 스파이크도 마커도 없다 (미리보기와 스트림 일치)
             return empty
         types = self.bank.pace_type[v]
         start = self.advance(np.array([row]), tick, spt, fs)
