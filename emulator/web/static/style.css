@@ -1157,7 +1157,7 @@ header button{min-height:36px;padding:6px 14px;border-radius:8px;font-size:13px}
 .status .pill.bad,.status .pill.err{background:var(--errbg);color:var(--errfg);border-color:transparent}
 .status .pill.run{background:var(--okbg);color:var(--okfg);border-color:transparent}
 button.linkbtn{background:none;border:0;min-height:0;padding:2px 4px;color:var(--muted);font-size:12px;text-decoration:underline;text-underline-offset:3px}
-main{max-width:1560px;padding:18px 24px 90px}
+main{max-width:1560px;margin:0;padding:18px 24px 90px}   /* 사이드바 바로 옆에 붙인다 (가운데 정렬하면 넓은 화면에서 왼쪽이 뜬다) */
 .card{border-radius:12px}
 .card h2{margin:0 0 12px;font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .card h2 .sub{font-size:12px;font-weight:400}
