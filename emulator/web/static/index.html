@@ -9,10 +9,15 @@
 <script>try{var t=localStorage.getItem("theme");if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
 <body>
+<aside id="side" aria-label="주 메뉴">
+  <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2-6 4 12 3-9 2 3h5"/></svg></span><span><b>Bio-Signal</b><small>Emulator Console</small></span></div>
+  <nav class="tabs" id="tabs"></nav>
+  <div class="simclock"><small>시뮬 시각</small><b id="sideClock">-</b><small id="sideSub">-</small></div>
+</aside>
 <div id="top">
 <header>
-  <h1>🫀 Bio-Signal Emulator</h1>
-  <nav class="tabs" id="tabs"></nav>
+  <h1 id="pageTitle">운영 현황</h1>
+  <span class="pill" id="hdrTx"><span class="dot"></span><span id="hdrTxTxt">-</span></span>
   <span class="spacer"></span>
   <button id="btnHelp" title="시작 매뉴얼 · 프로토콜 문서">도움말</button>
   <button id="btnTheme" title="테마 전환">🌙</button>
@@ -21,6 +26,7 @@
 </header>
 <select id="tabSelect"></select>
 <div class="status" id="statusStrip">
+  <span class="st-lbl">시스템 상태</span>
   <span id="runPill" class="pill"><span class="dot"></span><span id="runTxt">정지</span></span>
   <span class="pill" id="pillLink" title="송출 상태"><span class="dot"></span><span id="linkTxt">송출 -</span></span>
   <span class="pill hide-sm" id="pillPat">환자 -</span>
@@ -32,12 +38,38 @@
   <span class="pill" id="pillNoConn" title="라우터에 TCP 연결이 없어 버려진 프레임 (누적)" hidden>라우터 미연결</span>
   <span class="pill" id="pillErrGw" title="오류 게이트웨이 = 장애 + 성능저하">오류 GW 0</span>
   <span class="pill" id="pillEmr" title="연동 EMR — EMR 연동 메뉴에서 바꿉니다">EMR 에뮬레이터</span>
+  <span class="spacer"></span>
+  <button class="linkbtn" id="stHidden" type="button" hidden></button>
 </div>
 </div>
 <main>
 
 <!-- ================= 대시보드 -->
 <section class="tab" data-tab="dash" data-title="대시보드">
+  <div class="dash2">
+    <section class="d-kpis" aria-label="핵심 지표">
+      <div class="dk" id="dkGw"><div class="dk-l">연결 게이트웨이</div><div class="dk-v"><b>-</b><span></span></div><div class="dk-bar"><i></i></div><div class="dk-f"></div></div>
+      <div class="dk" id="dkRate"><div class="dk-l">전송률</div><div class="dk-v"><b>-</b><span>pkt/s</span></div><canvas class="spark" id="sparkPkts"></canvas><div class="dk-f"></div></div>
+      <div class="dk" id="dkBytes"><div class="dk-l">데이터량</div><div class="dk-v"><b>-</b><span>MB/s</span></div><canvas class="spark" id="sparkBytes"></canvas><div class="dk-f"></div></div>
+      <div class="dk" id="dkRx"><div class="dk-l"><span>라우터 수신 이상</span><a href="#dCounters" class="dk-a">원인 보기</a></div><div class="dk-v"><b>-</b><span>오류 pkt</span></div><div class="dk-f dk-m"></div><div class="dk-f"></div></div>
+    </section>
+    <section class="card d-pipe" aria-label="전송 파이프라인">
+      <h2>전송 파이프라인 <span class="sub">패킷이 지나는 순서대로 · 문제가 있는 구간만 강조</span></h2>
+      <div class="pipe" id="dPipe"></div>
+    </section>
+    <div class="d-cols">
+      <section class="card d-ev" aria-label="최근 이벤트">
+        <div class="d-evh"><h2>최근 이벤트</h2><div class="segtabs" role="tablist" aria-label="이벤트 분류" id="dEvTabs"></div><span class="spacer"></span><label class="chk sm"><input type="checkbox" id="dEvGroup" checked> 반복 이벤트 묶기</label></div>
+        <div class="d-evlist" id="dashEvents"></div>
+        <div class="d-evf"><span id="dEvFoot"></span><a href="#" id="dEvAll">로그 전체 보기</a></div>
+      </section>
+      <div class="d-side">
+        <section class="card" id="dCounters" aria-label="라우터 이상 카운터"><h2>라우터 이상 카운터 <span class="sub">누적 · 최근 증가분</span></h2><div class="ctr" id="dCtr"><div class="sub">라우터 보고 없음</div></div></section>
+        <section class="card" aria-label="시뮬레이션 규모"><h2>시뮬레이션 규모</h2><div class="scale" id="dScale"></div></section>
+      </div>
+    </div>
+  </div>
+  <details class="dmore"><summary>세부 지표 · 송출 장애 기록 · 송신/수신 연결</summary>
   <div class="grid dashgrid">
     <div class="card" style="grid-column:1/-1" id="txHealthCard">
       <h3>송출 상태 <span class="sub" id="txHealthTarget"></span></h3>
@@ -53,10 +85,8 @@
       <h3>상태 <span class="right" id="dashTime"></span></h3>
       <div class="kpis" id="kpis"></div>
     </div>
-    <div class="card dash-trend"><h3>전송률 (pkt/s)</h3><canvas class="spark" id="sparkPkts"></canvas>
-      <h3 style="margin-top:8px">데이터량 (KB/s)</h3><canvas class="spark" id="sparkBytes"></canvas></div>
-    <div class="card" style="grid-column:1/-1"><h3>최근 이벤트</h3><div class="events" id="dashEvents"></div></div>
   </div>
+  </details>
 </section>
 
 <!-- ================= 신호 -->
@@ -121,6 +151,8 @@
   <div>
     <div class="card">
       <h3>환자 목록 <span class="right" id="patCount"></span></h3>
+      <div class="patseg" id="patSeg" role="group" aria-label="환자 구분"><button data-seg="all" class="on">전체 <b></b></button><button data-seg="attn">주의 <b></b></button><button data-seg="inpatient">입원 <b></b></button><button data-seg="mcot">MCOT <b></b></button>
+        <label class="chk sm attnsort"><input type="checkbox" id="patAttnSort" checked> 주의 필요 순 정렬</label></div>
       <div class="row">
         <div class="field"><span>상태</span><select id="patStatus"><option value="admitted">입원/MCOT (모니터링 중)</option><option value="inpatient">입원만</option><option value="mcot">MCOT만 (원외)</option><option value="overseas">해외 체류 MCOT만</option><option value="pool">대기 프로필</option><option value="discharged">퇴원</option><option value="all">전체 (1만명)</option></select></div>
         <div class="field" style="flex:2"><span>검색</span><input type="text" id="patQ" placeholder="이름, 환자번호, MRN, 질환, 리듬(심방세동/afib), 병동(6A), 진료과(심장내과), 패치, 병상, 게이트웨이"></div>
@@ -181,6 +213,7 @@
 </section>
 <!-- ================= 시나리오 -->
 <section class="tab" data-tab="scn" data-title="시나리오">
+  <div class="applybar" id="applyBar" hidden><span class="ab-n" id="abN">0</span><div class="ab-t"><b>미적용 변경 <span id="abN2">0</span>건</b><span class="sub" id="abList"></span></div><span class="spacer"></span><button class="small" id="abRevert">되돌리기</button><button class="primary small" id="abApply">적용</button></div>
   <div class="card presetbar" id="presetBar"><h3><button class="fold" data-fold="presetBody" aria-expanded="true">▾</button>대표 테스트 시나리오 <span class="sub" id="presetState"></span><span class="right sub">휠로 고르면 아래 옵션에 미리 채워짐 · [적용]을 눌러야 에뮬레이터에 반영</span></h3>
     <div class="pwrap" id="presetBody">
       <div class="pwheel" id="pWheel" tabindex="0" role="listbox" aria-label="테스트 시나리오 선택 휠 (마우스 휠·드래그·화살표 키)"><div class="pw-lens"></div><div class="pw-track" id="pwTrack"></div></div>

@@ -118,22 +118,23 @@ const tabs = $$('section.tab');
 const nav = $('#tabs'), sel = $('#tabSelect');
 // 메뉴는 7개 묶음이다. 섹션(data-tab)은 그대로 두고 묶음이 여러 섹션을 함께 보여준다 —
 // 기존 코드의 `[data-tab="sig"].on` 같은 가시성 검사가 그대로 동작하게 하려는 것.
-const TAB_GROUPS = [
-  { id: 'dash', title: '운영 현황', show: ['dash'] },
-  { id: 'mon', title: '모니터링', show: ['pat', 'sig'] },
-  { id: 'hosp', title: '병원', show: ['hosp'] },
-  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'struct'] },       // 하위 메뉴 순서: ① 메디컬 월드 생성 · ② 시나리오 · ③ 시그널 송출 (show[1] 이 바뀜)
-  { id: 'test', title: '테스트', show: ['test'] },
-  { id: 'emr', title: 'EMR 연동', show: ['emr'] },
-  { id: 'log', title: '로그', show: ['log'] },
-  { id: 'data', title: '데이터', show: ['data'] },
+const TAB_GROUPS = [                                       // sec: 왼쪽 메뉴의 묶음 (관제 · 시험 · 기록)
+  { id: 'dash', title: '운영 현황', show: ['dash'], sec: '관제' },
+  { id: 'mon', title: '모니터링', show: ['pat', 'sig'], sec: '관제' },
+  { id: 'hosp', title: '병원 도면', show: ['hosp'], sec: '관제' },
+  { id: 'emu', title: '에뮬레이터 설정', show: ['emunav', 'struct'], sec: '시험' },       // 하위 메뉴 순서: ① 메디컬 월드 생성 · ② 시나리오 · ③ 시그널 송출 (show[1] 이 바뀜)
+  { id: 'test', title: '현장 테스트', show: ['test'], sec: '시험' },
+  { id: 'emr', title: 'EMR 연동', show: ['emr'], sec: '시험' },
+  { id: 'log', title: '로그', show: ['log'], sec: '기록' },
+  { id: 'data', title: '데이터', show: ['data'], sec: '기록' },
 ];
 const HELP_GROUP = { id: 'help', title: '도움말', show: ['guide', 'proto'] };
 const GROUP_OF = { chat: 'log', struct: 'emu', tx: 'emu' };
 [...TAB_GROUPS, HELP_GROUP].forEach(g => { GROUP_OF[g.id] = g.id; g.show.forEach(sid => { GROUP_OF[sid] = g.id; }); });
 let curGroup = 'dash', prevGroup = 'dash';
-TAB_GROUPS.forEach(g => {
-  const b = document.createElement('button'); b.textContent = g.title; b.dataset.tab = g.id; nav.appendChild(b);
+TAB_GROUPS.forEach((g, i) => {
+  if (!i || TAB_GROUPS[i - 1].sec !== g.sec) { const h = document.createElement('div'); h.className = 'nav-h'; h.textContent = g.sec; nav.appendChild(h); }
+  const b = document.createElement('button'); b.dataset.tab = g.id; b.innerHTML = `<i class="nd"></i><span class="nl">${g.title}</span><span class="nb" id="nb-${g.id}"></span>`; nav.appendChild(b);
   const o = document.createElement('option'); o.value = g.id; o.textContent = '메뉴: ' + g.title; sel.appendChild(o);
 });
 { const o = document.createElement('option'); o.value = 'help'; o.textContent = '메뉴: 도움말'; sel.appendChild(o); }
@@ -174,6 +175,7 @@ function showTab(id) {
   tabs.forEach(t => t.classList.toggle('on', shown.has(t.dataset.tab)));
   document.querySelector('main').dataset.grp = g.id;
   $$('button', nav).forEach(b => b.classList.toggle('on', b.dataset.tab === g.id));
+  { const pt = $('#pageTitle'); if (pt) pt.textContent = g.title; }
   $('#btnHelp').classList.toggle('on', g.id === 'help');
   sel.value = g.id; syncDropdowns(); try { localStorage.setItem('tab', g.id); } catch (e) { }
   if (shown.has('hosp')) { loadFloor(); drawElevation(); }
@@ -281,6 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // 로그 탭 라우터 채팅의 송수신 로그 스트립: 양쪽 누적 카운터를 받아 차분으로 초당 값을 만든다.
 // 라우터는 /api/v1/router/status 로 5초마다 같은 요약을 보내므로 .209 를 직접 부르지 않는다.
 let linkPrev = null, linkTimer = null;
+const ctrHist = [];                                                  // 라우터 이상 카운터 스냅숏 (대시보드 증가분 계산)
 const nfmt = cnum;
 const bfmt = cbytes;
 function linkCell(side, title, pairs) {
@@ -329,6 +332,7 @@ async function linkTick() {
     ]);
   }
   linkPrev = d;
+  if (d.rx && d.rx.anomalies) { ctrHist.push({ t: d.t, an: { ...d.rx.anomalies } }); while (ctrHist.length && d.t - ctrHist[0].t > 900) ctrHist.shift(); }
 }
 function linkStart() { if (linkTimer) return; linkTick(); linkTimer = setInterval(linkTick, 3000); }
 function linkStop() { if (linkTimer) { clearInterval(linkTimer); linkTimer = null; } }
@@ -680,6 +684,132 @@ function renderTxHealthEvents() {
 }
 // 값 뒤의 단위(KB/s, GB, %)는 작게 — 숫자는 크게 보이고 칸은 넘지 않게
 const kpiVal = (v) => { const m = typeof v === 'string' && v.match(/^(-?[\d.,]+[KMGT]?)(?:(%)|\s+([A-Za-z]+(?:\/s)?))$/); return m ? `${m[1]}<small>${m[2] ? '%' : ' ' + m[3]}</small>` : v; };
+// ================================================================ 화면 개선안 (2026-09-30): 사이드바 · 시스템 상태 · 운영 현황 대시보드 · 미적용 변경 바
+function renderShell(s, L, T, load) {
+  const tgt = s.target && s.target.ip ? `${s.target.ip}:${s.target.port}` : '';
+  const con = T.connected || 0, act = s.gw_active || s.gateways || 0;
+  const st = !s.running ? 'stop' : s.generate_only || !tgt ? 'idle' : con === 0 ? 'err' : 'run';
+  const hp = $('#hdrTx');
+  if (hp) { hp.className = 'pill ' + ({ run: 'run', err: 'err', idle: '', stop: '' }[st]); $('#hdrTxTxt').textContent = { run: `송출 중 → ${tgt}`, err: `라우터 미연결 → ${tgt}`, idle: '생성만 (송출 대상 없음)', stop: '정지' }[st]; }
+  const sc = $('#sideClock'); if (sc) sc.textContent = new Date(s.sim_time * 1000).toLocaleString('sv-SE', { hour12: false }).slice(0, 19);
+  const ss = $('#sideSub'); if (ss) ss.textContent = `속도 ×${CFG ? CFG.general.sim_speed : 1} · 워커 부하 ${fmt(load, 0)}%`;
+  // 사이드바 배지
+  const nb = (id, txt, cls = '') => { const e = document.getElementById('nb-' + id); if (e) { e.textContent = txt; e.className = 'nb ' + cls; } };
+  nb('mon', fmt(s.admitted));
+  let pend = 0; try { pend = SV && CFG ? scnPending().length : 0; } catch (e) { }
+  nb('emu', pend ? `미적용 ${pend}` : '', 'warn');
+  const ab = $('#applyBar');
+  if (ab) {
+    const on = pend > 0 && $('[data-tab="scn"]').classList.contains('on');
+    ab.hidden = !on;
+    if (on) {
+      $('#abN').textContent = pend; $('#abN2').textContent = pend;
+      const names = scnPending().slice(0, 4).map(id => { const el = document.getElementById(id); const f = el && el.closest('.field, label.chk'); const lab = f ? ((f.querySelector('span') || f).textContent || '').trim().split('\n')[0] : id;
+        const v0 = getPath(CFG, B[id]), v1 = getPath(SV, B[id]); return `${lab.slice(0, 18)} ${typeof v0 === 'boolean' ? (v0 ? 'ON' : 'OFF') : v0} → ${typeof v1 === 'boolean' ? (v1 ? 'ON' : 'OFF') : v1}`; });
+      $('#abList').textContent = names.join(' · ') + (pend > 4 ? ` 외 ${pend - 4}건` : '');
+    }
+  }
+  // 시스템 상태: 정상 항목은 접는다
+  const strip = $('#statusStrip');
+  if (strip) {
+    const pills = $$('.pill', strip).filter(x => x.id !== 'runPill' && x.id !== 'pillLink' && !x.hidden);
+    const normal = pills.filter(x => !(x.classList.contains('on') || x.classList.contains('bad') || x.classList.contains('err') || x.classList.contains('warn') || x.id === 'pillEmr'));
+    const showAll = strip.dataset.all === '1';
+    pills.forEach(x => x.classList.toggle('st-hide', !showAll && normal.includes(x)));
+    const hb = $('#stHidden'); if (hb) { hb.hidden = !normal.length; hb.textContent = showAll ? '정상 항목 접기' : `정상 항목 ${normal.length}개 숨김`; }
+  }
+  if (!$('[data-tab="dash"]').classList.contains('on')) return;
+  // ---- KPI 카드
+  const setK = (id, v, unit, foot, cls) => { const c = document.getElementById(id); if (!c) return; $('.dk-v b', c).textContent = v; if (unit !== null && unit !== undefined) $('.dk-v span', c).textContent = unit; const fs = $$('.dk-f', c); fs[fs.length - 1].innerHTML = foot; c.className = 'dk ' + (cls || ''); };
+  const pct = act ? con / act * 100 : 0;
+  setK('dkGw', fmt(con), `/ ${fmt(act)}`, `${fmt(pct, 0)}% 연결 · 설치 ${fmt(s.gateways)}대${L.gw_down ? ` · <b class="err">장애 ${fmt(L.gw_down)}</b>` : ''}`, st === 'err' ? 'bad' : pct < 95 && s.running ? 'warnc' : '');
+  { const bar = $('#dkGw .dk-bar i'); if (bar) { bar.style.width = Math.min(100, pct) + '%'; bar.className = pct < 95 ? 'w' : ''; } }
+  const win = sparkP.slice(-600).filter(x => x > 0);
+  setK('dkRate', cnum(L.pkts_ps), 'pkt/s', win.length ? `최근 ${Math.round(sparkP.slice(-600).length / 60)}분 · 최저 ${cnum(Math.min(...win))} · 최고 ${cnum(Math.max(...win))}` : '-');
+  setK('dkBytes', fmt((L.bytes_ps || 0) / 1e6, 2), 'MB/s', `누적 ${cbytes(T.bytes)} · ${cnum(T.pkts)} 패킷`);
+  const d = linkPrev, rx = d && d.rx ? d.rx : null, an = rx ? (rx.anomalies || {}) : {};
+  const anSum = Object.values(an).reduce((a, b) => a + (b || 0), 0);
+  const errPkt = (T.drop_emul || 0) + (T.drop_backlog || 0) + (T.send_err || 0);
+  const rxc = $('#dkRx');
+  if (rxc) {
+    const bad = anSum > 0 || (rx && rx.lost_packets);
+    $('.dk-v b', rxc).textContent = rx ? cnum(anSum) : '-';
+    $('.dk-v span', rxc).textContent = rx ? '이상' : '라우터 보고 없음';
+    $$('.dk-f', rxc)[0].innerHTML = rx ? `유실 ${cnum(rx.lost_packets)} · NACK ${cnum(rx.nack_tx)} · 복구 ${cnum(rx.recovered)}` : '';
+    const inc = ctrDelta();
+    $$('.dk-f', rxc)[1].innerHTML = rx ? (inc.total ? `최근 ${inc.mins}분 +${cnum(inc.total)}${inc.top ? ` (${esc(inc.top)} 증가)` : ''}` : `최근 ${inc.mins || 5}분 증가 없음`) + ` · 송신 오류 pkt ${cnum(errPkt)}` : '';
+    rxc.className = 'dk ' + (bad ? 'bad' : '');
+  }
+  // ---- 파이프라인
+  const emrName = ($('#pillEmr') && $('#pillEmr').textContent || '').replace(/^EMR\s*/, '') || '에뮬레이터';
+  const node = (kicker, name, meta, stat, kind) => `<div class="pn ${kind}"><div class="pn-h"><i></i><span>${kicker}</span><b>${stat}</b></div><div class="pn-n">${esc(name)}</div><div class="pn-m">${meta}</div></div>`;
+  const arrow = '<svg class="pa" width="36" height="16" viewBox="0 0 36 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h26M24 3l6 5-6 5"/></svg>';
+  const rxStale = d && (d.rx_age_s ?? 999) > 20;
+  const pipe = $('#dPipe');
+  if (pipe) pipe.innerHTML = [
+    node('송신', '에뮬레이터', `패치 ${fmt(L.active_patches)} · 워커 ${fmt(load, 0)}%`, s.running ? '정상' : '정지', s.running ? (load > 70 ? 'warn' : 'ok') : 'idle'),
+    node('중계', `게이트웨이 ${fmt(s.gateways)}`, `장애 ${fmt(L.gw_down)} · 저하 ${fmt(L.gw_degraded)} · 끊김 ${fmt(L.gw_uplink_lost)}`, L.gw_down ? `장애 ${fmt(L.gw_down)}` : (L.gw_degraded ? '저하' : '정상'), L.gw_down ? 'err' : L.gw_degraded ? 'warn' : 'ok'),
+    node('수신', rx ? (rx.name || 'router').toUpperCase() : '라우터', `${tgt || '-'} · ${rx ? cnum(rx.records) + ' 레코드' : '보고 없음'}`, st === 'err' ? '미연결' : !rx ? '보고 없음' : rxStale ? `${d.rx_age_s}s 전` : anSum ? `이상 ${cnum(anSum)}` : '정상', st === 'err' ? 'err' : !rx || rxStale ? 'warn' : anSum ? 'err' : 'ok'),
+    node('연동', `EMR ${emrName}`, emrName === '에뮬레이터' ? '에뮬레이터 자체 EMR' : '연동 병원 EMR', '정상', 'ok'),
+  ].join(arrow);
+  // ---- 규모
+  const scale = $('#dScale');
+  if (scale) {
+    const tr = CFG && CFG.transport.truth && CFG.transport.truth.enabled ? ({ basic: 16, standard: 32, precise: 64 }[CFG.transport.truth.grade] || 0) : 0;
+    const it = [[fmt(s.inpatients), '입원 환자'], [fmt(s.outpatients), 'MCOT 환자'], [fmt(s.bed_capacity), '병상'], [fmt(s.gateways), '게이트웨이'], [tr ? '+' + tr : '끔', '정답 패치'],
+      [fmt(L.unlinked_patches), '연결 끊김 패치', L.unlinked_patches ? 'warn' : ''], [`×${CFG ? CFG.general.sim_speed : 1}`, '시뮬 속도'], [fmt(s.bank.variants), '루프 변형'], [fmt(s.n_workers), '워커']];
+    scale.innerHTML = it.map(([v, k, c]) => `<div><b class="${c || ''}">${v}</b><small>${k}</small></div>`).join('');
+  }
+  renderCounters();
+}
+function ctrDelta() {                                                // 약 5분 전 스냅숏 대비 증가분
+  if (ctrHist.length < 2) return { total: 0, mins: 0, by: {} };
+  const now = ctrHist[ctrHist.length - 1], t0 = now.t - 300;
+  const base = ctrHist.find(x => x.t >= t0) || ctrHist[0];
+  const by = {}; let total = 0, top = '', topv = 0;
+  for (const [k, v] of Object.entries(now.an)) { const b = base.an[k] ?? 0; const dv = v >= b ? v - b : v; by[k] = dv; total += dv; if (dv > topv) { topv = dv; top = k; } }
+  return { total, by, top, mins: Math.max(1, Math.round((now.t - base.t) / 60)) };
+}
+function renderCounters() {
+  const box = $('#dCtr'); if (!box) return;
+  const d = linkPrev, an = d && d.rx ? (d.rx.anomalies || {}) : null;
+  if (!an) { box.innerHTML = '<div class="sub">라우터 보고 없음</div>'; return; }
+  const keys = Object.keys(an).sort((a, b) => an[b] - an[a]);
+  if (!keys.length) { box.innerHTML = '<div class="sub">이상 없음</div>'; return; }
+  const mx = Math.max(1, ...keys.map(k => an[k])), inc = ctrDelta();
+  box.innerHTML = keys.map(k => `<div class="ctr-r"><span class="mono">${esc(k)}</span><div class="ctr-b"><i style="width:${(an[k] / mx * 100).toFixed(1)}%" class="${inc.by[k] ? 'hot' : ''}"></i></div><b class="mono">${cnum(an[k])}</b><em class="mono">${inc.by[k] ? '+' + cnum(inc.by[k]) : ''}</em></div>`).join('');
+}
+// 최근 이벤트: 분류 탭 + 반복 이벤트 묶기 (숫자·이름만 다른 같은 문장은 한 줄로)
+const EV_CAT = { 전체: null, 송출: ['tx', 'backhaul'], 연결: ['link', 'gateway', 'network'], 리듬: ['rhythm'], 임상: ['clinical'], 입퇴원: ['adt', 'patch', 'exam'], 시스템: ['system', 'error', 'test', 'autotune', 'script'] };
+let evCat = '전체';
+function renderDashEvents() {
+  const box = $('#dashEvents'); if (!box) return;
+  const tabs = $('#dEvTabs');
+  if (tabs) tabs.innerHTML = Object.keys(EV_CAT).map(c => { const ks = EV_CAT[c]; const n = ks ? evAll.filter(e => ks.includes(e.kind)).length : evAll.length;
+    return `<button type="button" role="tab" data-cat="${c}" aria-selected="${c === evCat}" class="${c === evCat ? 'on' : ''}">${c} <span class="mono">${cnum(n)}</span></button>`; }).join('');
+  const ks = EV_CAT[evCat];
+  let list = evAll.filter(e => !ks || ks.includes(e.kind)).slice().reverse();
+  const n0 = list.length;
+  if ($('#dEvGroup') && $('#dEvGroup').checked) {
+    const out = []; const idx = new Map();
+    const sig = (e) => e.kind + '|' + String(e.msg).replace(/[\d.,:]+/g, '#').replace(/[가-힣A-Za-z]{2,4}(?= \()/g, '@').slice(0, 60);
+    for (const e of list) { const k = sig(e); if (idx.has(k)) out[idx.get(k)].n++; else { idx.set(k, out.length); out.push({ ...e, n: 1 }); } }
+    list = out;
+  }
+  const shown = list.slice(0, 40);
+  box.innerHTML = shown.length ? shown.map(e => `<div class="ev2 ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t mono">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span class="m">${esc(e.msg)}</span><span class="x mono">${e.n > 1 ? '×' + e.n : ''}</span></div>`).join('')
+    : '<div class="sub" style="padding:12px 16px">표시할 이벤트가 없습니다</div>';
+  const f = $('#dEvFoot'); if (f) f.textContent = `최근 ${cnum(n0)}건 중 ${cnum(shown.length)}개${list.length !== n0 ? ' 묶음' : ''} 표시`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('#dEvTabs button[data-cat]'); if (b) { evCat = b.dataset.cat; renderDashEvents(); return; }
+  if (e.target.closest('#dEvAll')) { e.preventDefault(); showTab('log'); return; }
+  if (e.target.closest('.dk-a')) { e.preventDefault(); const c = $('#dCounters'); if (c) c.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  if (e.target.closest('#stHidden')) { const s = $('#statusStrip'); s.dataset.all = s.dataset.all === '1' ? '' : '1'; if (STATS) renderShell(STATS, STATS.last || {}, (STATS.last || {}).total || {}, 0); }
+  if (e.target.closest('#abRevert')) { SCN_DRAFT = {}; scnRefresh(); toast('미적용 변경을 되돌렸습니다'); }
+  if (e.target.closest('#abApply')) { const a = $('#pApply'); if (a) a.click(); }
+});
+{ const g = $('#dEvGroup'); if (g) g.addEventListener('change', renderDashEvents); }
 function kpi(l, v, cls = '', full = '') { return `<div class="kpi ${cls}"${full ? ` title="${full}"` : ''}><div class="v">${kpiVal(v)}</div><div class="l">${l}</div></div>`; }
 async function refresh() {
   try { STATS = await api('/status'); } catch (e) { $('#runPill').className = 'pill err'; $('#runTxt').textContent = '서버 연결 실패'; return; }
@@ -713,8 +843,9 @@ async function refresh() {
     kpi('게이트웨이', `${fmt(s.gateways)}`) + kpi('GW 장애 / 저하', `${fmt(L.gw_down)} / ${fmt(L.gw_degraded)}`, L.gw_down ? 'err' : '') + kpi('pkt/s', cnum(L.pkts_ps), 'ok', exact(L.pkts_ps)) + kpi('전송률', cbytes(L.bytes_ps) + '/s') +
     kpi('총 패킷', cnum(T.pkts), '', exact(T.pkts)) + kpi('총 전송량', cbytes(T.bytes), '', exact(T.bytes) + ' B') + kpi('에뮬 손실 pkt', cnum(T.drop_emul), '', exact(T.drop_emul)) + 
     kpi('워커 부하', fmt(load, 0) + '%', load > 70 ? 'err' : load > 40 ? 'warn' : 'ok') + kpi('bank 변형', fmt(s.bank.variants));
-  sparkP.push(L.pkts_ps || 0); sparkB.push((L.bytes_ps || 0) / 1024); if (sparkP.length > 120) { sparkP.shift(); sparkB.shift(); }
-  drawSpark($('#sparkPkts'), sparkP, TH().acc); drawSpark($('#sparkBytes'), sparkB, TH().acc2);
+  sparkP.push(L.pkts_ps || 0); sparkB.push((L.bytes_ps || 0) / 1024); if (sparkP.length > 600) { sparkP.shift(); sparkB.shift(); }
+  drawSpark($('#sparkPkts'), sparkP.slice(-120), TH().acc); drawSpark($('#sparkBytes'), sparkB.slice(-120), TH().acc2);
+  try { renderShell(s, L, T, load); } catch (e) { console.error('shell', e); }
   const b = s.bank, p = b.progress;
   $('#bankInfo2').textContent = `${b.loaded ? '로드됨' : '미생성'} · 변형 ${b.variants} · ${b.size_mb} MB · ${p.state}${p.state === 'running' ? ` ${p.done}/${p.total} (${p.message}, ETA ${fmt(p.eta_s)}s)` : ''}`;
   $('#bankBar2').style.width = (p.total ? p.done / p.total * 100 : (b.loaded ? 100 : 0)) + '%';
@@ -730,7 +861,7 @@ async function pollEvents() {
     const r = await api('/events?since=' + lastEvSeq); if (!r.events.length) return;
     evAll = evAll.concat(r.events).slice(-600); lastEvSeq = evAll[evAll.length - 1].seq; renderTxHealthEvents();
     const html = (list) => list.slice().reverse().map(e => `<div class="ev ${e.kind}${e.level ? ' lvl-' + e.level : ''}"><span class="t">${hhmm(e.t)}</span><span class="k">${evKindLabel(e)}</span><span>${esc(e.msg)}</span></div>`).join('');
-    $('#dashEvents').innerHTML = html(evAll.slice(-40));
+    renderDashEvents();
     if ($('[data-tab="log"]').classList.contains('on')) renderLog();
     if (r.events.some(e => e.kind === 'adt' || e.kind === 'system')) loadPatientList();
   } catch (e) { }
@@ -937,7 +1068,21 @@ async function loadPatCard() {
 }
 
 // ---------------------------------------------------------------- patients tab (sortable, 2-line rows, 10 per page)
-let patPage = 0, patSort = { key: 'id', dir: 1 }, patCache = { key: '', items: [] };
+let patPage = 0, patSort = { key: 'id', dir: 1 }, patCache = { key: '', items: [] }, patSeg = 'all';
+// 주의 필요도: 2 = 위급(치명 리듬·리드 오프·배터리 < 10 %), 1 = 주의(부정맥 에피소드·배터리 < 20 %·게이트웨이 미연결), 0 = 없음
+const ATTN_RED = /심실세동|VFib|심실빈맥|\(VT\)|3도|무수축/;
+function attnOf(p) {
+  const why = [];
+  let a = 0;
+  if (p.status === 'pool' || p.status === 'discharged') return { _attn: 0, _why: '' };
+  if (ATTN_RED.test(p.rhythm_label || '')) { a = 2; why.push(p.rhythm_label); }
+  if (p.lead_off) { a = 2; why.push('리드 오프'); }
+  if (p.battery >= 0 && p.battery < 10) { a = 2; why.push(`배터리 ${p.battery}%`); }
+  else if (p.battery >= 0 && p.battery < 20) { a = Math.max(a, 1); why.push(`배터리 ${p.battery}%`); }
+  if (p.episode) { a = Math.max(a, 1); why.push('부정맥 에피소드'); }
+  if (!p.gateway && (p.status === 'admitted' || p.status === 'outpatient' || p.row >= 0)) { a = Math.max(a, 1); why.push('게이트웨이 미연결'); }
+  return { _attn: a, _why: why.join(' · ') };
+}
 try { const ps = JSON.parse(localStorage.getItem('patSort') || 'null'); if (ps && ps.key) patSort = ps; } catch (e) { }
 const PAGE = 10;
 const fmtLeftH = (h) => h == null ? '-' : h >= 48 ? `${Math.floor(h / 24)}일` : h >= 1 ? `${Math.round(h)}시간` : `${Math.round(h * 60)}분`;
@@ -953,13 +1098,18 @@ async function loadPatients(force = false) {
     patCache = { key: ck, items: src.map(p => ({ ...p, devn: (p.devices || []).length, rhythm_label: p.rhythm_label || (META && META.rhythms[p.rhythm] ? META.rhythms[p.rhythm].label : p.rhythm),
       bed: p.bed || (p.admission ? p.admission.bed : '') || '', gateway: p.gateway || '', activity: p.activity || p.status || '', battery: p.battery ?? -1, rssi: p.rssi ?? -999, patch_id: (p.patch_id ?? (p.admission ? p.admission.patch_id : 0)) || 0, patient_no: p.patient_no ?? (p.admission ? p.admission.patient_no : null) ?? -1, rx_days: p.rx_days ?? 0, rx_left_h: p.rx_left_h ?? 1e9, patch_wear_days: p.patch_wear_days ?? -1, ward: p.ward || (p.admission ? p.admission.ward_name : '') || '', specialty: p.specialty || p.ward_specialty || '' })) };
   }
-  const items = patCache.items.slice();
-  const k = patSort.key, d = patSort.dir;
-  items.sort((a, b) => { const x = a[k], y = b[k]; if (x === y) return a.id - b.id; if (typeof x === 'number' && typeof y === 'number') return (x - y) * d; return String(x).localeCompare(String(y), 'ko') * d; });
+  patCache.items.forEach(p => { if (p._attn === undefined) Object.assign(p, attnOf(p)); });
+  const segN = { all: patCache.items.length, attn: 0, inpatient: 0, mcot: 0 };
+  patCache.items.forEach(p => { if (p._attn > 0) segN.attn++; if (p.outpatient) segN.mcot++; else segN.inpatient++; });
+  $$('#patSeg button').forEach(b => { b.classList.toggle('on', b.dataset.seg === patSeg); b.setAttribute('aria-pressed', String(b.dataset.seg === patSeg)); $('b', b).textContent = fmt(segN[b.dataset.seg]); });
+  let items = patCache.items.slice();
+  if (patSeg === 'attn') items = items.filter(p => p._attn > 0); else if (patSeg === 'inpatient') items = items.filter(p => !p.outpatient); else if (patSeg === 'mcot') items = items.filter(p => p.outpatient);
+  const k = patSort.key, d = patSort.dir, byAttn = $('#patAttnSort') && $('#patAttnSort').checked;
+  items.sort((a, b) => { if (byAttn && a._attn !== b._attn) return b._attn - a._attn; const x = a[k], y = b[k]; if (x === y) return a.id - b.id; if (typeof x === 'number' && typeof y === 'number') return (x - y) * d; return String(x).localeCompare(String(y), 'ko') * d; });
   const pages = Math.max(1, Math.ceil(items.length / PAGE)); patPage = Math.min(patPage, pages - 1);
   $('#patCount').textContent = `총 ${fmt(items.length)}명 · ${patPage * PAGE + 1}-${Math.min(items.length, (patPage + 1) * PAGE)}`;
   $$('#patHead button').forEach(b => { b.classList.toggle('on', b.dataset.sort === k); b.classList.toggle('desc', b.dataset.sort === k && d < 0); });
-  $('#patBody').innerHTML = items.slice(patPage * PAGE, (patPage + 1) * PAGE).map(p => `<div class="prow" data-id="${p.id}" data-row="${p.row ?? -1}">
+  $('#patBody').innerHTML = items.slice(patPage * PAGE, (patPage + 1) * PAGE).map(p => `<div class="prow${p._attn >= 2 ? ' attn-err' : p._attn ? ' attn-warn' : ''}" data-id="${p.id}" data-row="${p.row ?? -1}"${p._why ? ` title="주의: ${esc(p._why)}"` : ''}>
     <div class="who"><img src="/api/v1/emr/patients/${p.id}/avatar.svg" loading="lazy" alt=""><div><div class="l1">${esc(p.name)} <span class="sub">${p.sex}/${p.age}</span></div><div class="l2">환자번호 #${p.patient_no ?? '-'} · 프로필 #${p.id} · ${esc(p.mrn || '')}</div></div></div>
     <div><div class="l1">${esc(p.disease)}${p.pacemaker ? ` <span class="tag warn">⚡${(p.pacemaker_type || (p.pacemaker_info && p.pacemaker_info.type)) === 'icd' ? 'ICD' : (p.pacemaker_mode || (p.pacemaker_info && p.pacemaker_info.mode) || 'PM')}</span>` : ''}</div><div class="l2">${esc(p.rhythm_label)}</div></div>
     <div><div class="l1">${esc(p.bed || '-')}${p.overseas ? ` <span class="tag warn" title="${esc(abroadTitle(p.abroad))}">해외 · ${esc((p.abroad && p.abroad.country_label) || '')}</span>` : ''}${p.ward ? ` <span class="sub">${esc(p.ward)}</span>` : ''}</div><div class="l2">${esc(p.specialty || '')}${p.specialty ? ' · ' : ''}${esc(p.gateway || (p.status === 'admitted' || p.status === 'outpatient' ? '연결 없음' : p.status || '-'))}</div></div>
@@ -984,6 +1134,8 @@ async function loadPatients(force = false) {
   pg.innerHTML = html;
 }
 $('#patStatus').onchange = $('#patQ').oninput = () => { patPage = 0; loadPatients(); };
+$('#patSeg').addEventListener('click', e => { const b = e.target.closest('button[data-seg]'); if (!b) return; patSeg = b.dataset.seg; patPage = 0; loadPatients(); });
+$('#patAttnSort').addEventListener('change', () => { patPage = 0; loadPatients(); });
 $('#patPager').addEventListener('click', e => { const b = e.target.closest('button[data-pg]'); if (b && !b.disabled) { patPage = Number(b.dataset.pg); loadPatients(); } });
 $('#patHead').addEventListener('click', e => { const b = e.target.closest('button[data-sort]'); if (!b) return; if (patSort.key === b.dataset.sort) patSort.dir *= -1; else patSort = { key: b.dataset.sort, dir: 1 }; try { localStorage.setItem('patSort', JSON.stringify(patSort)); } catch (e) { } patPage = 0; loadPatients(); });
 setInterval(() => { if ($('[data-tab="pat"]').classList.contains('on')) loadPatients(true); }, 10000);
