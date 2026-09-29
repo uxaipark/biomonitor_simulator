@@ -373,6 +373,15 @@
       <div class="row"><div class="field"><span>워커 프로세스 (0=자동)</span><input type="number" id="t_workers" min="0" max="16"></div><div class="field"><span>송신 백로그 한도 (bytes)</span><input type="number" id="t_backlog" min="4096" step="4096"></div></div>
       <div class="help">전송 설정은 즉시 반영됩니다 (워커가 소켓을 재연결).</div>
     </div></div>
+    <div class="card tx-truth" data-apply="now"><h3><button class="fold" data-fold="txb-4" aria-expanded="true">▾</button>정답 전용 패치 (파형 알고리즘 채점) <span class="sub" id="truthState"></span></h3><div class="scnb" id="txb-4">
+      <div class="row"><label class="chk" style="align-self:flex-end"><input type="checkbox" id="tr_en"> 정답 패치 송출</label>
+        <div class="field" style="flex:2"><span>등급 세트</span><select id="tr_grade"><option value="basic">간소 — 16채널 (핵심 리듬 13종)</option><option value="standard">일반 — 32채널 (25종)</option><option value="precise">정밀 — 64채널 (전체 27종)</option></select></div></div>
+      <div class="row"><div class="field"><span>리듬·변형 교체 간격 최소 (초)</span><input type="number" id="tr_hop0" min="10" max="3600"></div><div class="field"><span>최대 (초)</span><input type="number" id="tr_hop1" min="10" max="7200"></div><div class="field"><span>교체 때 리듬 종류 변경 (%)</span><input type="number" id="tr_sw" min="0" max="100"></div></div>
+      <div class="row"><div class="field"><span>동작 아티팩트 (%/h·패치)</span><input type="number" id="tr_art" min="0" max="100"></div><div class="field"><span>잡음 (%/h·패치)</span><input type="number" id="tr_nz" min="0" max="100"></div><div class="field"><span>리드 오프 (%/h·패치)</span><input type="number" id="tr_lo" min="0" max="100"></div></div>
+      <div class="help">실제 환자가 아닌 가상 패치가 정답 게이트웨이(TGW-01/02)로 파형 + <b>정답 레코드(채널 11)</b>를 같은 프레임에 보냅니다 — 리듬(전환 중이면 이전 리듬도), R-peak 위치·박동 종류, 참 HR, 모든 페이스 스파이크 위치·챔버, 아티팩트/잡음/리드오프/재부착 안정화 플래그. 아티팩트·잡음·리드오프 중에도 정답은 계속 나갑니다. 라우터는 이 패치로 알고리즘을 실시간 채점합니다.</div>
+      <div id="truthSets" class="sub" style="margin:6px 0"></div>
+      <div class="tbl" style="max-height:26vh"><table id="truthTable"><thead><tr><th>#</th><th>시리얼</th><th>patch_id</th><th>GW</th><th>리듬</th><th>상태</th><th>다음 교체</th></tr></thead><tbody></tbody></table></div>
+    </div></div>
     <div class="card tx-stats"><h3><button class="fold" data-fold="txb-2" aria-expanded="true">▾</button>전송 통계</h3><div class="scnb" id="txb-2"><div class="kpis" id="txKpis"></div>
       <h3 style="margin-top:10px">워커</h3><div class="tbl" style="max-height:30vh"><table id="wTable"><thead><tr><th>#</th><th>alive</th><th>패치</th><th>GW</th><th>ticks</th><th>overrun</th><th>build µs</th><th>send µs</th></tr></thead><tbody></tbody></table></div>
     </div></div>

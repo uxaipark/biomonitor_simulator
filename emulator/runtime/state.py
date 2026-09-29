@@ -47,6 +47,7 @@ PATCH_FIELDS = [
     ("gl_add", np.float32),
     ("attach_tick", np.int64),   # tick when the patch was (re)attached -> electrode settling transient (0 = none)
     ("detach_tick", np.int64),   # tick when the electrodes came off -> brief violent artefact before the rail
+    ("truth", np.uint8),         # 1 = 정답 전용 벤치마크 패치: 프레임마다 TRUTH 레코드(채널 11)를 같이 보낸다
 ]
 GW_FIELDS = [
     ("active", np.uint8),

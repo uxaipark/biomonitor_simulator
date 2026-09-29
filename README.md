@@ -91,7 +91,7 @@ Control: 라우터→게이트웨이, 같은 소켓, 헤더 flags 0x08(F_CTRL), 
 두 종류의 순번이 있습니다. 헤더의 `seq`는 **게이트웨이 프레임** 순번이라 게이트웨이→라우터 구간의 유실을, 레코드의 `seq`는 **패치가 자기 패킷마다 붙이는 순번**이라 패치→게이트웨이(BLE)→라우터 전체 구간에서 어느 패치의 몇 번째 패킷이 사라졌는지를 알려 줍니다. 저장 후 전송 재전송은 원래 번호를 그대로 갖고 오고, 페이스메이커 스파이크 레코드는 같은 프레임의 데이터 레코드와 같은 번호입니다. 엄격 수신기·검증 도구·라우터는 `patch_seq_gap/missing/dup/reorder`로 집계하고 라우터의 패치별 index.json에 `lost`가 누적됩니다.
 Channel: ch_id u8 | dtype u8 | n u16 | data
 ```
-채널: 1 ECG(int16, 0.001 mV) 2 HR 3 체온(int16, 0.01 °C) 4 호흡수 5 SpO2 6 혈당(uint16, 0.1 mg/dL) 7 가속도(int16×3, 0.001 g) 8 PPG 9 호흡파형 10 페이스마커.
+채널: 1 ECG(int16, 0.001 mV) 2 HR 3 체온(int16, 0.01 °C) 4 호흡수 5 SpO2 6 혈당(uint16, 0.1 mg/dL) 7 가속도(int16×3, 0.001 g) 8 PPG 9 호흡파형 10 페이스마커. **11 정답(TRUTH, uint8 블록 — 정답 전용 벤치마크 패치만)**.
 수치 채널은 초당 1회, 패치별로 프레임을 엇갈려 보냅니다. META 블록은 재연결 직후와 `meta_every_n_frames` 마다(게이트웨이별 시차) 채널 구성·패치↔환자 매핑을 실어 나릅니다.
 전체 명세는 `GET /api/v1` 의 `stream_protocol` 로 기계가독 형태로 제공되며, `tools/receiver.py` 가 디코더 레퍼런스입니다.
 
@@ -137,6 +137,25 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 검증 도구: `tools/receiver.py --strict --save-frames DIR`는 `emulator/runtime/verify.py`의 StreamChecker로 각 연결을 검사해 bad magic/version/length, garbage(재동기화), seq gap/dup/reorder, ts 역행, 알 수 없는 채널을 집계합니다. `tools/verify_capture.py --capture data/runtime/capture --received DIR`는 캡처(정답)와 수신 프레임을 (gw_id, seq) 단위로 대조해 누락·초과·바이트 불일치·순서 위반을 보고합니다(문제가 있으면 종료 코드 1). `tests/`는 pytest로 프로토콜 왕복, 모든 오염 종류의 검출, NIBP 결정성, 도면 규정, 스크립트 파일을 검사합니다: `.venv/bin/python -m pytest -q tests`.
 
 **병원 규모 = 환자 수 기준** (`hospital.size_by_patients`, 기본 켜짐): 생성되는 병원의 병상 수는 시나리오의 모니터링 환자 수 ÷ (1 − 여유율)로 정합니다. 기본 여유율 20 %이므로 환자 500명이면 625병상, 2000명이면 2500병상 규모를 만들고, 건물은 1~3동(`hospital.max_buildings`)까지만 늘린 뒤 층수를 늘립니다. 템플릿도 그 병상 수로 자동 선택되므로 환자가 적으면 소규모 지역병원 1동 몇 층짜리가 나옵니다. 한 동은 병동 층 12개(소규모 템플릿 8개)까지 채운 뒤 다음 동을 만들고, 층 단위 반올림으로 남는 병상은 위층 병실을 "(공실)"로 비워 목표 병상 수(±1 %)에 맞춥니다(예: 500명 → 628병상 1동 9층, 1000명 → 1250병상 3동 14층, 2000명 → 2503병상 3동 20층). 병원 탭의 건축 도면 영역은 정사각형이며 건물 측면도는 그 높이에 맞춰 층 높이·글자 크기가 정해지고(최대 2.2 px/단위) 세로 가운데 정렬됩니다. 환자 수를 바꾸면 설정 응답에 `needs_rebuild`가 서고 병원 탭 제목에 "규모 불일치" 표시가 뜨며, [템플릿 재생성] 또는 [병원·환자 재구성]으로 맞춥니다. 끄면 `general.bed_capacity` 그대로의 대형 병원을 만듭니다(`/api/v1/emr/hospital`의 `sizing`에 계획/실제 병상이 나옵니다).
+
+## 정답 전용 벤치마크 패치 (`emulator/runtime/truthbench.py`) — 파형 알고리즘 실시간 채점
+
+실제 환자가 아닌 가상 패치가 정답 게이트웨이(`TGW-01/02`, 도면 밖, META `benchmark: true`)로 **파형 + 정답 레코드(채널 11)** 를 같은 프레임에
+보낸다. 라우터는 이 패치로 R-peak 검출·HR·리듬 분류·페이스 검출 정확도를 실시간으로 잰다. 설정은 ③ 시그널 송출의 [정답 전용 패치] 카드
+또는 `transport.truth`, 상태는 `GET /api/v1/truth`.
+
+| 등급 세트 | 채널(패치) | 구성 |
+| --- | --- | --- |
+| 간소 `basic` | 16 | NSR 2 · 동서맥 1 · 동빈맥 1 · AFib 2 · 심방조동 1 · PVC 2 · PAC 1 · VT 1 · SVT 1 · 3도 AVB 1 · LBBB 1 · DDD 페이싱 1 · VFib 1 (13종) |
+| 일반 `standard` | 32 | 위에 더해 AFib RVR · 이단맥 · NSVT · 1도/2도(M-I, M-II) AVB · RBBB · STEMI · 허혈 · VVI 페이싱 · 페이스메이커 오작동 · 동정지 (25종) |
+| 정밀 `precise` | 64 | 27종 전부, 임상적으로 중요한 부정맥에 2~5개 (AFib 5 · PVC 4 · NSR 4 · AFib RVR/조동/PAC/NSVT/SVT 3 …) |
+
+* `hop_s`(기본 120~480 초)마다 같은 리듬의 다른 변형으로, `switch_rhythm_pct`(35 %)면 다른 리듬으로 바꾼다 — 전환은 프레임 단위로 정확하고 크로스페이드 동안 정답에 `rhythm_prev`·`switching`이 붙는다.
+* 시간당 패치당 `artifact_pct`/`noise_pct`/`lead_off_pct`(15/10/6 %) 확률로 동작 아티팩트(10~60 초)·잡음(10~40 초)·리드 오프(10~40 초)가 들어가고, **그 동안에도 정답은 계속 나간다**(플래그·수준, 리드오프면 HR 0, 재부착 뒤 `settling`).
+* 페이싱 리듬 패치는 **모든** 스파이크 위치·챔버를 정답에 싣는다(채널 10 하드웨어 검출 손실과 무관). 단극(mV급)/양극(sub-mV) 스파이크를 번갈아 배치.
+* 정답 블록(v1): `u8 ver | u8 rhythm(RHYTHM_CODES) | u8 rhythm_prev(255 없음) | u8 flags | u8 art_level(×0.01) | u8 noise_level(×0.001) | u16 hr | u8 n_beats + n×(u16 offset, u8 kind) | u8 n_pace + n×u16(bits 0-13 offset, 14-15 chamber)`. 오프셋은 같은 프레임 ECG 블록 안 표본 인덱스, 레코드 seq 는 ECG 레코드와 같다. flags: 0x01 lead_off 0x02 artifact 0x04 noise 0x08 paced 0x10 switching 0x20 settling 0x40 beats_unavailable. 코드표는 `GET /api/v1` 의 채널 11 항목.
+* R-peak·박동 종류 주석은 루프 은행에 들어 있다(2026-09-29 이후 생성분). 옛 은행이면 `beats_unavailable` 플래그가 서고 박동 목록이 비니 [루프 은행 재생성]이 필요하다.
+* 정답 패치는 환자 목록·병상·패치 레지스트리·라벨 API 에 나타나지 않는다(`patch_id` 0xF0000+, `patient_id` 900001+, 시리얼 `TR-xxxx`).
 
 ## 건축 도면 엔진 (`emulator/hospital/layout.py`)
 

@@ -12,7 +12,7 @@ import numpy as np
 
 from .ecg import (Morphology, beat_waves, render_waves, periodic_wander, powerline,
                   colored_noise, circular_smooth)
-from .rhythms import RHYTHMS, generate_beats, pick_hr, CONDUCTED
+from .rhythms import RHYTHMS, generate_beats, pick_hr, CONDUCTED, BEAT_KIND_ID
 
 
 def _resp_profile(rng: np.random.Generator, seconds: int, resp_fs: int, kind: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -259,11 +259,12 @@ def generate_bundle(rhythm: str, seed: int, ecg_fs: int = 250, ppg_fs: int = 100
 
     resp_i16 = np.clip(np.rint(resp_wave * 1000.0), -32000, 32000).astype(np.int16)
     r_idx = np.array([int(round(times[i] * ecg_fs)) % n_ecg for i in conducted_idx], dtype=np.int32)
+    r_kind = np.array([BEAT_KIND_ID.get(kinds[i], 0) for i in conducted_idx], dtype=np.uint8)      # 정답 레코드용 박동 종류
     return {
         "ecg": ecg_i16, "ppg": ppg_i16, "resp_wave": resp_i16,
         "hr": hr_sec, "rr_cap": rr_cap, "rr_edr": rr_edr, "rr_spo2": rr_spo2,
         "spo2_finger": spo2_finger, "spo2_ring": spo2_ring, "spo2_wrist": spo2_wrist,
-        "pace": np.array([m for m, _ in pace_marks], dtype=np.uint32), "pace_type": np.array([t for _, t in pace_marks], dtype=np.uint8), "rpeaks": r_idx,
+        "pace": np.array([m for m, _ in pace_marks], dtype=np.uint32), "pace_type": np.array([t for _, t in pace_marks], dtype=np.uint8), "rpeaks": r_idx, "rkinds": r_kind,
         "meta": {"rhythm": rhythm, "label": spec["label"], "cls": spec["cls"], "hr_mean": float(hr_sec[hr_sec > 0].mean()) if (hr_sec > 0).any() else 0.0,
                  "resp_kind": resp_kind, "age": age, "sex": sex, "seed": seed, "ecg_fs": ecg_fs, "ppg_fs": ppg_fs,
                  "resp_fs": resp_fs, "seconds": seconds, "n_beats": len(beats), "spo2_base": float(spo2_base), "pm": info.get("pm", {})},

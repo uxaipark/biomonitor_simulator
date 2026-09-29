@@ -17,11 +17,12 @@ import traceback
 import struct
 import numpy as np
 
-from ..config import (CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE, CHANNELS,
+from ..config import (CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE, CHANNELS, CH_TRUTH,
                       RESP_SOURCES, SPO2_SOURCES)
 from ..signals.accel import POSTURES
 from ..signals.loops import LoopBank
-from .protocol import (record_dtype, fill_constants, pace_record, frame, gwstat_block, meta_block, F_META, F_GWSTAT, F_KEEPALIVE, HEADER,
+from .protocol import (record_dtype, fill_constants, pace_record, truth_record, truth_block, RHYTHM_CODE_ID, T_LEAD_OFF, T_ARTIFACT, T_NOISE, T_PACED, T_SWITCH, T_SETTLING, T_NO_BEATS,
+                       frame, gwstat_block, meta_block, F_META, F_GWSTAT, F_KEEPALIVE, HEADER,
                        CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl)
 from collections import deque
 from .realsig import MAP_PATH as RS_MAP_PATH
@@ -323,6 +324,60 @@ class Gather:
                 out, typ = out[keep], typ[keep]
         return out.astype(np.uint16), typ.astype(np.uint8)
 
+    # ---------------------------------------------------------------- 정답(TRUTH) 레코드 — 벤치마크 패치 행만
+    def _marks_in_frame(self, row: int, tick: int, spt: int, fs: int, marks: np.ndarray, types: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """루프 표본 인덱스 목록(marks) 중 이 프레임이 덮는 구간에 드는 것을 프레임 내 오프셋으로 (pace_marks 와 같은 규칙, 검출 손실 없음)."""
+        empty = (np.zeros(0, dtype=np.uint16), np.zeros(0, dtype=np.uint8))
+        if marks is None or marks.size == 0:
+            return empty
+        p = self.st.patch.arr[row]
+        start = self.advance(np.array([row]), tick, spt, fs)
+        base = int(start[0]) % self.n_ecg
+        rate = float(p["hr_scale"]) if p["hr_scale"] > 0.1 else 1.0
+        win = int(math.ceil(spt * rate))
+        lo, hi = np.searchsorted(marks, base), np.searchsorted(marks, base + win)
+        out, typ = marks[lo:hi] - base, types[lo:hi]
+        if base + win > self.n_ecg:
+            hi2 = np.searchsorted(marks, base + win - self.n_ecg)
+            out = np.concatenate([out, marks[:hi2] + (self.n_ecg - base)]); typ = np.concatenate([typ, types[:hi2]])
+        if out.size and rate != 1.0:
+            out = np.rint(out / rate).astype(np.int64)
+            keep = out < spt
+            out, typ = out[keep], typ[keep]
+        return out.astype(np.uint16), typ.astype(np.uint8)
+
+    def truth_blob(self, row: int, tick: int, spt: int, fs: int, bundle_ms: int, crossfade_ticks: int) -> bytes:
+        """이 프레임의 정답 블록: 리듬(+전환 중 이전 리듬), 플래그, 아티팩트·잡음 수준, 참 HR, R-peak(종류), 모든 페이스 스파이크."""
+        if not hasattr(self, "_var_rhythm"):
+            metas = self.bank.index.get("variants", []) if getattr(self.bank, "index", None) else []
+            self._var_rhythm = np.array([RHYTHM_CODE_ID.get(m.get("rhythm"), 255) for m in metas], dtype=np.int64)
+        p = self.st.patch.arr[row]
+        v, vp = int(p["variant"]), int(p["variant_prev"])
+        code = lambda x: int(self._var_rhythm[x]) if 0 <= x < self._var_rhythm.size else 255
+        age = tick - int(p["switch_tick"])
+        switching = (0 <= age < crossfade_ticks) and vp >= 0 and vp != v
+        lead_off = int(p["lead_off"]) > 0
+        ticks_per_s = 1000.0 / bundle_ms
+        age_a = tick - int(p["attach_tick"])
+        settling = int(p["attach_tick"]) > 0 and 0 <= age_a < SETTLE_S * ticks_per_s and not lead_off
+        flags = (T_LEAD_OFF if lead_off else 0) | (T_ARTIFACT if p["art_gain"] > 0.001 else 0) | (T_NOISE if p["noise"] > 0.03 else 0) \
+            | (T_PACED if p["paced"] > 0 else 0) | (T_SWITCH if switching else 0) | (T_SETTLING if settling else 0)
+        start = self.advance(np.array([row]), tick, spt, fs)
+        sec = (int(start[0]) // fs) % self.seconds
+        rate = float(p["hr_scale"]) if p["hr_scale"] > 0.1 else 1.0
+        hr = 0 if lead_off else int(round(float(self.bank.sec[v, 0, sec]) * rate))
+        if getattr(self.bank, "rpeaks", None) is None:
+            flags |= T_NO_BEATS
+            beats = []
+        else:
+            bo, bk = self._marks_in_frame(row, tick, spt, fs, self.bank.rpeaks[v], self.bank.rkinds[v])
+            beats = list(zip(bo.tolist(), bk.tolist()))
+        pace = []
+        if p["paced"] > 0:
+            po, pt = self.pace_marks(row, tick, spt, fs, detect=False)
+            pace = list(zip(po.tolist(), pt.tolist()))
+        return truth_block(code(v), code(vp) if switching else 255, flags, float(p["art_gain"]) * 100.0, float(p["noise"]) * 1000.0, hr, beats, pace)
+
     def preview(self, row: int, tick: int, chan_mask: int) -> dict:
         """Samples for the web live view (one patch)."""
         rows = np.array([row])
@@ -472,6 +527,16 @@ class FrameBuilder:
                     enc = (marks.astype(np.uint16) & 0x3FFF) | (types.astype(np.uint16) << 14)     # bits 0-13 offset, 14-15 type
                     pace_by_gw.setdefault(int(pr["gw"]), []).append(
                         pace_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), enc))
+            # 정답 전용 벤치마크 패치: 프레임마다 TRUTH 레코드(채널 11)를 ECG 레코드 뒤에 같은 seq 로 붙인다
+            truth_rows = active[(pa["truth"] > 0) & ((eff & (1 << CH_TRUTH)) > 0) & ((eff & (1 << CH_ECG)) > 0)]
+            for r in truth_rows:
+                pr = P[r]
+                try:
+                    blob = self.g.truth_blob(int(r), tick, spt_ecg, fs["ecg"], bundle_ms, cft)
+                except Exception:
+                    continue
+                pace_by_gw.setdefault(int(pr["gw"]), []).append(
+                    truth_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), blob))
         # per-gateway byte ranges of every record array, computed with numpy once per tick: for each key the selected rows
         # are contiguous per gateway (rows are sorted by gateway), so a gateway's block is one slice of the array's bytes
         blocks: list[tuple[memoryview, int, np.ndarray, np.ndarray, np.ndarray]] = []

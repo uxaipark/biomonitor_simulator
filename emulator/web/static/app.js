@@ -350,6 +350,7 @@ const B = {  // element id -> config path
   t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
   t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
   sf_en: ['transport', 'store_forward', 'enabled'], sf_max: ['transport', 'store_forward', 'max_bytes_per_gw'], sf_burst: ['transport', 'store_forward', 'burst_frames_per_cycle'],
+  tr_en: ['transport', 'truth', 'enabled'], tr_grade: ['transport', 'truth', 'grade'], tr_sw: ['transport', 'truth', 'switch_rhythm_pct'], tr_art: ['transport', 'truth', 'artifact_pct'], tr_nz: ['transport', 'truth', 'noise_pct'], tr_lo: ['transport', 'truth', 'lead_off_pct'],
   fz_en: ['transport', 'fuzz', 'enabled'], fz_rate: ['transport', 'fuzz', 'rate_per_1000'], t_storm: ['transport', 'storm_smoothing'], cap_en: ['transport', 'capture', 'enabled'],
   selRespSrc: ['signals', 'resp_source'], selEcgFs: ['signals', 'ecg_fs'], s_vpr: ['signals', 'variants_per_rhythm'], s_pm: ['signals', 'pacemaker_ratio'],
 };
@@ -491,6 +492,7 @@ function renderChips() {
   const box = $('#chanChips'); box.innerHTML = '';
   const names = { ecg: 'ECG', hr: 'HR', temp: '체온', resp: '호흡수', spo2: 'SpO2', glucose: '혈당', accel: '가속도', ppg: 'PPG 파형', resp_wave: '호흡 파형', pace: '페이스 마커 (페이스메이커 환자만)' };
   for (const [k, on] of Object.entries(CFG.signals.enabled)) {
+    if (k === 'truth') continue;                                     // 정답 채널은 정답 전용 패치만 보낸다 (아래 카드에서 on/off)
     const l = document.createElement('label'); const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on;
     c.addEventListener('change', () => queue(['signals', 'enabled', k], c.checked));
     l.appendChild(c); l.appendChild(document.createTextNode(names[k] || k)); box.appendChild(l);
@@ -637,6 +639,35 @@ function renderTxHealth(s, L, T) {
 // 해외 체류 MCOT: 현지 시각(시간대)·통신사 표시
 function localClock(tz) { try { return new Intl.DateTimeFormat('ko-KR', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); } catch (e) { return ''; } }
 function abroadTitle(ab) { return ab ? `${ab.country_label || ''} ${ab.region || ''} ${ab.city || ''} · 현지 ${localClock(ab.tz)} (${ab.tz || ''}) · ${ab.carrier || ''}` : ''; }
+// 정답 전용 패치 카드: /truth 를 5초마다 (③ 탭이 보일 때만)
+const TR_EVENT_KO = { artifact: '동작 아티팩트', noise: '잡음', lead_off: '리드 오프' };
+let truthSetsKey = '';
+function renderTruth(t) {
+  const st = $('#truthState'); if (!st || !t) return;
+  st.textContent = t.enabled ? `· ${t.grade_label} ${t.patches}패치 송출 중 (${(t.gateways || []).join(', ')})` : '· 꺼짐';
+  st.className = 'sub ' + (t.enabled ? (t.beats_available ? 'ok' : 'warn') : '');
+  const gs = t.grade_sets && t.grade_sets[t.grade];
+  const key = t.grade + (t.beats_available ? '1' : '0');
+  if (gs && key !== truthSetsKey) {
+    truthSetsKey = key;
+    $('#truthSets').innerHTML = (t.beats_available ? '' : `<div class="err" style="margin-bottom:4px">⚠ ${esc(t.note || '')}</div>`) +
+      `<b>${esc(gs.label)} 세트 (${gs.patches}채널 · 리듬 ${gs.rhythms.length}종)</b>: ` + gs.rhythms.map(r => `<span class="tag" title="${esc(r.cls)}">${esc(r.label)} ×${r.n}</span>`).join(' ');
+  }
+  const body = $('#truthTable tbody'); if (!body) return;
+  body.innerHTML = (t.patches_list || []).map(p => {
+    const ev = p.event ? `<span class="tag warn">${TR_EVENT_KO[p.event] || p.event} ${fmt(p.event_left_s, 0)}s</span>` : '<span class="tag ok">정상</span>';
+    return `<tr><td>${p.k}</td><td class="mono">${esc(p.serial)}</td><td class="mono">${p.patch_id}</td><td>${p.gateway}</td><td>${esc(p.rhythm_label || p.rhythm || '')}${p.paced ? ' ⚡' : ''}</td><td>${ev}</td><td>${fmt(p.next_hop_s / 60, 1)}분</td></tr>`;
+  }).join('') || '<tr><td colspan="7" class="sub">정답 패치 없음</td></tr>';
+  const h = (CFG && CFG.transport && CFG.transport.truth && CFG.transport.truth.hop_s) || [120, 480];
+  for (const [id, v] of [['tr_hop0', h[0]], ['tr_hop1', h[1]]]) { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = v; }
+}
+async function pollTruth() {
+  const on = $('[data-tab="tx"]').classList.contains('on') || ($('[data-tab="emu"]') && $('[data-tab="emu"]').classList.contains('on'));
+  if (!on || document.visibilityState === 'hidden' || !document.getElementById('truthTable')) return;
+  try { renderTruth(await api('/truth')); } catch (e) { }
+}
+setInterval(pollTruth, 5000);
+for (const id of ['tr_hop0', 'tr_hop1']) { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { const a = Number($('#tr_hop0').value), b = Number($('#tr_hop1').value); queue(['transport', 'truth', 'hop_s'], [Math.min(a, b), Math.max(a, b)]); }); }
 function renderTxHealthEvents() {
   const box = $('#txHealthEvents'); if (!box) return;
   const ev = evAll.filter(e => e.kind === 'tx').slice(-6).reverse();

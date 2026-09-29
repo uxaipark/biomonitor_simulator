@@ -28,6 +28,7 @@ CH_ACCEL = 7
 CH_PPG = 8
 CH_RESP_WAVE = 9
 CH_PACE = 10          # pacemaker spike marker events (sample index list)
+CH_TRUTH = 11         # 정답(ground truth) 블록 — 정답 전용 벤치마크 패치만 보낸다 (emulator/runtime/truthbench.py)
 
 CHANNELS: dict[int, dict[str, Any]] = {
     CH_ECG:       {"key": "ecg", "name": "ECG", "unit": "mV", "dtype": "int16", "scale": 0.001, "kind": "waveform"},
@@ -40,6 +41,7 @@ CHANNELS: dict[int, dict[str, Any]] = {
     CH_PPG:       {"key": "ppg", "name": "PPG", "unit": "a.u.", "dtype": "int16", "scale": 0.001, "kind": "waveform"},
     CH_RESP_WAVE: {"key": "resp_wave", "name": "Respiration Waveform", "unit": "a.u.", "dtype": "int16", "scale": 0.001, "kind": "waveform"},
     CH_PACE:      {"key": "pace", "name": "Pacemaker Spike Marks", "unit": "sample_idx", "dtype": "uint16", "scale": 1, "kind": "event"},
+    CH_TRUTH:     {"key": "truth", "name": "Ground Truth (benchmark patches)", "unit": "-", "dtype": "uint8", "scale": 1, "kind": "truth"},
 }
 CHANNEL_BY_KEY = {v["key"]: k for k, v in CHANNELS.items()}
 
@@ -72,7 +74,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "resp_fs": 25,
         "accel_fs": 50,
         "enabled": {"ecg": True, "hr": True, "temp": True, "resp": True, "spo2": True,
-                    "glucose": False, "accel": True, "ppg": False, "resp_wave": False, "pace": True},
+                    "glucose": False, "accel": True, "ppg": False, "resp_wave": False, "pace": True, "truth": True},
         "resp_source": "capacitive",
         "spo2_source": "fingertip",
         "pacemaker_ratio": 0.06,       # share of heart patients with a pacemaker
@@ -101,6 +103,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
                  "kinds": ["bad_magic", "bad_version", "bad_len", "truncated", "oversize", "garbage", "dup", "reorder", "seq_gap", "bad_record"]},
         "storm_smoothing": True,                                                                          # False = every gateway reconnects at once (connection storm)
         "capture": {"enabled": False},                                                                    # ground-truth tap: exact bytes sent -> data/capture/w<worker>.bin
+        # ---- 정답 전용 벤치마크 패치 (파형 알고리즘 채점용): 실제 환자가 아닌 가상 패치가 파형 + 정답 레코드(채널 11)를 같이 보낸다
+        "truth": {"enabled": True, "grade": "precise",                                                     # 등급 세트: basic 간소 16 · standard 일반 32 · precise 정밀 64
+                  "hop_s": [120, 480],                                                                     # 리듬/변형 교체 간격 (초, 균등)
+                  "switch_rhythm_pct": 35,                                                                 # 교체 때 리듬 종류까지 바꿀 확률 (%), 나머지는 같은 리듬의 다른 변형
+                  "artifact_pct": 15, "noise_pct": 10, "lead_off_pct": 6},                                  # 한 시간에 환자당 이벤트 기대 횟수 (%) — 10 % ≈ 시간당 0.1 회
     },
     "hospital": {
         "template": "auto",            # auto (by bed capacity) or one of layout.TEMPLATES
@@ -306,6 +313,16 @@ class Config:
         sf["enabled"] = bool(sf.get("enabled", True))
         sf["max_bytes_per_gw"] = int(max(65536, min(64 * 1024 * 1024, sf.get("max_bytes_per_gw", 2097152))))
         sf["burst_frames_per_cycle"] = int(max(1, min(1000, sf.get("burst_frames_per_cycle", 40))))
+        tr = t.setdefault("truth", {})
+        tr["enabled"] = bool(tr.get("enabled", True))
+        tr["grade"] = tr.get("grade") if tr.get("grade") in ("basic", "standard", "precise") else "precise"
+        tr.pop("patches", None)
+        hs = tr.get("hop_s") or [120, 480]
+        tr["hop_s"] = [int(max(10, min(3600, hs[0]))), int(max(10, min(7200, hs[-1])))]
+        if tr["hop_s"][1] < tr["hop_s"][0]:
+            tr["hop_s"][1] = tr["hop_s"][0]
+        for k, dflt in (("switch_rhythm_pct", 35), ("artifact_pct", 15), ("noise_pct", 10), ("lead_off_pct", 6)):
+            tr[k] = int(max(0, min(100, tr.get(k, dflt))))
         fz = t.setdefault("fuzz", {})
         fz["enabled"] = bool(fz.get("enabled", False))
         fz["rate_per_1000"] = float(max(0.0, min(1000.0, fz.get("rate_per_1000", 5))))

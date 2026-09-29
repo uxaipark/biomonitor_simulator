@@ -16,7 +16,7 @@ from .layout import CEIL_H
 from .names import staff_name
 from . import layout as L
 
-GW_TYPES = ["room", "corridor", "elevator", "stairs", "toilet", "shower", "nurse_station", "exam", "lobby", "er", "mobile", "support"]
+GW_TYPES = ["room", "corridor", "elevator", "stairs", "toilet", "shower", "nurse_station", "exam", "lobby", "er", "mobile", "support", "truth"]
 GW_TYPE_ID = {t: i for i, t in enumerate(GW_TYPES)}
 EXAM_ROOMS = ["ECG실", "심초음파실", "X-ray실", "CT실", "MRI실", "채혈실", "내시경실", "폐기능검사실", "재활치료실", "투석실", "심혈관조영실"]
 NO_BLE_ROOMS = {"MRI실"}
@@ -70,7 +70,8 @@ def _poly_bbox(poly):
 
 class Hospital:
     def __init__(self, bed_capacity: int, seed: int, gw_capacity: int = 32, corridor_gateways: bool = True,
-                 outpatients: int = 0, name: str | None = None, template: str = "auto", layout_data: dict | None = None, max_buildings: int = 3):
+                 outpatients: int = 0, name: str | None = None, template: str = "auto", layout_data: dict | None = None, max_buildings: int = 3,
+                 truth_gateways: int = 0):
         self.rng = np.random.default_rng(seed + 11)
         self.gw_capacity = gw_capacity
         self.corridor_gateways = corridor_gateways
@@ -92,6 +93,9 @@ class Hospital:
         self.n_fixed_gateways = len(self.gateways)
         for i in range(outpatients):
             self.add_mobile_gateway(i)
+        self.n_truth_gateways = truth_gateways
+        for k in range(truth_gateways):
+            self.add_truth_gateway(k)
         self._geom()
 
     # ------------------------------------------------------------ derive runtime model
@@ -219,6 +223,16 @@ class Hospital:
         self.gw_xyz = np.array([[g["x"], g["y"], g["floor"] * 4.0 + g["building_idx"] * 1000.0] for g in self.gateways], dtype=np.float32)
         self.gw_room = np.array([g["room_idx"] for g in self.gateways], dtype=np.int32)
         self._cand_cache: dict[int, np.ndarray] = {}   # room_idx -> gateways by expected RSSI; geometry is fixed for the life of this Hospital
+
+    def add_truth_gateway(self, k: int) -> int:
+        """정답(벤치마크) 게이트웨이: 실제 환자 없이 정답 전용 패치를 묶어 내보낸다 (emulator/runtime/truthbench.py).  도면 밖(x 6000+)."""
+        gidx = len(self.gateways)
+        self.gateways.append({"idx": gidx, "id": f"TGW-{k + 1:02d}", "base_id": f"TGW-{k + 1:02d}", "gw_no": gidx + 1, "type": "truth", "type_id": GW_TYPE_ID["truth"],
+                              "building_idx": 98, "building": "정답(벤치마크)", "floor": 0, "x": 6000.0 + k * 50, "y": 5000.0, "room_idx": -1, "capacity": 64,
+                              "mac": f"D8:3A:DD:FE:{k & 0xFF:02X}:01", "ip": f"100.65.0.{k + 1}", "fw": "truth-gw 1.0", "ble_channels": 8})
+        if hasattr(self, "gw_xyz"):
+            self._geom()
+        return gidx
 
     def add_mobile_gateway(self, k: int) -> int:
         gidx = len(self.gateways)

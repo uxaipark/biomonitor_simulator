@@ -38,7 +38,10 @@ def check(w) -> dict:
     # 2. 게이트웨이 연결 수 = 실제 연결 환자 수, 용량 이하, 다운 게이트웨이에 연결 없음
     linked = collections.Counter(rec["gw"] for _, rec in admitted if rec["gw"] >= 0)
     mismatch, over, on_down = [], [], []
+    truth_rows = set(getattr(getattr(w, "truth", None), "rows", []) or [])
     for gw, g in enumerate(h.gateways):
+        if g["type"] == "truth":                                       # 정답 전용 패치 게이트웨이: 환자가 아니라 재원 목록과 대조하지 않는다
+            continue
         n_state = w.gw_state[gw]["n_conn"]
         if n_state != linked.get(gw, 0) or int(G["n_conn"][gw]) != min(255, n_state):
             mismatch.append((g["id"], n_state, linked.get(gw, 0), int(G["n_conn"][gw])))
@@ -78,7 +81,7 @@ def check(w) -> dict:
     P = w.st.patch.arr
     inactive = [(pid, rec["row"]) for pid, rec in admitted if int(P["active"][rec["row"]]) != 1]
     add("admitted_row_inactive", inactive, "입원 환자의 공유 배열 active 가 0")
-    ghost = [int(r) for r in range(len(P)) if int(P["active"][r]) == 1 and r not in {rec["row"] for _, rec in admitted}]
+    ghost = [int(r) for r in range(len(P)) if int(P["active"][r]) == 1 and r not in {rec["row"] for _, rec in admitted} and r not in truth_rows]
     add("active_row_without_patient", ghost)
     # 6. 정답 라벨: 열린 구간은 재원 환자·존재하는 게이트웨이만
     real = getattr(w, "real", None)
@@ -93,4 +96,5 @@ def check(w) -> dict:
     return {"ok": not viol, "violations": viol, "checked_sim_time": now, "checked_at": time.time(),
             "stats": {"inpatients": n_in, "outpatients": len(admitted) - n_in, "moving": moving, "linked": sum(linked.values()),
                       "moving_pct": round(100.0 * moving / n_in, 1) if n_in else 0.0,
-                      "overseas_outpatients": sum(1 for pid, rec in admitted if rec["outpatient"] and w.by_id[pid].get("overseas"))}}
+                      "overseas_outpatients": sum(1 for pid, rec in admitted if rec["outpatient"] and w.by_id[pid].get("overseas")),
+                      "truth_patches": int(getattr(getattr(w, "truth", None), "n", 0) or 0)}}

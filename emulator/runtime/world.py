@@ -38,6 +38,7 @@ from ..signals import trend as trend_model
 from .realism import Realism
 from ..hospital.layout import CEIL_H
 from .state import SharedState, CTL, FUZZ_KINDS, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED, FLAG_NEW_PATCH, FLAG_CHARGING
+from .truthbench import TruthBench, TRUTH_MAX
 
 ACT_ID = {a: i for i, a in enumerate(ACTIVITIES)}
 POSTURE_ID = {"supine": 0, "left_lateral": 1, "right_lateral": 2, "sitting": 3, "standing": 4, "prone": 5}
@@ -197,7 +198,7 @@ class World:
             # scenario gets a ~625-bed hospital (1-3 buildings, floors sized to that), not the 2000-bed maximum
             beds = self.planned_beds()
             self.hospital = Hospital(beds, g["seed"], sc["gateway"]["capacity"], sc["gateway"]["corridor_gateways"],
-                                     outpatients=self.mobile_pool, template=hp.get("template", "auto"), layout_data=layout_data,
+                                     outpatients=self.mobile_pool, truth_gateways=2, template=hp.get("template", "auto"), layout_data=layout_data,
                                      max_buildings=int(hp.get("max_buildings", 3) or 3))
             # 환자 프로필은 [환자 프로필 재생성] 때 정한 값으로 만든다 (병원을 다시 지어도 명단은 그대로).  병상이 늘어 모자라면 자동으로 다시 만든다.
             want = self._profile_params_from_cfg(g, s)
@@ -222,7 +223,7 @@ class World:
                 p["avatar"] = assign_avatar(arng, p)
                 p["status"] = "pool"
             self.by_id = {p["id"]: p for p in self.profiles}
-            n_patch = self.hospital.bed_capacity + self.mobile_pool + 64
+            n_patch = self.hospital.bed_capacity + self.mobile_pool + 64 + TRUTH_MAX      # 마지막 TRUTH_MAX 행은 정답 전용 패치 (truthbench)
             n_gw = len(self.hospital.gateways)
             self._meta_cache.clear()
             old = self.st
@@ -280,7 +281,7 @@ class World:
                 self.next_gw_no = len(gws) + 1
                 self.db.upsert_gateways([self._gw_db_row(g, "초기 설치") for g in gws])
             self.log.add("system", f"DB {'이력 유지' if kept else '새로 생성'}: {self.db.path.name} (다음 패치 번호 BP-{self.next_patch_serial:06d}, 다음 게이트웨이 번호 {self.next_gw_no})")
-            self.free_rows = list(range(n_patch - 1, -1, -1))
+            self.free_rows = list(range(n_patch - TRUTH_MAX - 1, -1, -1))
             self.pool_cursor = 0
             self.gw_state = []
             G = self.st.gw.arr
@@ -315,6 +316,8 @@ class World:
             self._mod_last = 0.0
             self._exam_quota_t = 0.0
             self.net_events = []
+            self.truth = TruthBench(self, rows=list(range(n_patch - TRUTH_MAX, n_patch)), gws=[gw["idx"] for gw in self.hospital.gateways if gw["type"] == "truth"])
+            self.truth.setup()
             self.log.add("system", f"월드 구성 완료: 병상 {self.hospital.bed_capacity}, 게이트웨이 {n_gw}, 프로필 {len(self.profiles)} ({time.time() - t0:.1f}s)")
             self.meta_dirty = True
             self._sync_population(initial=True)
@@ -351,6 +354,8 @@ class World:
         P = self.st.patch.arr
         rs = RESP_SOURCES.index(s["resp_source"])
         P["resp_src"][:] = rs                       # SpO2 source is per patient (device set)
+        if getattr(self, "truth", None):
+            self.truth.apply_config()               # 정답 패치 on/off·등급 즉시 반영
         self.meta_dirty = True
 
     # ------------------------------------------------------------------ helpers
@@ -1786,6 +1791,9 @@ class World:
                                                     "fw": PATCH_FW, "resp_source": s["resp_source"], "spo2_source": (SPO2_SOURCES[src] if src is not None else None),
                                                     "devices": [{"key": d, "label": DEVICES[d]["label"]} for d in devs], "channels": p_chans,
                                                     "pacemaker": ({"type": pmi["type"], "mode": pmi["mode"], "lead": pmi["lead"], "detect_pct": pmi["detect_pct"]} if pmi else None)})
+        if getattr(self, "truth", None):                            # 정답 전용 패치 (환자 아님) → 정답 게이트웨이 항목
+            for gw_t, ents in self.truth.meta_entries().items():
+                by_gw.setdefault(gw_t, []).extend(ents)
         # Delta build: a gateway's entry is re-serialised only when its signature (patch set, devices, channels, resp source,
         # gw number, bundle) changed; every other entry is the cached JSON text.  With 2390 gateways and a few handovers per
         # second this turns a 2.4 MB json.dump every 2-3 s (world_step spikes to ~280 ms on the Pi) into a few small dumps.
@@ -1808,6 +1816,8 @@ class World:
                     d["uplink"] = g["radio"]
                     if g.get("abroad"):                             # 해외 체류: 국가·지역·시간대·현지 통신사 (추가 필드, 라우터는 무시해도 됨)
                         d["abroad"] = g["abroad"]
+                elif g["type"] == "truth":                          # 정답(벤치마크) 게이트웨이: 환자 없음, 채점용
+                    d["benchmark"] = True
                 elif getattr(self, "real", None) and self.real.meta_net(gw):   # 병원 GW: 유선/무선, 층 스위치·AP, 전원 계통
                     d["net"] = self.real.meta_net(gw)
                 ent = (sig, f'"{gw}":' + json.dumps(d, ensure_ascii=False, separators=(",", ":")))
@@ -1908,6 +1918,8 @@ class World:
                     self._step_inpatient(rec, ac, intensity)
             self._step_exam_quota(sc)
             self._step_patches(dt_s)
+            if getattr(self, "truth", None):
+                self.truth.step(dt_s)                         # 정답 전용 패치: 리듬 교체·아티팩트·잡음·리드오프
             self._step_prescriptions()
             self._step_modulation()
             self._step_episodes(dt_s)

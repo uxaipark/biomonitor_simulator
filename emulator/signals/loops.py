@@ -41,7 +41,7 @@ def _variant_task(args):
     path = Path(out_dir) / f"{rhythm}_{vi:03d}.npz"
     np.savez(path, ecg=b["ecg"], ppg=b["ppg"], resp_wave=b["resp_wave"],
              sec=np.stack([b[k] for k in SEC_ROWS]).astype(np.uint8), pace=b["pace"], pace_type=b["pace_type"], rpeaks=b["rpeaks"],
-             meta=json.dumps(b["meta"]))
+             rkinds=b["rkinds"], meta=json.dumps(b["meta"]))
     return rhythm, vi, b["meta"]
 
 
@@ -70,6 +70,8 @@ class LoopBank:
         # arrays (filled by load())
         self.ecg = self.ppg = self.resp = self.sec = None
         self.pace: list[np.ndarray] = []
+        self.rpeaks: list[np.ndarray] | None = None     # 변형별 R-peak 표본 인덱스 (정답 레코드); None = 주석 없는 옛 은행
+        self.rkinds: list[np.ndarray] | None = None
         self.pace_type: list[np.ndarray] = []
         self.accel = self.art = self.level = self.temp = self.glucose = self.noise = None
         self.rhythm_variants: dict[str, list[int]] = {}
@@ -167,6 +169,8 @@ class LoopBank:
                     sec[i] = z["sec"]
                     pace[f"v{i}"] = z["pace"]
                     pace[f"t{i}"] = z["pace_type"]
+                    pace[f"r{i}"] = z["rpeaks"].astype(np.int32)                      # 정답 레코드: R-peak 표본 인덱스 + 박동 종류
+                    pace[f"k{i}"] = z["rkinds"] if "rkinds" in z.files else np.zeros(len(z["rpeaks"]), dtype=np.uint8)
                     meta = json.loads(str(z["meta"]))
                 meta["index"] = i
                 variants.append(meta)
@@ -219,6 +223,9 @@ class LoopBank:
         with np.load(self.dir / "bank_pace.npz") as z:
             self.pace = [z[f"v{i}"] for i in range(self.ecg.shape[0])]
             self.pace_type = [z[f"t{i}"] for i in range(self.ecg.shape[0])]
+            has = all(f"r{i}" in z.files for i in range(self.ecg.shape[0]))       # 2026-09-29 이전 은행에는 R-peak 주석이 없다 → 재생성 필요
+            self.rpeaks = [z[f"r{i}"] for i in range(self.ecg.shape[0])] if has else None
+            self.rkinds = [z[f"k{i}"] for i in range(self.ecg.shape[0])] if has else None
         self.accel = np.load(self.dir / "bank_accel.npy", mmap_mode="r")
         self.art = np.load(self.dir / "bank_art.npy", mmap_mode="r")
         self.level = np.load(self.dir / "bank_level.npy")

@@ -40,5 +40,6 @@ def test_scenarios_actually_happen(sim_result):
     f = sim_result["final"]
     assert 0 < f["moving_pct"] < 50, f                                # 이동 중 비율이 말이 되는 범위 (하한 8 % 설정)
     assert f["inpatients"] >= 55                                      # 목표 60명 ± 5 유지
+    assert f["truth_patches"] == 64                                   # 정답 전용 패치(정밀 세트)가 환자와 별개로 살아 있다
     fired = dict(sim_result["fired"])
     assert "unknown" not in fired.values(), fired                    # 모든 트리거가 처리됨

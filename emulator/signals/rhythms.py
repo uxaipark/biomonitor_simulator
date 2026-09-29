@@ -43,6 +43,9 @@ RHYTHMS: dict[str, dict] = {
 }
 PACED_RHYTHMS = ("paced_vvi", "paced_aai", "paced_ddd", "paced_crt", "paced_malfunction")
 CONDUCTED = {"N", "A", "V", "Vp", "AVp", "J", "E", "S", "Ap", "AsVp", "CRT", "F"}
+# 정답(TRUTH) 레코드의 박동 종류 코드 (append-only): N 정상, A 심방조기, V 심실조기, Vp 심실페이싱, AVp 방실페이싱, J 접합부, E 이탈, S 상심실, Ap 심방페이싱, AsVp 심방감지-심실페이싱, CRT 양심실, F 융합
+BEAT_KINDS = ["N", "A", "V", "Vp", "AVp", "J", "E", "S", "Ap", "AsVp", "CRT", "F"]
+BEAT_KIND_ID = {k: i for i, k in enumerate(BEAT_KINDS)}
 SPIKE_A, SPIKE_V, SPIKE_LV = 0, 1, 2
 
 

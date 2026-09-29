@@ -20,7 +20,8 @@ from functools import lru_cache
 
 import numpy as np
 
-from ..config import CHANNELS, CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE
+from ..config import CHANNELS, CH_ECG, CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE, CH_ACCEL, CH_PPG, CH_RESP_WAVE, CH_PACE, CH_TRUTH
+from ..signals.rhythms import RHYTHMS, BEAT_KINDS
 
 MAGIC = 0x4742
 VERSION = 3                      # v3: CRC-32 trailer on every frame + control frames (router -> gateway NACK); v2 added the per-patch seq
@@ -81,6 +82,52 @@ def fill_constants(rec: np.ndarray, chan_mask: int, with_numerics: bool, bundle_
     rec["n_ch"] = n_ch
 
 
+# ---------------------------------------------------------------- TRUTH record (channel 11) — 정답 전용 벤치마크 패치만 보낸다
+# 채널 블록: ch_id 11 | dtype 2(uint8) | n = 블록 길이 | 블록.  블록(v1, little-endian):
+#   u8 ver=1 | u8 rhythm | u8 rhythm_prev(255=없음; 크로스페이드 중 이전 리듬) | u8 flags | u8 art_level(0..255, 동작 아티팩트 이득×100)
+#   u8 noise_level(0..255, 잡음 비율×1000) | u16 hr_true(bpm, 리드오프면 0)
+#   u8 n_beats | n × (u16 offset(이 프레임 ECG 블록 안 표본 인덱스), u8 kind)      kind = BEAT_KINDS 인덱스
+#   u8 n_pace  | n × u16 (bits 0-13 offset, 14-15 chamber 0 A 1 V 2 LV)            하드웨어 검출 손실 없는 '모든' 스파이크
+# rhythm 코드 = RHYTHM_CODES 인덱스 (append-only).  flags 비트는 아래 T_*.
+RHYTHM_CODES = list(RHYTHMS.keys())
+RHYTHM_CODE_ID = {k: i for i, k in enumerate(RHYTHM_CODES)}
+TRUTH_VER = 1
+T_LEAD_OFF, T_ARTIFACT, T_NOISE, T_PACED, T_SWITCH, T_SETTLING, T_NO_BEATS = 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40
+TRUTH_HEAD = struct.Struct("<BBBBBBH")
+
+
+def truth_block(rhythm: int, rhythm_prev: int, flags: int, art_level: int, noise_level: int, hr: int, beats, pace) -> bytes:
+    """beats: iterable of (offset, kind); pace: iterable of (offset, chamber).  offset 은 이 프레임 ECG 블록 안 표본 인덱스."""
+    beats = list(beats)[:255]
+    pace = list(pace)[:255]
+    out = TRUTH_HEAD.pack(TRUTH_VER, rhythm & 0xFF, rhythm_prev & 0xFF, flags & 0xFF, min(255, max(0, int(art_level))), min(255, max(0, int(noise_level))), min(65535, max(0, int(hr))))
+    out += struct.pack("<B", len(beats)) + b"".join(struct.pack("<HB", int(o) & 0xFFFF, int(k) & 0xFF) for o, k in beats)
+    out += struct.pack("<B", len(pace)) + b"".join(struct.pack("<H", (int(o) & 0x3FFF) | ((int(c) & 3) << 14)) for o, c in pace)
+    return out
+
+
+def parse_truth(b: bytes) -> dict:
+    ver, rh, rhp, fl, art, nz, hr = TRUTH_HEAD.unpack_from(b, 0)
+    off = TRUTH_HEAD.size
+    nb = b[off]; off += 1
+    beats = [(struct.unpack_from("<H", b, off + 3 * i)[0], b[off + 3 * i + 2]) for i in range(nb)]
+    off += 3 * nb
+    npc = b[off]; off += 1
+    pace = [((v & 0x3FFF), v >> 14) for v in struct.unpack_from(f"<{npc}H", b, off)]
+    return {"ver": ver, "rhythm": RHYTHM_CODES[rh] if rh < len(RHYTHM_CODES) else None, "rhythm_code": rh,
+            "rhythm_prev": RHYTHM_CODES[rhp] if rhp < len(RHYTHM_CODES) else None, "flags": fl,
+            "lead_off": bool(fl & T_LEAD_OFF), "artifact": bool(fl & T_ARTIFACT), "noise": bool(fl & T_NOISE), "paced": bool(fl & T_PACED),
+            "switching": bool(fl & T_SWITCH), "settling": bool(fl & T_SETTLING), "beats_unavailable": bool(fl & T_NO_BEATS),
+            "art_level": art / 100.0, "noise_level": nz / 1000.0, "hr": hr,
+            "beats": [{"offset": o, "kind": BEAT_KINDS[k] if k < len(BEAT_KINDS) else k} for o, k in beats], "pace": [{"offset": o, "chamber": c} for o, c in pace]}
+
+
+def truth_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, blob: bytes) -> bytes:
+    """정답 레코드: 같은 프레임의 ECG 레코드와 같은 seq 를 가진 별도 레코드 (n_ch=1, 채널 11)."""
+    head = struct.pack("<IIIBBbB", patch_id, patient_id, seq, flags, battery, rssi, 1)
+    return head + struct.pack("<BBH", CH_TRUTH, DTYPE_CODE["uint8"], len(blob)) + blob
+
+
 def pace_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, marks: np.ndarray) -> bytes:
     """Standalone record carrying only pacemaker spike marks (sample offsets within the frame); same seq as the data record."""
     head = struct.pack("<IIIBBbB", patch_id, patient_id, seq, flags, battery, rssi, 1)
@@ -128,6 +175,15 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
         elif cid in NUM_CH:
             d["period_ms"] = 1000
             d["note"] = "1 value/s, staggered per patch: sent on frames where (tick + patch_row) % (1000/bundle_ms) == 0. 0 = invalid/no reading."
+        elif cid == CH_TRUTH:
+            d["note"] = ("Ground-truth block sent only by the benchmark patches (gateway type 'truth', META patches[].benchmark=true), one record per "
+                         "frame with the same seq as the ECG record: u8 ver=1 | u8 rhythm(RHYTHM_CODES idx) | u8 rhythm_prev(255=none, set during a "
+                         "crossfade) | u8 flags | u8 art_level(x0.01) | u8 noise_level(x0.001) | u16 hr_true(bpm) | u8 n_beats + n x (u16 offset, u8 "
+                         "beat_kind) | u8 n_pace + n x u16 (bits 0-13 offset, 14-15 chamber). Offsets index this frame's ECG block. flags: 0x01 lead_off "
+                         "0x02 motion_artifact 0x04 noise 0x08 paced_device 0x10 rhythm_switching 0x20 electrode_settling 0x40 beats_unavailable "
+                         "(loop bank without annotations). All pacing spikes are listed (no detection loss), unlike channel 10.")
+            d["rhythm_codes"] = RHYTHM_CODES
+            d["beat_kinds"] = BEAT_KINDS
         else:
             d["note"] = ("uint16 per detected pacing spike: bits 0-13 = sample offset within this frame's ECG block, bits 14-15 = chamber "
                          "(0 atrial, 1 ventricular/RV, 2 LV for CRT). Emulates hardware pace detection: bipolar/leadless spikes are tiny in the "

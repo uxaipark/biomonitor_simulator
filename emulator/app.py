@@ -106,7 +106,7 @@ def discovery():
                          "3. transport.target_ip/port 에 TCP 리스너 오픈 (에뮬레이터가 게이트웨이별로 접속)", "4. 프레임 수신: META 블록으로 채널 구성 갱신, 레코드를 패치 번호 파일로 저장",
                          "5. POST /api/v1/router/status 로 라우터 상태를 주기적으로 보고 (선택)"],
         "endpoints": {
-            "discovery": "/api/v1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
+            "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
                         "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
@@ -588,6 +588,14 @@ def labels(kind: str = "", patient_id: int | None = None, since_ms: int = 0, unt
         name = f"labels-{time.strftime('%Y%m%d-%H%M%S')}.csv"
         return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
     return _json({"labels": rows, "count": len(rows)})
+
+
+@app.get("/api/v1/truth")
+def truth_status():
+    """정답 전용 벤치마크 패치: 등급(간소 16·일반 32·정밀 64)·현재 리듬 배치·이벤트 상태·등급 세트 구성.  설정은 transport.truth."""
+    w = E().world
+    with w.lock:
+        return w.truth.status()
 
 
 @app.get("/api/v1/labels/summary")
