@@ -26,7 +26,7 @@ from .protocol import (record_dtype, fill_constants, pace_record, truth_record, 
                        CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl)
 from collections import deque
 from .realsig import MAP_PATH as RS_MAP_PATH
-from .state import SharedState, CTL, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
+from .state import SharedState, CTL, TRUTH_RING, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
 
 POSTURE_G = np.array([POSTURES[k] for k in ("supine", "left_lateral", "right_lateral", "sitting", "standing", "prone")], dtype=np.float32) * 1000.0
 POSTURE_NAMES = ["supine", "left_lateral", "right_lateral", "sitting", "standing", "prone"]
@@ -347,6 +347,10 @@ class Gather:
         return out.astype(np.uint16), typ.astype(np.uint8)
 
     def truth_blob(self, row: int, tick: int, spt: int, fs: int, bundle_ms: int, crossfade_ticks: int) -> bytes:
+        return self.truth_info(row, tick, spt, fs, bundle_ms, crossfade_ticks)[0]
+
+    def truth_info(self, row: int, tick: int, spt: int, fs: int, bundle_ms: int, crossfade_ticks: int) -> tuple:
+        """(정답 블록 bytes, 리듬 코드, 플래그, beats[(offset, kind)], pace[(offset, chamber)]) — 링버퍼 기록과 블록이 같은 값을 쓴다."""
         """이 프레임의 정답 블록: 리듬(+전환 중 이전 리듬), 플래그, 아티팩트·잡음 수준, 참 HR, R-peak(종류), 모든 페이스 스파이크."""
         if not hasattr(self, "_var_rhythm"):
             metas = self.bank.index.get("variants", []) if getattr(self.bank, "index", None) else []
@@ -376,7 +380,8 @@ class Gather:
         if p["paced"] > 0:
             po, pt = self.pace_marks(row, tick, spt, fs, detect=False)
             pace = list(zip(po.tolist(), pt.tolist()))
-        return truth_block(code(v), code(vp) if switching else 255, flags, float(p["art_gain"]) * 100.0, float(p["noise"]) * 1000.0, hr, beats, pace)
+        blob = truth_block(code(v), code(vp) if switching else 255, flags, float(p["art_gain"]) * 100.0, float(p["noise"]) * 1000.0, hr, beats, pace)
+        return blob, code(v), flags, beats, pace
 
     def preview(self, row: int, tick: int, chan_mask: int) -> dict:
         """Samples for the web live view (one patch)."""
@@ -410,9 +415,11 @@ class Gather:
 class FrameBuilder:
     """Builds per-gateway frames for a subset of gateway rows."""
 
-    def __init__(self, bank: LoopBank, st: SharedState, gw_rows: np.ndarray, meta_provider=None):
+    def __init__(self, bank: LoopBank, st: SharedState, gw_rows: np.ndarray, meta_provider=None, worker_id: int = 0):
         self.st = st
         self.g = Gather(bank, st)
+        self.worker_id = int(worker_id)
+        self._tr_w = 0                                   # 정답 박동 링버퍼 쓰기 카운터 (wstat.truth_w 에 미러)
         self.gw_rows = np.asarray(gw_rows, dtype=np.int64)
         self.in_set = np.zeros(st.n_gateways, dtype=bool)
         self.in_set[self.gw_rows] = True
@@ -529,14 +536,25 @@ class FrameBuilder:
                         pace_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), enc))
             # 정답 전용 벤치마크 패치: 프레임마다 TRUTH 레코드(채널 11)를 ECG 레코드 뒤에 같은 seq 로 붙인다
             truth_rows = active[(pa["truth"] > 0) & ((eff & (1 << CH_TRUTH)) > 0) & ((eff & (1 << CH_ECG)) > 0)]
+            ring = self.st.truthlog.arr
+            base = self.worker_id * TRUTH_RING
             for r in truth_rows:
                 pr = P[r]
                 try:
-                    blob = self.g.truth_blob(int(r), tick, spt_ecg, fs["ecg"], bundle_ms, cft)
+                    blob, rcode, tflags, beats, pace = self.g.truth_info(int(r), tick, spt_ecg, fs["ecg"], bundle_ms, cft)
                 except Exception:
                     continue
+                pid, pseq = int(pr["patch_id"]), int(pr["seq"])
                 pace_by_gw.setdefault(int(pr["gw"]), []).append(
-                    truth_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), blob))
+                    truth_record(pid, int(pr["patient_id"]), pseq, int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), blob))
+                for off, kind in beats:                                         # 절대 시각(ms)으로 링버퍼에 — 채점 API 의 정답 원천
+                    ring[base + (self._tr_w % TRUTH_RING)] = (ts_ms + (int(off) * 1000) // fs["ecg"], pid, pseq, int(kind), rcode, tflags, 0)
+                    self._tr_w += 1
+                for off, ch in pace:
+                    ring[base + (self._tr_w % TRUTH_RING)] = (ts_ms + (int(off) * 1000) // fs["ecg"], pid, pseq, int(ch), rcode, tflags, 1)
+                    self._tr_w += 1
+            if truth_rows.size:
+                self.st.wstat["truth_w"][self.worker_id] = self._tr_w
         # per-gateway byte ranges of every record array, computed with numpy once per tick: for each key the selected rows
         # are contiguous per gateway (rows are sorted by gateway), so a gateway's block is one slice of the array's bytes
         blocks: list[tuple[memoryview, int, np.ndarray, np.ndarray, np.ndarray]] = []
@@ -1211,7 +1229,7 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
             pass
 
     gw_rows = np.asarray(gw_rows, dtype=np.int64)
-    fb = FrameBuilder(bank, st, gw_rows, meta_provider)
+    fb = FrameBuilder(bank, st, gw_rows, meta_provider, worker_id=worker_id)
     sender = Sender(st, gw_rows, worker_id, fb, names.get("capture_dir"))
     W = st.wstat.arr
     W["alive"][worker_id] = 1

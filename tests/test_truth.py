@@ -48,3 +48,22 @@ def test_grade_sets_are_consistent():
     assert set(PLANS["precise"]) == set(RHYTHMS)                                  # 정밀: 모든 리듬 종류
     assert set(PLANS["basic"]) <= set(PLANS["standard"]) <= set(PLANS["precise"])    # 등급이 오를수록 포함 관계
     assert len(P.RHYTHM_CODES) == len(RHYTHMS) and len(BEAT_KINDS) == 12
+
+
+def test_score_beats_se_ppv_and_exclusions():
+    from emulator.runtime.truthbench import score_beats
+    from emulator.runtime.protocol import T_LEAD_OFF, T_ARTIFACT
+    afib = P.RHYTHM_CODE_ID["afib"]
+    truth = [(1000, 1, 0, afib, 0), (1800, 1, 0, afib, 0), (2600, 1, 2, afib, T_ARTIFACT), (3400, 1, 0, afib, T_LEAD_OFF), (4200, 1, 0, afib, 0),
+             (1000, 2, 0, afib, 0), (1900, 2, 0, afib, 0)]
+    det = {1: [1010, 1790, 3000, 3410, 4190, 5000], 2: [1000, 1900]}
+    r = score_beats(truth, det, 150)
+    o = r["overall"]
+    assert (o["tp"], o["fp"], o["fn"], o["ignored_truth"], o["ignored_det"]) == (5, 2, 1, 1, 1)         # 3000 은 2600(V) 과 400 ms 차 → FN+FP; 3400 리드오프 제외
+    assert o["se_pct"] == round(100 * 5 / 6, 2) and o["ppv_pct"] == round(100 * 5 / 7, 2)
+    assert r["patches"][2]["se_pct"] == 100.0 and r["patches"][2]["ppv_pct"] == 100.0
+    assert r["by_condition"]["artifact"]["fn"] == 1 and r["by_beat_kind"]["V"]["fn"] == 1 and r["by_rhythm"]["afib"]["tp"] == 5
+    assert r["fn_examples"][0]["ts_ms"] == 2600 and {e["ts_ms"] for e in r["fp_examples"]} == {3000, 5000}
+    r2 = score_beats(truth, det, 150, exclude=())                                # 제외 없음: 리드오프 박동도 채점
+    assert r2["overall"]["tp"] == 6 and r2["overall"]["ignored_truth"] == 0
+    assert score_beats([], {1: [5]}, 150)["overall"]["se_pct"] is None

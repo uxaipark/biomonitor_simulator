@@ -21,6 +21,7 @@ from .hospital import layout as hospital_layout
 from .config import BASE_DIR
 from .chat import ChatHub
 from .runtime.engine import Engine
+from .runtime.truthbench import EXCLUDE_DEFAULT
 from .runtime.protocol import describe as describe_protocol
 from .signals.rhythms import RHYTHMS
 from .signals import trend as trend_model
@@ -106,7 +107,7 @@ def discovery():
                          "3. transport.target_ip/port 에 TCP 리스너 오픈 (에뮬레이터가 게이트웨이별로 접속)", "4. 프레임 수신: META 블록으로 채널 구성 갱신, 레코드를 패치 번호 파일로 저장",
                          "5. POST /api/v1/router/status 로 라우터 상태를 주기적으로 보고 (선택)"],
         "endpoints": {
-            "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
+            "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "truth_beats": "GET /api/v1/truth/beats?patch_id=&since_ms=&until_ms=&pace= (정답 R-peak 절대 시각)", "truth_score": "POST /api/v1/truth/score {detections:{patch_id:[ts_ms..]}, tolerance_ms:150} → QRS 검출 Se/PPV/F1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
                         "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
@@ -596,6 +597,34 @@ def truth_status():
     w = E().world
     with w.lock:
         return w.truth.status()
+
+
+@app.get("/api/v1/truth/beats")
+def truth_beats(patch_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(20000, le=200000), pace: int = 0):
+    """정답 박동(R-peak) 절대 시각 목록 — 워커가 프레임에 실은 정답과 같은 값(프레임 ts_ms + 오프셋). pace=1 이면 페이스 스파이크.
+    항목: ts_ms, patch_id, kind(박동 종류)/chamber, rhythm, flags, condition(clean|artifact|noise|switching|settling|lead_off)."""
+    w = E().world
+    with w.lock:
+        rows = w.truth.beats_view(patch_id, since_ms, until_ms, limit, pace=bool(pace))
+    return _json({"beats": rows, "count": len(rows)})
+
+
+@app.post("/api/v1/truth/score")
+def truth_score(body: dict):
+    """QRS 검출 채점: {"detections": {"<patch_id>": [ts_ms, ...]} 또는 [{"patch_id":..,"ts_ms":..}], "tolerance_ms": 150,
+    "since_ms": 0, "until_ms": 0, "exclude": ["lead_off","settling"]} → 전체·패치별·리듬별·조건별·박동종류별 TP/FP/FN, Se(민감도)·PPV(정밀도)·F1,
+    FN/FP 예시.  검출 ts_ms 는 라우터가 받은 프레임 ts_ms 기준(같은 시계)."""
+    det = body.get("detections") or {}
+    if isinstance(det, list):
+        m: dict = {}
+        for d in det:
+            m.setdefault(int(d["patch_id"]), []).append(int(d["ts_ms"]))
+        det = m
+    tol = int(body.get("tolerance_ms", 150))
+    ex = body.get("exclude", list(EXCLUDE_DEFAULT))
+    w = E().world
+    with w.lock:
+        return _json(w.truth.score(det, tol, int(body.get("since_ms", 0) or 0), int(body.get("until_ms", 0) or 0), tuple(ex or ())))
 
 
 @app.get("/api/v1/labels/summary")

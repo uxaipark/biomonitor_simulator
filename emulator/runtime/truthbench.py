@@ -13,13 +13,115 @@ truth=1 행에 대해 프레임마다 TRUTH 레코드를 만든다(fastpath.Fram
 """
 from __future__ import annotations
 
+import collections
 import time
 
 import numpy as np
 
 from ..config import CH_ECG, CH_HR, CH_PACE, CH_TRUTH
-from ..signals.rhythms import RHYTHMS
-from .state import CTL, FLAG_PACED
+from ..signals.rhythms import RHYTHMS, BEAT_KINDS
+from .state import CTL, FLAG_PACED, TRUTH_RING
+from .protocol import RHYTHM_CODES, T_LEAD_OFF, T_ARTIFACT, T_NOISE, T_SWITCH, T_SETTLING
+
+BEATS_KEEP = 1_000_000                 # 메인이 보관하는 정답 박동 수 (64 패치 ≈ 100/s → 약 2.5 시간)
+EXCLUDE_DEFAULT = ("lead_off", "settling", "switching")   # 크로스페이드(1 s) 동안은 두 변형이 섞여 정답이 모호하니 기본 제외
+FLAG_BITS = {"lead_off": T_LEAD_OFF, "artifact": T_ARTIFACT, "noise": T_NOISE, "switching": T_SWITCH, "settling": T_SETTLING}
+
+
+def condition_of(flags: int) -> str:
+    for name in ("lead_off", "settling", "artifact", "noise", "switching"):
+        if flags & FLAG_BITS[name]:
+            return name
+    return "clean"
+
+
+def score_beats(truth: list, detections: dict, tol_ms: int = 150, exclude=EXCLUDE_DEFAULT, examples: int = 20) -> dict:
+    """QRS 검출 채점 (ANSI/AAMI EC57 식 beat-by-beat 대조).
+    truth: [(ts_ms, patch_id, kind, rhythm_code, flags)], detections: {patch_id: [ts_ms, ...]}.
+    허용창 ±tol_ms 안에서 시각순 병합으로 1:1 짝짓기.  exclude 조건(리드오프·재부착 안정화 등)의 정답 박동은 채점에서 빼고,
+    그 박동 ±tol 안의 검출도 FP 로 세지 않는다.  민감도 Se=TP/(TP+FN), 정밀도 PPV=TP/(TP+FP), F1."""
+    ex_mask = 0
+    for name in exclude or ():
+        ex_mask |= FLAG_BITS.get(name, 0)
+    by_patch: dict[int, list] = collections.defaultdict(list)
+    for t in truth:
+        by_patch[int(t[1])].append(t)
+    det_map = {int(k): sorted(int(x) for x in v) for k, v in detections.items()}
+    tot = {"tp": 0, "fp": 0, "fn": 0, "ignored_truth": 0, "ignored_det": 0}
+    by_rhythm: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0, "fp": 0})
+    by_cond: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0, "fp": 0})
+    by_kind: dict = collections.defaultdict(lambda: {"tp": 0, "fn": 0})
+    per_patch: dict = {}
+    fn_ex: list = []
+    fp_ex: list = []
+    pids = sorted(set(by_patch) | set(det_map))
+    for pid in pids:
+        T = sorted(by_patch.get(pid, []), key=lambda t: t[0])
+        D = det_map.get(pid, [])
+        c = {"tp": 0, "fp": 0, "fn": 0, "ignored_truth": 0, "ignored_det": 0, "n_truth": len(T), "n_det": len(D)}
+        i = j = 0
+        last_cond = "clean"
+        while i < len(T) or j < len(D):
+            if i < len(T) and j < len(D):
+                t = T[i]; d = D[j]; dt = d - t[0]
+                if abs(dt) <= tol_ms:                                    # 짝
+                    if t[4] & ex_mask:
+                        c["ignored_truth"] += 1; c["ignored_det"] += 1
+                    else:
+                        c["tp"] += 1
+                        rname = RHYTHM_CODES[t[3]] if t[3] < len(RHYTHM_CODES) else "?"
+                        by_rhythm[rname]["tp"] += 1; by_cond[condition_of(t[4])]["tp"] += 1; by_kind[BEAT_KINDS[t[2]] if t[2] < len(BEAT_KINDS) else "?"]["tp"] += 1
+                    last_cond = condition_of(t[4]); i += 1; j += 1
+                    continue
+                if dt < 0:                                               # 검출이 먼저: FP (근처 제외 박동이면 무시)
+                    near_ex = (i > 0 and (T[i - 1][4] & ex_mask) and d - T[i - 1][0] <= tol_ms * 2) or ((t[4] & ex_mask) and t[0] - d <= tol_ms * 2)
+                    if near_ex:
+                        c["ignored_det"] += 1
+                    else:
+                        c["fp"] += 1; by_cond[last_cond]["fp"] += 1
+                        if len(fp_ex) < examples:
+                            fp_ex.append({"patch_id": pid, "ts_ms": d, "nearest_truth_ms": t[0]})
+                    j += 1
+                    continue
+            if i < len(T) and (j >= len(D) or D[j] - T[i][0] > tol_ms):   # 정답이 먼저: FN
+                t = T[i]
+                if t[4] & ex_mask:
+                    c["ignored_truth"] += 1
+                else:
+                    c["fn"] += 1
+                    rname = RHYTHM_CODES[t[3]] if t[3] < len(RHYTHM_CODES) else "?"
+                    by_rhythm[rname]["fn"] += 1; by_cond[condition_of(t[4])]["fn"] += 1; by_kind[BEAT_KINDS[t[2]] if t[2] < len(BEAT_KINDS) else "?"]["fn"] += 1
+                    if len(fn_ex) < examples:
+                        fn_ex.append({"patch_id": pid, "ts_ms": t[0], "kind": BEAT_KINDS[t[2]] if t[2] < len(BEAT_KINDS) else t[2], "rhythm": rname, "condition": condition_of(t[4])})
+                last_cond = condition_of(t[4]); i += 1
+                continue
+            if j < len(D):                                               # 남은 검출: FP
+                d = D[j]
+                near_ex = i > 0 and (T[i - 1][4] & ex_mask) and d - T[i - 1][0] <= tol_ms * 2
+                if near_ex:
+                    c["ignored_det"] += 1
+                else:
+                    c["fp"] += 1; by_cond[last_cond]["fp"] += 1
+                    if len(fp_ex) < examples:
+                        fp_ex.append({"patch_id": pid, "ts_ms": d, "nearest_truth_ms": T[-1][0] if T else None})
+                j += 1
+        per_patch[pid] = {**c, **_rates(c)}
+        for k in tot:
+            tot[k] += c[k]
+
+    def fin(d):
+        return {k: {**v, **_rates(v)} for k, v in d.items()}
+    return {"tolerance_ms": tol_ms, "exclude": list(exclude or ()), "overall": {**tot, **_rates(tot)}, "patches": per_patch,
+            "by_rhythm": fin(by_rhythm), "by_condition": fin(by_cond), "by_beat_kind": fin(by_kind), "fn_examples": fn_ex, "fp_examples": fp_ex}
+
+
+def _rates(c: dict) -> dict:
+    tp, fp, fn = c.get("tp", 0), c.get("fp", 0), c.get("fn", 0)
+    se = tp / (tp + fn) if tp + fn else None
+    ppv = tp / (tp + fp) if tp + fp else None
+    f1 = (2 * se * ppv / (se + ppv)) if se and ppv and (se + ppv) else (0.0 if se is not None and ppv is not None else None)
+    r = lambda x: None if x is None else round(100.0 * x, 2)
+    return {"se_pct": r(se), "ppv_pct": r(ppv), "f1_pct": r(f1)}
 
 TRUTH_MAX = 64
 # 등급 세트: 간소 16 · 일반 32 · 정밀 64 채널(패치).  값 = 리듬별 패치 수.  정밀은 리듬 종류마다 최소 1개, 임상적으로 중요한 부정맥에 더 많이.
@@ -63,6 +165,11 @@ class TruthBench:
         self.enabled = False
         self.n = 0
         self.counters = {"hops": 0, "rhythm_switches": 0, "artifact": 0, "noise": 0, "lead_off": 0}
+        self.beats: collections.deque = collections.deque(maxlen=BEATS_KEEP)   # (ts_ms, patch_id, kind, rhythm, flags) 정답 R-peak (메인 보관)
+        self.spikes: collections.deque = collections.deque(maxlen=BEATS_KEEP // 4)
+        self._ring_rd: dict[int, int] = {}
+        self.ring_lost = 0
+        self.last_score: dict | None = None
 
     # ------------------------------------------------------------------ setup
     def cfg(self) -> dict:
@@ -151,8 +258,70 @@ class TruthBench:
                 w.gw_state[g]["n_conn"] = cnt
         w.meta_dirty = True
 
+    # ------------------------------------------------------------------ 정답 박동 수집 (워커 링버퍼 → 메인)
+    def collect(self) -> int:
+        st = self.w.st
+        W = st.wstat.arr
+        ring = st.truthlog.arr
+        n_new = 0
+        for wk in range(min(len(W), st.n_workers)):
+            w_end = int(W["truth_w"][wk])
+            rd = self._ring_rd.get(wk, 0)
+            if w_end <= rd:
+                if w_end < rd:                                             # 워커 재시작: 카운터가 0 부터
+                    self._ring_rd[wk] = 0
+                continue
+            if w_end - rd > TRUTH_RING:                                    # 너무 늦게 읽어 덮어씀
+                self.ring_lost += (w_end - rd) - TRUTH_RING
+                rd = w_end - TRUTH_RING
+            base = wk * TRUTH_RING
+            idx = np.arange(rd, w_end) % TRUTH_RING + base
+            rows = ring[idx]
+            for r in rows:
+                if int(r["is_pace"]):
+                    self.spikes.append((int(r["ts_ms"]), int(r["patch_id"]), int(r["kind"]), int(r["rhythm"]), int(r["flags"])))
+                else:
+                    self.beats.append((int(r["ts_ms"]), int(r["patch_id"]), int(r["kind"]), int(r["rhythm"]), int(r["flags"])))
+            n_new += len(rows)
+            self._ring_rd[wk] = w_end
+        return n_new
+
+    def beats_view(self, patch_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = 20000, pace: bool = False) -> list[dict]:
+        src = self.spikes if pace else self.beats
+        out = []
+        for ts, pid, kind, rh, fl in src:
+            if patch_id is not None and pid != patch_id:
+                continue
+            if since_ms and ts < since_ms:
+                continue
+            if until_ms and ts > until_ms:
+                continue
+            out.append({"ts_ms": ts, "patch_id": pid, ("chamber" if pace else "kind"): (kind if pace else (BEAT_KINDS[kind] if kind < len(BEAT_KINDS) else kind)),
+                        "rhythm": RHYTHM_CODES[rh] if rh < len(RHYTHM_CODES) else None, "flags": fl, "condition": condition_of(fl)})
+            if len(out) >= limit:
+                break
+        return out
+
+    def score(self, detections: dict, tol_ms: int = 150, since_ms: int = 0, until_ms: int = 0, exclude=EXCLUDE_DEFAULT) -> dict:
+        """검출 시각 목록({patch_id: [ts_ms...]})을 보관 중인 정답과 대조.  since/until 이 없으면 검출이 걸친 시간창(±tol) 만 본다."""
+        det = {int(k): [int(x) for x in v] for k, v in (detections or {}).items() if v}
+        if not since_ms and det:
+            since_ms = min(min(v) for v in det.values()) - tol_ms
+        if not until_ms and det:
+            until_ms = max(max(v) for v in det.values()) + tol_ms
+        pids = set(det)
+        truth = [t for t in self.beats if (not pids or t[1] in pids) and (not since_ms or t[0] >= since_ms) and (not until_ms or t[0] <= until_ms)]
+        res = score_beats(truth, det, tol_ms, exclude)
+        res.update({"since_ms": since_ms, "until_ms": until_ms, "n_truth": len(truth), "n_detections": sum(len(v) for v in det.values()), "scored_at": time.time()})
+        self.last_score = {k: v for k, v in res.items() if k not in ("patches", "fn_examples", "fp_examples")}
+        return res
+
     # ------------------------------------------------------------------ per-second step
     def step(self, dt_s: float) -> None:
+        try:
+            self.collect()
+        except Exception:
+            pass
         if not self.n:
             return
         w = self.w
@@ -251,4 +420,6 @@ class TruthBench:
         return {"enabled": self.enabled, "grade": getattr(self, "grade", "precise"), "grade_label": GRADES[getattr(self, "grade", "precise")][0], "patches": self.n, "max": len(self.rows),
                 "gateways": [self.w.hospital.gateways[g]["id"] for g in self.gws], "grade_sets": grade_sets(),
                 "beats_available": bank_ok, "note": None if bank_ok else "루프 은행에 R-peak 주석이 없습니다 — [루프 은행 재생성] 뒤에 박동 정답이 나갑니다",
-                "config": self.cfg(), "counters": dict(self.counters), "by_rhythm": by_rhythm, "patches_list": items, "t": time.time()}
+                "config": self.cfg(), "counters": dict(self.counters), "by_rhythm": by_rhythm, "patches_list": items, "t": time.time(),
+                "beats_kept": len(self.beats), "spikes_kept": len(self.spikes), "beats_first_ms": self.beats[0][0] if self.beats else None,
+                "beats_last_ms": self.beats[-1][0] if self.beats else None, "ring_lost": self.ring_lost, "last_score": self.last_score}

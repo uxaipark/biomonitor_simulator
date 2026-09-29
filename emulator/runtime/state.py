@@ -80,7 +80,11 @@ STAT_FIELDS = [                 # per gateway, written by workers
 WSTAT_FIELDS = [                # per worker
     ("ticks", np.uint64), ("overruns", np.uint64), ("build_us", np.float64), ("send_us", np.float64),
     ("last_tick", np.int64), ("alive", np.uint8), ("n_patches", np.uint32), ("n_gw", np.uint32), ("pkts", np.uint64), ("bytes", np.uint64),
+    ("truth_w", np.int64),       # 정답 박동 링버퍼(truthlog) 쓰기 카운터 (단조 증가; 메인이 읽은 위치와의 차로 새 항목을 안다)
 ]
+# 정답 전용 패치의 박동/스파이크 이벤트 링버퍼 (워커 → 메인): 워커마다 TRUTH_RING 칸.  QRS 검출 채점(/api/v1/truth/score)의 정답 원천.
+TRUTH_RING = 16384
+TRUTH_RING_FIELDS = [("ts_ms", np.int64), ("patch_id", np.uint32), ("seq", np.uint32), ("kind", np.uint8), ("rhythm", np.uint8), ("flags", np.uint8), ("is_pace", np.uint8)]
 # control scalars (float64 array)
 CTL = {"running": 0, "epoch_ns": 1, "bundle_ms": 2, "chan_mask": 3, "ecg_fs": 4, "ppg_fs": 5, "resp_fs": 6, "accel_fs": 7,
        "meta_every": 8, "gwstat_every": 9, "target_port": 10, "socket_mode": 11, "crossfade_ticks": 12, "cfg_version": 13,
@@ -145,6 +149,7 @@ class SharedState:
         self.gw = Table(GW_FIELDS, n_gateways, names.get("gw"), create)
         self.stat = Table(STAT_FIELDS, n_gateways, names.get("stat"), create)
         self.wstat = Table(WSTAT_FIELDS, max(1, n_workers), names.get("wstat"), create)
+        self.truthlog = Table(TRUTH_RING_FIELDS, max(1, n_workers) * TRUTH_RING, names.get("truthlog"), create)
         if create:
             self.ctl_shm = shared_memory.SharedMemory(create=True, size=CTL_SIZE * 8)
             self.target_shm = shared_memory.SharedMemory(create=True, size=TARGET_BUF)
@@ -158,7 +163,7 @@ class SharedState:
             self.target[:] = 0
 
     def names(self) -> dict:
-        return {"patch": self.patch.name, "gw": self.gw.name, "stat": self.stat.name, "wstat": self.wstat.name,
+        return {"patch": self.patch.name, "gw": self.gw.name, "stat": self.stat.name, "wstat": self.wstat.name, "truthlog": self.truthlog.name,
                 "ctl": self.ctl_shm.name, "target": self.target_shm.name,
                 "n_patches": self.n_patches, "n_gateways": self.n_gateways, "n_workers": self.n_workers}
 
@@ -177,13 +182,13 @@ class SharedState:
         return raw.split(b"\x00", 1)[0].decode("ascii", "ignore")
 
     def close(self) -> None:
-        for t in (self.patch, self.gw, self.stat, self.wstat):
+        for t in (self.patch, self.gw, self.stat, self.wstat, self.truthlog):
             t.close()
         self.ctl_shm.close()
         self.target_shm.close()
 
     def unlink(self) -> None:
-        for t in (self.patch, self.gw, self.stat, self.wstat):
+        for t in (self.patch, self.gw, self.stat, self.wstat, self.truthlog):
             t.unlink()
         for s in (self.ctl_shm, self.target_shm):
             try:

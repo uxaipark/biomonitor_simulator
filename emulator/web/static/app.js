@@ -653,6 +653,10 @@ function renderTruth(t) {
     $('#truthSets').innerHTML = (t.beats_available ? '' : `<div class="err" style="margin-bottom:4px">⚠ ${esc(t.note || '')}</div>`) +
       `<b>${esc(gs.label)} 세트 (${gs.patches}채널 · 리듬 ${gs.rhythms.length}종)</b>: ` + gs.rhythms.map(r => `<span class="tag" title="${esc(r.cls)}">${esc(r.label)} ×${r.n}</span>`).join(' ');
   }
+  const sc = t.last_score, sbox = $('#truthScore');
+  if (sbox) sbox.innerHTML = sc && sc.overall ? `<b>최근 QRS 채점</b> (허용 ±${sc.tolerance_ms} ms · ${hhmm(sc.scored_at)}): 민감도 <b>${sc.overall.se_pct ?? '-'} %</b> · 정밀도 <b>${sc.overall.ppv_pct ?? '-'} %</b> · F1 ${sc.overall.f1_pct ?? '-'} % — TP ${cnum(sc.overall.tp)} FP ${cnum(sc.overall.fp)} FN ${cnum(sc.overall.fn)} · 정답 ${cnum(sc.n_truth)} · 검출 ${cnum(sc.n_detections)}` +
+    (sc.by_condition ? `<br><span class="sub">조건별 Se/PPV: ${Object.entries(sc.by_condition).map(([k, v]) => `${k} ${v.se_pct ?? '-'}/${v.ppv_pct ?? '-'}`).join(' · ')}</span>` : '')
+    : `<span class="sub">QRS 채점 결과 없음 — 라우터가 <code>POST /api/v1/truth/score {detections:{patch_id:[ts_ms…]}}</code> 로 검출 시각을 보내면 여기에 민감도·정밀도가 표시됩니다. 보관 중인 정답 박동 ${cnum(t.beats_kept || 0)}개${t.ring_lost ? ` (유실 ${cnum(t.ring_lost)})` : ''}.</span>`;
   const body = $('#truthTable tbody'); if (!body) return;
   body.innerHTML = (t.patches_list || []).map(p => {
     const ev = p.event ? `<span class="tag warn">${TR_EVENT_KO[p.event] || p.event} ${fmt(p.event_left_s, 0)}s</span>` : '<span class="tag ok">정상</span>';
