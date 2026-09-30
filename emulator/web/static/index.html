@@ -362,7 +362,8 @@
       <div class="wgrid">
         <div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div>
         <div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div>
-        <div class="field"><span>한국인 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div>
+        <div class="field"><span title="환자 이름·주소·전화·MRN 을 그 나라식으로 만듭니다 (프로필 수는 그대로)">병원 국가 (환자 명단)</span><select id="g_country"><option value="KR">대한민국</option><option value="US">미국 (시카고권)</option><option value="JP">일본 (도쿄권)</option></select></div>
+        <div class="field"><span title="병원 국가 국민 비율 — 나머지는 이민자·외국인 주민">자국민 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div>
         <div class="field"><span title="심장질환 환자 중 페이스메이커 비율">페이스메이커 비율</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div>
         <div class="field"><span title="환자 이름·나이·질환·기저 리듬·주소를 정하는 시드">프로필 시드</span><input type="number" id="g_pseed"></div>
       </div>

@@ -18,7 +18,8 @@ SKIN_BY_NAT = {"KR": ["LIGHT", "PALE", "YELLOW"], "CN": ["LIGHT", "YELLOW", "PAL
                "UZ": ["LIGHT", "TANNED"], "RU": ["PALE", "LIGHT"], "US": ["PALE", "LIGHT", "TANNED", "BROWN", "DARK_BROWN", "BLACK"],
                "GB": ["PALE", "LIGHT", "TANNED", "BROWN"], "DE": ["PALE", "LIGHT"], "FR": ["PALE", "LIGHT", "TANNED"], "NL": ["PALE", "LIGHT"],
                "ES": ["LIGHT", "TANNED"], "IT": ["LIGHT", "TANNED"], "BR": ["LIGHT", "TANNED", "BROWN", "DARK_BROWN"], "MX": ["TANNED", "BROWN", "LIGHT"],
-               "CL": ["LIGHT", "TANNED"], "CO": ["TANNED", "BROWN", "LIGHT"], "AR": ["PALE", "LIGHT", "TANNED"]}
+               "CL": ["LIGHT", "TANNED"], "CO": ["TANNED", "BROWN", "LIGHT"], "AR": ["PALE", "LIGHT", "TANNED"],
+               "IN": ["BROWN", "TANNED", "DARK_BROWN"], "CU": ["TANNED", "BROWN", "LIGHT"], "NG": ["DARK_BROWN", "BLACK"]}
 CLOTHES = ["SHIRT_CREW_NECK", "SHIRT_V_NECK", "SHIRT_SCOOP_NECK", "HOODIE", "COLLAR_SWEATER", "BLAZER_SHIRT"]
 CLOTH_COLORS = ["PASTEL_BLUE", "PASTEL_GREEN", "HEATHER", "GRAY_01", "BLUE_02", "WHITE", "PASTEL_YELLOW", "PINK"]
 

@@ -169,7 +169,7 @@ class World:
 
     def _profile_params_from_cfg(self, g: dict, s: dict) -> dict:
         return {"count": int(g["profile_count"]), "seed": int(g.get("profile_seed") or g["seed"]), "heart": float(g["heart_disease_ratio"]),
-                "korean": float(g["korean_ratio"]), "pm": float(s["pacemaker_ratio"])}
+                "korean": float(g["korean_ratio"]), "pm": float(s["pacemaker_ratio"]), "country": g.get("patient_country", "KR")}
 
     def applied_profile_params(self) -> dict | None:
         try:
@@ -217,7 +217,7 @@ class World:
                 if regen_profiles:
                     self.log.add("system", f"환자 프로필 재생성: {pp['count']:,}명 · 시드 {pp['seed']}")
             self.profile_params = pp
-            self.profiles = make_profiles(pp["count"], pp["seed"], pp["heart"], pp["korean"], pp["pm"])
+            self.profiles = make_profiles(pp["count"], pp["seed"], pp["heart"], pp["korean"], pp["pm"], country=pp.get("country", "KR"))
             arng = np.random.default_rng(pp["seed"] + 99)
             for p in self.profiles:
                 p["avatar"] = assign_avatar(arng, p)
@@ -237,7 +237,9 @@ class World:
                    "template": self.hospital.template, "layout_file": hp.get("layout_file", ""),
                    "heart_ratio": pp["heart"], "korean_ratio": pp["korean"], "pm_ratio": pp["pm"]}
             if pp["seed"] != g["seed"]:
-                sig["profile_seed"] = pp["seed"]                  # 예전 세션(시드 하나)과 같은 값이면 서명도 예전과 같게
+                sig["profile_seed"] = pp["seed"]
+            if pp.get("country", "KR") != "KR":
+                sig["country"] = pp["country"]                    # 한국 명단은 예전 서명 그대로 (DB 이력 유지)                  # 예전 세션(시드 하나)과 같은 값이면 서명도 예전과 같게
             self.built_cfg = cfg                                   # 지금 지어진 병원·게이트웨이의 설정 (재구성 필요 여부 비교용)
             kept = self.db.begin_session(sig)
             if hasattr(self, "_bld_beds"):

@@ -6,6 +6,7 @@ import datetime as dt
 import numpy as np
 
 from .names import korean_name, foreign_name, overseas_name, NATION_LABEL
+from . import intl
 
 # name, icd10, ward specialty, rhythm weights, temp weights, glucose weights, resp kind weights, pacemaker prob
 HEART_DISEASES = [
@@ -250,7 +251,9 @@ def make_overseas_residence(rng: np.random.Generator, code: str) -> tuple[dict, 
 
 
 def make_profiles(n: int, seed: int, heart_ratio: float = 0.7, korean_ratio: float = 0.9,
-                  pacemaker_ratio: float = 0.06, today: dt.date | None = None, overseas_pool: float = 0.08) -> list[dict]:
+                  pacemaker_ratio: float = 0.06, today: dt.date | None = None, overseas_pool: float = 0.08, country: str = "KR") -> list[dict]:
+    """country: 병원 국가 KR(기본) · US · JP — 이름·주소·전화·체격·혈액형·MRN 형식이 그 나라식이 된다 (intl.py).  korean_ratio 는 '자국민 비율'."""
+    country = country if country in intl.COUNTRIES else "KR"
     rng = np.random.default_rng(seed)
     addr_rng = np.random.default_rng(seed ^ 0xADD2E55)       # addresses draw from their own stream: the roster for a seed stays byte-identical
     ovs_rng = np.random.default_rng(seed ^ 0x0BE55EA5)       # 해외 체류자(MCOT 전용 풀)도 별도 난수열: 나머지 프로필은 그대로
@@ -261,14 +264,22 @@ def make_profiles(n: int, seed: int, heart_ratio: float = 0.7, korean_ratio: flo
         age = int(np.clip(rng.normal(64, 15), 19, 96))
         birth = today - dt.timedelta(days=int(age * 365.25 + rng.integers(0, 365)))
         korean = rng.random() < korean_ratio
-        if korean:
+        extra: dict = {}
+        if country != "KR":                                           # 미국 · 일본 병원: 자국민 / 이민자·외국인 주민
+            name, nat, extra = intl.NAMERS[country](rng, sex, birth.year, korean)
+        elif korean:
             name, nat = korean_name(rng, sex, birth.year), "KR"
         else:
             name, nat = foreign_name(rng, sex)
             if nat == "CN" and rng.random() < 0.35:                   # Korean-Chinese, hangul name
                 name = korean_name(rng, sex, birth.year)
-        height = float(np.clip(rng.normal(171 if sex == "M" else 158, 6), 140, 195)) - (0.15 * max(0, age - 50))
-        bmi = float(np.clip(rng.normal(23.8, 3.4), 15.5, 40))
+        if country == "KR":
+            height = float(np.clip(rng.normal(171 if sex == "M" else 158, 6), 140, 195)) - (0.15 * max(0, age - 50))
+            bmi = float(np.clip(rng.normal(23.8, 3.4), 15.5, 40))
+        else:
+            hb = intl.BODY[country]
+            height = float(np.clip(rng.normal(hb["h"][0] if sex == "M" else hb["h"][1], 7), 140, 205)) - (0.15 * max(0, age - 50))
+            bmi = float(np.clip(rng.normal(*hb["bmi"]), 15.5, 55))
         weight = round(bmi * (height / 100) ** 2, 1)
         heart = rng.random() < heart_ratio
         dis = (HEART_DISEASES if heart else OTHER_DISEASES)[int(rng.integers(len(HEART_DISEASES if heart else OTHER_DISEASES)))]
@@ -292,24 +303,35 @@ def make_profiles(n: int, seed: int, heart_ratio: float = 0.7, korean_ratio: flo
         mobility = _pick(rng, {"bedridden": 1 + (age > 80) * 2 + (dis["name"].startswith("고관절")) * 4,
                                "limited": 4 + (age > 70) * 2, "ambulatory": 5 - (age > 75) * 2})
         phone = f"010-{rng.integers(1000, 9999):04d}-{rng.integers(1000, 9999):04d}"
-        address = make_address(addr_rng)
+        if country == "KR":
+            address = make_address(addr_rng)
+        else:
+            address, phone = intl.ADDRESSERS[country](addr_rng)
         overseas = ovs_rng.random() < overseas_pool             # 해외 체류 외국인: 원외 MCOT 로만 부착된다 (world.admit)
         if overseas:
             name, nat = overseas_name(ovs_rng, sex)
-            address, phone = make_overseas_residence(ovs_rng, nat)
+            for _ in range(8):                                  # 병원 나라 사람은 '해외 체류'가 아니다
+                if nat != country:
+                    break
+                name, nat = overseas_name(ovs_rng, sex)
+            if nat == country:
+                overseas = False
+            else:
+                extra = {}
+                address, phone = make_overseas_residence(ovs_rng, nat)
         out.append({
             "id": i + 1,
-            "mrn": f"MRN-{(seed % 97) * 100000 + 10000000 + i:08d}",
+            "mrn": f"MRN-{(seed % 97) * 100000 + 10000000 + i:08d}" if country == "KR" else intl.MRN[country](seed, i),
             "name": name, "sex": sex, "age": age, "birth_date": birth.isoformat(),
             "nationality": nat, "nationality_label": NATION_LABEL[nat],
             "height_cm": round(height, 1), "weight_kg": weight, "bmi": round(bmi, 1),
-            "blood_type": BLOOD[0][int(rng.choice(8, p=BLOOD[1]))],
+            "blood_type": (BLOOD if country == "KR" else intl.BLOOD[country])[0][int(rng.choice(8, p=(BLOOD if country == "KR" else intl.BLOOD[country])[1]))],
             "allergies": ALLERGIES[int(rng.integers(len(ALLERGIES)))],
             "disease": dis["name"], "icd10": dis["icd"], "disease_group": "heart" if heart else "other",
             "ward_specialty": dis["ward"], "comorbidities": comorb,
             "pacemaker": bool(pacemaker), "pacemaker_info": pm_info, "rhythm": rhythm,
             "temp_profile": temp_p, "glucose_profile": gluc_p, "resp_kind": resp_k, "mobility": mobility,
-            "phone": phone, "address": address, "overseas": overseas,
+            "phone": phone, "address": address, "overseas": overseas, "home_country": country, **extra,
             "emergency_contact": ("배우자" if age > 40 else "부모") if rng.random() < 0.7 else "자녀",
             "avatar": None,          # filled by avatars.assign
         })

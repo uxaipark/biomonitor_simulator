@@ -154,7 +154,7 @@ def get_config():
 
 STRUCTURAL = {("general", "seed"), ("general", "bed_capacity"), ("hospital", "template"), ("hospital", "layout_file"), ("hospital", "max_buildings"),
               ("scenario", "gateway", "capacity"), ("scenario", "gateway", "corridor_gateways"), ("general", "fixed_start")}     # [병원·게이트웨이 재구성]
-PROFILE_KEYS = {("general", "profile_count"), ("general", "profile_seed"), ("general", "heart_disease_ratio"), ("general", "korean_ratio"),
+PROFILE_KEYS = {("general", "profile_count"), ("general", "profile_seed"), ("general", "heart_disease_ratio"), ("general", "korean_ratio"), ("general", "patient_country"),
                 ("signals", "pacemaker_ratio")}                                                                              # [환자 프로필 재생성]
 BANK_KEYS = {("signals", "ecg_fs"), ("signals", "ppg_fs"), ("signals", "resp_fs"), ("signals", "accel_fs"), ("signals", "variants_per_rhythm"), ("signals", "loop_seconds"), ("signals", "bank_seed")}   # [루프 은행 재생성]
 
@@ -339,7 +339,7 @@ def world_status():
     hosp = sorted(".".join(p) for p in STRUCTURAL if get(cur, p) != get(built, p))
     pp = w.profile_params or {}
     want = w._profile_params_from_cfg(cur["general"], cur["signals"])
-    prof = sorted(k for k in want if want[k] != pp.get(k))
+    prof = sorted(k for k in want if want[k] != pp.get(k, "KR" if k == "country" else None))      # 예전 명단(국가 키 없음) = 한국
     nb = e._make_bank()
     bank_ok = e.bank.is_ready() and nb.signature() == e.bank.signature()
     return {"hospital": {"pending": bool(hosp), "changed": hosp, "beds": w.hospital.bed_capacity, "gateways": len(w.hospital.gateways)},

@@ -416,7 +416,7 @@ class Realism:
     # ======================================================================= 6. MCOT 단말
     def region_factor(self, prof: dict) -> float:
         a = prof.get("address") or {}
-        return 2.0 if a.get("sido") in RURAL else 1.0
+        return 2.0 if (a.get("sido") in RURAL or a.get("rural")) else 1.0
 
     def phone_step(self, rec: dict, gw: int, dt_s: float) -> None:
         w = self.w

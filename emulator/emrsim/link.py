@@ -251,6 +251,22 @@ class LinkedSim(S.SiteSim):
                                                            "광주": "광주광역시", "울산": "울산광역시", "세종": "세종특별자치시", "제주": "제주특별자치도"}.get(a.get("sido"), a.get("sido")),
                                 "city": a.get("sigungu", ""), "district": a.get("dong", "")}
             p["phone"] = prof.get("phone") or p["phone"]
+        elif loc in ("us", "jp") and prof.get("home_country") == loc.upper() and not (prof.get("address") or {}).get("overseas"):
+            a = prof.get("address") or {}                     # 병원 국가 = 연동 병원 나라: 명단의 이름·주소·전화를 그대로
+            if loc == "jp":
+                fam, _, giv = prof["name"].partition(" ")
+                kana = (prof.get("name_kana") or "").split(" ")
+                p.update(family=fam, given=[giv] if giv else [], text=prof["name"])
+                if len(kana) == 2:
+                    p.update(kana_family=kana[0], kana_given=kana[1], kana_text=f"{kana[0]} {kana[1]}")
+                p["address"] = {"line": [a.get("dong", "")], "city": a.get("sigungu", ""), "district": None, "state": a.get("sido", ""), "postal": a.get("postal"), "country": "JP"}
+            else:
+                if prof.get("name_family"):
+                    p.update(family=prof["name_family"], given=prof["name"].replace(" " + prof["name_family"], "").split(" "), text=prof["name"])
+                p["address"] = {"line": [], "city": a.get("sigungu", ""), "district": a.get("dong"), "state": a.get("sido", ""), "postal": a.get("postal"), "country": "US"}
+            p["phone"] = prof.get("phone") or p.get("phone")
+            if "phone" not in p or "address" not in p:
+                fill_contact(p, loc, r, self.site.get("region"))
         else:
             fill_contact(p, loc, r, self.site.get("region"))
         idx = len(self.people)

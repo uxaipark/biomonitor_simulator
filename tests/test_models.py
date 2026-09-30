@@ -106,3 +106,22 @@ def test_arrhythmia_beat_generation_quality():
             break
     incs = np.diff(prs)
     assert len(prs) >= 3 and all(x > 0 for x in incs) and all(incs[i + 1] <= incs[i] + 1e-9 for i in range(len(incs) - 1))
+
+
+def test_country_rosters_us_jp():
+    """병원 국가 US/JP: 한국과 같은 수의 명단이 그 나라식 이름·주소·전화·MRN 으로, 해외 체류 풀에는 자기 나라가 없다."""
+    import re
+    from emulator.hospital.profiles import make_profiles
+    kr = make_profiles(2000, 11)
+    for c, phone_re, label_re in (("US", r"^\(\d{3}\) 555-01\d\d$", r", (IL|IN|WI|MI|IA) \d{5}$"), ("JP", r"^0[789]0-\d{4}-\d{4}$", r"^〒\d{3}-\d{4} .+丁目$")):
+        ps = make_profiles(2000, 11, country=c)
+        assert len(ps) == len(kr)
+        home = [p for p in ps if not p["overseas"]]
+        assert 0.85 < sum(p["nationality"] == c for p in home) / len(home) < 0.95          # 자국민 비율 0.9
+        for p in home[:200]:
+            a = p["address"]
+            assert a["country"] == c and re.match(phone_re, p["phone"]) and re.search(label_re, a["label"]) and a["postal"] and a["lat"] and p["home_country"] == c
+            assert not p["mrn"].startswith("MRN-")
+        assert not any(p["nationality"] == c for p in ps if p["overseas"])
+    jp = [p for p in make_profiles(500, 11, country="JP") if p["nationality"] == "JP"]
+    assert all(" " in p["name"] and p["name_kana"] for p in jp[:50])
