@@ -342,7 +342,7 @@ function linkStop() { if (linkTimer) { clearInterval(linkTimer); linkTimer = nul
 // ---------------------------------------------------------------- config binding
 const B = {  // element id -> config path
   g_active: ['general', 'active_patients'], g_out: ['general', 'outpatient_count'], g_ovs: ['general', 'overseas_ratio'], g_adm: ['general', 'admissions_per_hour'], g_dis: ['general', 'discharges_per_hour'],
-  g_speed: ['general', 'sim_speed'], g_beds: ['general', 'bed_capacity'], g_prof: ['general', 'profile_count'], g_seed: ['general', 'seed'], g_pseed: ['general', 'profile_seed'], g_country: ['general', 'patient_country'], s_bseed: ['signals', 'bank_seed'], g_heart: ['general', 'heart_disease_ratio'], g_kr: ['general', 'korean_ratio'],
+  g_speed: ['general', 'sim_speed'], g_beds: ['general', 'bed_capacity'], g_prof: ['general', 'profile_count'], g_seed: ['general', 'seed'], g_pseed: ['general', 'profile_seed'], s_bseed: ['signals', 'bank_seed'], g_heart: ['general', 'heart_disease_ratio'], g_kr: ['general', 'korean_ratio'],
   s_ep: ['scenario', 'rhythm_episodes'], s_hop: ['scenario', 'variant_hopping'], s_devpol: ['scenario', 'devices', 'policy'], d_mf: ['scenario', 'devices', 'spo2_mix', 'fingertip'], d_mr: ['scenario', 'devices', 'spo2_mix', 'ring'], d_mw: ['scenario', 'devices', 'spo2_mix', 'wrist_ptt'], n_en: ['scenario', 'network', 'enabled'], n_int: ['scenario', 'network', 'intensity'], n_wl: ['scenario', 'network', 'wireless_noise'], n_wd: ['scenario', 'network', 'wired_failure'], n_lat: ['scenario', 'network', 'latency'], n_pw: ['scenario', 'network', 'power_outage'],
   x_ratio: ['scenario', 'exam_trip_ratio'], a_en: ['scenario', 'artifacts', 'enabled'], a_int: ['scenario', 'artifacts', 'intensity'], a_mo: ['scenario', 'artifacts', 'motion'], a_sh: ['scenario', 'artifacts', 'shower'], a_ex: ['scenario', 'artifacts', 'exam_trips'], a_tr: ['scenario', 'artifacts', 'transfer'], a_hm: ['scenario', 'artifacts', 'home_interference'],
   p_days: ['scenario', 'patch', 'battery_days'], p_wear: ['scenario', 'patch', 'max_wear_days'], p_rx: ['scenario', 'patch', 'rx_enabled'], p_rep: ['scenario', 'patch', 'replace_below_pct'], p_dr: ['scenario', 'patch', 'battery_drain_enabled'], p_lo: ['scenario', 'patch', 'lead_off_enabled'], p_repl: ['scenario', 'patch', 'replace_enabled'],
@@ -352,7 +352,7 @@ const B = {  // element id -> config path
   rf_en: ['scenario', 'rf_noise', 'enabled'], rf_lvl: ['scenario', 'rf_noise', 'level'],
   g_fstart: ['general', 'fixed_start'], g_fstep: ['general', 'fixed_step'],
   t_ip: ['transport', 'target_ip'], t_port: ['transport', 'target_port'], t_bundle: ['transport', 'bundle_ms'], t_meta: ['transport', 'meta_every_n_frames'], t_gws: ['transport', 'gw_status_every_n_frames'],
-  t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
+  t_idc: ['transport', 'identity_country'], t_workers: ['transport', 'workers'], t_backlog: ['transport', 'max_send_backlog_bytes'], 
   sf_en: ['transport', 'store_forward', 'enabled'], sf_max: ['transport', 'store_forward', 'max_bytes_per_gw'], sf_burst: ['transport', 'store_forward', 'burst_frames_per_cycle'],
   tr_en: ['transport', 'truth', 'enabled'], tr_grade: ['transport', 'truth', 'grade'], tr_sw: ['transport', 'truth', 'switch_rhythm_pct'], tr_art: ['transport', 'truth', 'artifact_pct'], tr_nz: ['transport', 'truth', 'noise_pct'], tr_lo: ['transport', 'truth', 'lead_off_pct'],
   fz_en: ['transport', 'fuzz', 'enabled'], fz_rate: ['transport', 'fuzz', 'rate_per_1000'], t_storm: ['transport', 'storm_smoothing'], cap_en: ['transport', 'capture', 'enabled'],
@@ -676,6 +676,15 @@ async function pollTruth() {
 }
 setInterval(pollTruth, 5000);
 for (const id of ['tr_hop0', 'tr_hop1']) { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { const a = Number($('#tr_hop0').value), b = Number($('#tr_hop1').value); queue(['transport', 'truth', 'hop_s'], [Math.min(a, b), Math.max(a, b)]); }); }
+// 국가별 신원 세트 (메디컬 월드 생성 › 환자 프로필 · 시그널 송출 › 송출 국가)
+async function loadIdent() {
+  let r; try { r = await api('/identities'); } catch (e) { return; }
+  const el = $('#identState'); if (el) el.innerHTML = '국가별 신원 세트: ' + ['US', 'JP'].map(c => `${r.labels[c]} ${r.sets[c].ready ? `<b class="ok">${cnum(r.sets[c].count)}명 ✓</b>` : '<b class="warn">없음</b>'}`).join(' · ') + ` · 송출 국가 <b>${r.labels[r.current]}</b>`;
+  const sel = $('#t_idc'); if (sel) $$('option', sel).forEach(o => { const ok = o.value === 'KR' || (r.sets[o.value] && r.sets[o.value].ready); o.textContent = o.textContent.replace(/ \(생성 필요\)$/, '') + (ok ? '' : ' (생성 필요)'); });
+}
+{ const b = $('#btnIdentGen'); if (b) b.onclick = async () => { b.disabled = true; b.textContent = '생성 중…'; try { const r = await post('/identities/generate', {}); toast('신원 세트 생성: ' + Object.entries(r.generated).map(([c, v]) => `${r.labels[c]} ${cnum(v.count)}명`).join(', ')); } catch (e) { toast('생성 실패: ' + e.message); } b.disabled = false; b.textContent = '미국·일본 신원 생성'; loadIdent(); }; }
+setInterval(() => { if ($('[data-tab="struct"]').classList.contains('on') || $('[data-tab="tx"]').classList.contains('on')) loadIdent(); }, 5000);
+setTimeout(loadIdent, 1500);
 function renderTxHealthEvents() {
   const box = $('#txHealthEvents'); if (!box) return;
   const ev = evAll.filter(e => e.kind === 'tx').slice(-6).reverse();

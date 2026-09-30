@@ -174,3 +174,29 @@ NAMERS = {"US": name_us, "JP": name_jp}
 ADDRESSERS = {"US": address_us, "JP": address_jp}
 COUNTRIES = ("KR", "US", "JP")
 COUNTRY_LABEL = {"KR": "대한민국", "US": "미국", "JP": "일본"}
+
+
+# ------------------------------------------------------------------ 국가별 신원 세트 (임상 코어는 공통, 신원만 나라별)
+IDENT_FIELDS = ("name", "nationality", "nationality_label", "address", "phone", "mrn", "name_kana", "name_family", "name_given", "avatar", "home_country")
+
+
+def make_identities(profiles: list[dict], country: str, seed: int, native_ratio: float = 0.9) -> dict:
+    """프로필마다 country 나라의 신원(이름·주소·전화·MRN·국적·아바타)을 만든다.  이름은 그 환자의 성별·출생연도에 맞춘다.
+    해외 체류(MCOT 전용) 프로필은 신원을 바꾸지 않는다(이미 외국 거주자).  결정적: 같은 seed·프로필이면 같은 결과."""
+    from .names import NATION_LABEL
+    from .avatars import assign as assign_avatar
+    out: dict[int, dict] = {}
+    code = {"US": 0x5553, "JP": 0x4A50}[country]
+    for p in profiles:
+        if p.get("overseas"):
+            continue
+        rng = np.random.default_rng([seed, code, p["id"]])
+        birth_year = int(p["birth_date"][:4])
+        native = rng.random() < native_ratio
+        name, nat, extra = NAMERS[country](rng, p["sex"], birth_year, native)
+        address, phone = ADDRESSERS[country](rng)
+        ident = {"name": name, "nationality": nat, "nationality_label": NATION_LABEL.get(nat, nat), "address": address, "phone": phone,
+                 "mrn": MRN[country](seed, p["id"] - 1), "home_country": country, "name_kana": None, "name_family": None, "name_given": None, **extra}
+        ident["avatar"] = assign_avatar(np.random.default_rng([seed, code, p["id"], 7]), {**p, "nationality": nat})
+        out[p["id"]] = ident
+    return out

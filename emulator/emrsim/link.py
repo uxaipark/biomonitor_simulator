@@ -73,6 +73,13 @@ def select(site_id: str | None) -> dict:
     return status()
 
 
+def reset() -> None:
+    """에뮬레이터 환자 신원이 바뀌었을 때(송출 국가 전환): 다음 조회 때 연동 EMR 을 새로 만든다."""
+    global _linked
+    with _lock:
+        _linked = None
+
+
 def linked_sim() -> "LinkedSim | None":
     """선택된 병원의 LinkedSim (에뮬레이터 world 가 바뀌었으면 다시 만든다)."""
     global _linked

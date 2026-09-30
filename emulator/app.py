@@ -313,6 +313,27 @@ async def control_profiles_regenerate():
     return {"result": "profiles regenerated", "profiles": E().world.profile_params}
 
 
+@app.get("/api/v1/identities")
+def identities_status():
+    """국가별 신원 세트: 지금 송출 국가, 준비된 세트(미국·일본), 명단 수."""
+    w = E().world
+    with w.lock:
+        return w.identity_status()
+
+
+@app.post("/api/v1/identities/generate")
+async def identities_generate(body: dict | None = None):
+    """{"countries": ["US","JP"]} (비우면 둘 다) — 지금 명단에 대해 국가별 신원 세트를 만들어 저장한다 (나라당 약 3 초)."""
+    w = E().world
+    cs = [c for c in ((body or {}).get("countries") or ["US", "JP"]) if c in ("US", "JP")]
+
+    def run():
+        with w.lock:
+            return w.generate_identities(cs)
+    r = await asyncio.to_thread(run)
+    return {"generated": r, **w.identity_status()}
+
+
 @app.get("/api/v1/debug/memory")
 def debug_memory(trace: str | None = None, top: int = 30, trim: int = 0):
     """메모리 진단 (RSS · glibc 힙(mallinfo2) · 구조 크기 · 타입별 객체 수 · tracemalloc 증분). ?trace=start|top|stop, ?trim=1 은 malloc_trim(0)"""

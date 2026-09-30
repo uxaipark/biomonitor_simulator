@@ -1249,3 +1249,5 @@ details.dmore>.grid{margin-top:8px}
   header{padding:8px 12px}.status{padding:8px 12px}
 }
 @media (max-width:560px){ .d-kpis{grid-template-columns:1fr} .ev2{grid-template-columns:60px 60px minmax(0,1fr)} .ev2 .x{display:none} .ctr-r{grid-template-columns:110px minmax(0,1fr) 50px 40px} }
+
+.identrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0}.identrow .sub{flex:1}.identrow b.ok{color:var(--acc)}.identrow b.warn{color:var(--warn)}

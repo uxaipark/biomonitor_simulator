@@ -27,6 +27,7 @@ from ..hospital.hospital import Hospital, EXAM_ROOMS, NO_BLE_ROOMS, GW_TYPE_ID
 from ..hospital import layout as hospital_layout
 from ..hospital.profiles import EXAM_TYPES, make_profiles, make_exam_schedule
 from ..hospital.avatars import assign as assign_avatar
+from ..hospital import intl
 from ..hospital.devices import DEVICES, assign_devices, devices_mask, spo2_source
 from ..hospital import monitoring as rx_model
 from ..signals.loops import LoopBank
@@ -171,6 +172,99 @@ class World:
         return {"count": int(g["profile_count"]), "seed": int(g.get("profile_seed") or g["seed"]), "heart": float(g["heart_disease_ratio"]),
                 "korean": float(g["korean_ratio"]), "pm": float(s["pacemaker_ratio"]), "country": g.get("patient_country", "KR")}
 
+    # ------------------------------------------------------------------ 국가별 신원 세트
+    # 임상 코어(나이·성별·질환·리듬·기기·입원·패치·파형)는 하나, 신원(이름·주소·전화·MRN·국적·아바타)만 한국·미국·일본 세 벌.
+    # 송출 국가(transport.identity_country)를 바꾸면 재배정·DB 초기화·전송 중단 없이 신원만 즉시 바뀐다.  세트는 파일로 저장해 재사용
+    # (runtime/identities_US.json · _JP.json, 명단 서명이 같을 때만), [환자 프로필 재생성] 때 다시 만든다.
+    IDENT_COUNTRIES = ("US", "JP")
+
+    def _ident_path(self, c: str) -> Path:
+        return RUNTIME_DIR / f"identities_{c}.json"
+
+    def _ident_sig(self, pp: dict) -> dict:
+        return {k: pp.get(k) for k in ("count", "seed", "heart", "korean", "pm", "country")}
+
+    def _init_identities(self, pp: dict, regen: bool = False) -> None:
+        self._base_ident = {p["id"]: {k: p.get(k) for k in intl.IDENT_FIELDS} for p in self.profiles}
+        self._ident_sets: dict[str, dict] = {}
+        self.identity_country = "KR"
+        sig = self._ident_sig(pp)
+        for c in self.IDENT_COUNTRIES:
+            if regen:
+                self.generate_identities([c], log=False)
+                continue
+            try:
+                doc = json.loads(self._ident_path(c).read_text("utf-8"))
+                if doc.get("sig") == sig:
+                    self._ident_sets[c] = {int(k): v for k, v in doc["items"].items()}
+            except (OSError, ValueError, KeyError):
+                pass
+        want = self.cfg.get("transport", "identity_country", default="KR") or "KR"
+        if want != "KR":
+            try:
+                self.set_identity_country(want, write=False)
+            except Exception as e:
+                self.log.add("system", f"송출 국가 {want} 적용 실패: {e} — 한국 신원으로 송출")
+
+    def generate_identities(self, countries=None, log: bool = True) -> dict:
+        """국가별 신원 세트를 만들어 저장한다 (명단 10,000명이면 나라당 약 3 초)."""
+        pp = self.profile_params
+        out = {}
+        for c in (countries or self.IDENT_COUNTRIES):
+            t0 = time.time()
+            items = intl.make_identities(self.profiles, c, int(pp["seed"]), float(pp["korean"]))
+            self._ident_sets[c] = items
+            try:
+                RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+                self._ident_path(c).write_text(json.dumps({"sig": self._ident_sig(pp), "created_at": time.time(), "items": items}, ensure_ascii=False), "utf-8")
+            except OSError:
+                pass
+            out[c] = {"count": len(items), "seconds": round(time.time() - t0, 1)}
+            if log:
+                self.log.add("system", f"{intl.COUNTRY_LABEL[c]} 신원 세트 생성: {len(items):,}명 ({out[c]['seconds']} 초)")
+        if self.identity_country in out:                                   # 지금 송출 중인 나라를 다시 만들었으면 바로 반영
+            self.set_identity_country(self.identity_country, force=True)
+        return out
+
+    def identity_status(self) -> dict:
+        return {"current": self.identity_country, "available": ["KR"] + [c for c in self.IDENT_COUNTRIES if c in self._ident_sets],
+                "sets": {c: {"count": len(self._ident_sets.get(c) or {}), "ready": c in self._ident_sets} for c in self.IDENT_COUNTRIES},
+                "labels": intl.COUNTRY_LABEL}
+
+    def set_identity_country(self, c: str, write: bool = True, force: bool = False) -> dict:
+        c = c if c in ("KR",) + self.IDENT_COUNTRIES else "KR"
+        if c == self.identity_country and not force:
+            return self.identity_status()
+        if c != "KR" and c not in self._ident_sets:
+            self.generate_identities([c])
+        src = self._ident_sets.get(c) if c != "KR" else None
+        for p in self.profiles:
+            ident = (src or {}).get(p["id"]) if src is not None else None
+            base = self._base_ident.get(p["id"]) or {}
+            for k in intl.IDENT_FIELDS:
+                v = (ident if ident is not None else base).get(k)
+                if v is None and k not in base and ident is None:
+                    p.pop(k, None)
+                else:
+                    p[k] = v
+        prev = self.identity_country
+        self.identity_country = c
+        self.meta_dirty = True
+        self._meta_cache.clear()                                           # 이름·거주지·MRN 이 바뀌었다: META 전부 새로
+        if write:
+            try:
+                self.db.upsert_patients(self.profiles)
+            except Exception:
+                pass
+            try:
+                from ..emrsim import link as emlink
+                emlink.reset()                                             # 연동 EMR 인물도 새 신원으로
+            except Exception:
+                pass
+            self.write_meta(force=True)
+            self.log.add("system", f"송출 국가: {intl.COUNTRY_LABEL[prev]} → {intl.COUNTRY_LABEL[c]} (환자 신원만 교체 · 임상 상태·패치·파형 그대로)")
+        return self.identity_status()
+
     def applied_profile_params(self) -> dict | None:
         try:
             return json.loads(self.PROFILE_APPLIED.read_text("utf-8"))
@@ -223,6 +317,7 @@ class World:
                 p["avatar"] = assign_avatar(arng, p)
                 p["status"] = "pool"
             self.by_id = {p["id"]: p for p in self.profiles}
+            self._init_identities(pp, regen=regen_profiles)                # 국가별 신원 세트 (③ 시그널 송출 › 송출 국가)
             n_patch = self.hospital.bed_capacity + self.mobile_pool + 64 + TRUTH_MAX      # 마지막 TRUTH_MAX 행은 정답 전용 패치 (truthbench)
             n_gw = len(self.hospital.gateways)
             self._meta_cache.clear()
@@ -358,6 +453,12 @@ class World:
         P["resp_src"][:] = rs                       # SpO2 source is per patient (device set)
         if getattr(self, "truth", None):
             self.truth.apply_config()               # 정답 패치 on/off·등급 즉시 반영
+        want = t.get("identity_country", "KR") or "KR"
+        if getattr(self, "_ident_sets", None) is not None and want != getattr(self, "identity_country", "KR"):
+            try:
+                self.set_identity_country(want)            # 송출 국가: 환자 신원만 즉시 교체
+            except Exception as e:
+                self.log.add("error", f"송출 국가 전환 실패: {e}")
         self.meta_dirty = True
 
     # ------------------------------------------------------------------ helpers
@@ -1807,7 +1908,7 @@ class World:
         for g in h.gateways:
             gw = g["idx"]
             patches = sorted(by_gw.get(gw, []), key=lambda x: x["patch_id"])
-            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"], bundle]))
+            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"], bundle, getattr(self, "identity_country", "KR")]))
             ent = cache.get(gw)
             if ent is None or ent[0] != sig:
                 room = h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else ""

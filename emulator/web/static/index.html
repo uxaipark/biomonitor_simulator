@@ -362,12 +362,12 @@
       <div class="wgrid">
         <div class="field"><span>프로필 수</span><input type="number" id="g_prof" min="100" max="50000"></div>
         <div class="field"><span>심장질환 비율</span><input type="number" id="g_heart" min="0" max="1" step="0.05"></div>
-        <div class="field"><span title="환자 이름·주소·전화·MRN 을 그 나라식으로 만듭니다 (프로필 수는 그대로)">병원 국가 (환자 명단)</span><select id="g_country"><option value="KR">대한민국</option><option value="US">미국 (시카고권)</option><option value="JP">일본 (도쿄권)</option></select></div>
-        <div class="field"><span title="병원 국가 국민 비율 — 나머지는 이민자·외국인 주민">자국민 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div>
+        <div class="field"><span title="자국민 비율 — 나머지는 이민자·외국인 주민 (한국·미국·일본 신원 세트 모두에 적용)">자국민 비율</span><input type="number" id="g_kr" min="0" max="1" step="0.05"></div>
         <div class="field"><span title="심장질환 환자 중 페이스메이커 비율">페이스메이커 비율</span><input type="number" id="s_pm" min="0" max="1" step="0.01"></div>
         <div class="field"><span title="환자 이름·나이·질환·기저 리듬·주소를 정하는 시드">프로필 시드</span><input type="number" id="g_pseed"></div>
       </div>
-      <div class="wg-foot"><span></span><button id="btnProfRegen" class="small primary" title="환자 명단을 새로 만들고 다시 배정합니다 (병원·루프 은행은 그대로)">환자 프로필 재생성</button></div>
+      <div class="identrow"><span class="sub" id="identState">국가별 신원 세트 확인 중…</span><button id="btnIdentGen" class="small" title="지금 명단에 대해 미국·일본 신원(이름·주소·전화·MRN)을 만들어 저장합니다 — 임상 정보는 그대로">미국·일본 신원 생성</button></div>
+      <div class="wg-foot"><span></span><button id="btnProfRegen" class="small primary" title="환자 명단을 새로 만들고 다시 배정합니다 (병원·루프 은행은 그대로). 미국·일본 신원 세트도 함께 다시 만듭니다">환자 프로필 재생성</button></div>
     </div></div>
     </div>
     <div class="dcol">
@@ -405,7 +405,8 @@
       <div class="row"><div class="field"><span>번들 주기 (ms)</span><input type="number" id="t_bundle" min="50" max="2000" step="50"></div></div>
       <div class="row"><div class="field"><span>META 전송 주기 (프레임)</span><input type="number" id="t_meta" min="1" max="1000"></div><div class="field"><span>GW 상태 주기 (프레임)</span><input type="number" id="t_gws" min="1" max="1000"></div></div>
       <div class="row"><div class="field"><span>워커 프로세스 (0=자동)</span><input type="number" id="t_workers" min="0" max="16"></div><div class="field"><span>송신 백로그 한도 (bytes)</span><input type="number" id="t_backlog" min="4096" step="4096"></div></div>
-      <div class="help">전송 설정은 즉시 반영됩니다 (워커가 소켓을 재연결).</div>
+      <div class="row"><div class="field"><span title="환자 신원(이름·주소·전화·MRN)을 어느 나라 세트로 보낼지 — 임상 상태·패치·파형은 그대로, 즉시 반영">송출 국가 (환자 신원)</span><select id="t_idc"><option value="KR">대한민국</option><option value="US">미국 (시카고권)</option><option value="JP">일본 (도쿄권)</option></select></div></div>
+      <div class="help">전송 설정은 즉시 반영됩니다 (워커가 소켓을 재연결). 송출 국가를 바꾸면 환자 이름·거주지·전화·MRN 만 그 나라 신원으로 바뀌고 환자 번호·패치·파형·임상 상태는 그대로 이어집니다.</div>
     </div></div>
     <div class="card tx-truth" data-apply="now"><h3><button class="fold" data-fold="txb-4" aria-expanded="true">▾</button>정답 전용 패치 (파형 알고리즘 채점) <span class="sub" id="truthState"></span></h3><div class="scnb" id="txb-4">
       <div class="row"><label class="chk" style="align-self:flex-end"><input type="checkbox" id="tr_en"> 정답 패치 송출</label>

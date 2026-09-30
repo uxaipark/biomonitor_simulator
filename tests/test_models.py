@@ -125,3 +125,18 @@ def test_country_rosters_us_jp():
         assert not any(p["nationality"] == c for p in ps if p["overseas"])
     jp = [p for p in make_profiles(500, 11, country="JP") if p["nationality"] == "JP"]
     assert all(" " in p["name"] and p["name_kana"] for p in jp[:50])
+
+
+def test_identity_sets_keep_clinical_core():
+    """국가별 신원 세트: 성별·출생연도는 코어 그대로, 이름·주소·전화·MRN 만 그 나라식, 결정적, 해외 체류 프로필은 제외."""
+    from emulator.hospital.profiles import make_profiles
+    from emulator.hospital.intl import make_identities
+    ps = make_profiles(800, 5)
+    for c in ("US", "JP"):
+        a, b = make_identities(ps, c, 5), make_identities(ps, c, 5)
+        assert a == b and len(a) == sum(1 for p in ps if not p["overseas"])
+        for p in ps[:100]:
+            if p["overseas"]:
+                continue
+            i = a[p["id"]]
+            assert i["address"]["country"] == c and i["home_country"] == c and i["name"] != p["name"] and i["mrn"] != p["mrn"] and i["avatar"]
