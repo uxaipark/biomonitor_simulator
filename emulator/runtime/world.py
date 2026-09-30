@@ -226,8 +226,19 @@ class World:
             self.set_identity_country(self.identity_country, force=True)
         return out
 
+    LOCALE = {"KR": ("ko-KR", "Asia/Seoul"), "US": ("en-US", "America/Chicago"), "JP": ("ja-JP", "Asia/Tokyo")}
+
+    def identity_fields(self, prof: dict) -> dict:
+        """EMR API 행에 붙는 신원 필드 (라우터 요청 2026-09-30): name_kana, country, home{sido,sigungu,dong,postal,lat,lon,label,country}."""
+        a = prof.get("address") or {}
+        c = a.get("country") or ("KR" if self.identity_country == "KR" else self.identity_country)
+        home = {k: a.get(k) for k in ("sido", "sigungu", "dong", "postal", "lat", "lon", "label")}
+        home["country"] = c
+        return {"name_kana": prof.get("name_kana"), "country": c, "home": home}
+
     def identity_status(self) -> dict:
-        return {"current": self.identity_country, "available": ["KR"] + [c for c in self.IDENT_COUNTRIES if c in self._ident_sets],
+        return {"current": self.identity_country, "site": self.cfg.get("transport", "identity_site", default="") or "", "version": getattr(self, "identity_version", 0),
+                "available": ["KR"] + [c for c in self.IDENT_COUNTRIES if c in self._ident_sets],
                 "sets": {c: {"count": len(self._ident_sets.get(c) or {}), "ready": c in self._ident_sets} for c in self.IDENT_COUNTRIES},
                 "labels": intl.COUNTRY_LABEL}
 
@@ -249,6 +260,7 @@ class World:
                     p[k] = v
         prev = self.identity_country
         self.identity_country = c
+        self.identity_version = getattr(self, "identity_version", 0) + (1 if prev != c or force else 0)
         self.meta_dirty = True
         self._meta_cache.clear()                                           # 이름·거주지·MRN 이 바뀌었다: META 전부 새로
         if write:
@@ -1908,11 +1920,13 @@ class World:
         for g in h.gateways:
             gw = g["idx"]
             patches = sorted(by_gw.get(gw, []), key=lambda x: x["patch_id"])
-            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"], bundle, getattr(self, "identity_country", "KR")]))
+            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"], bundle, getattr(self, "identity_country", "KR"), cfg["transport"].get("identity_site", "")]))
             ent = cache.get(gw)
             if ent is None or ent[0] != sig:
                 room = h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else ""
                 d = {"v": sig & 0x7FFFFFFF, "gw": g["id"], "gw_no": g["gw_no"], "gw_idx": gw, "type": g["type"], "mac": g["mac"], "ip": g["ip"], "fw": g["fw"],
+                     "identity_country": getattr(self, "identity_country", "KR"), "identity_version": getattr(self, "identity_version", 0),   # 라우터: version 이 바뀌면 EMR 캐시 비움
+                     "identity": {"country": getattr(self, "identity_country", "KR"), "hospital": cfg["transport"].get("identity_site", ""), "version": getattr(self, "identity_version", 0)},
                      "location": {"building": g["building"], "floor": g["floor"], "x": g["x"], "y": g["y"], "room": room},
                      "bundle_ms": bundle, "channels_enabled": en, "patches": patches}
                 if g.get("radio"):                                  # MCOT mobile gateway: cellular uplink type
@@ -2237,6 +2251,7 @@ class World:
                         "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]),
                         "patch": self.patches[row].serial if row in self.patches else None, "row": row, "outpatient": rec["outpatient"],
                         "overseas": bool(prof.get("overseas")), "abroad": (h.gateways[rec["mobile_gw"]].get("abroad") if rec["outpatient"] and rec["mobile_gw"] >= 0 else None),
+                        **self.identity_fields(prof),
                         "episode": bool(rec["episode_until"]), **self._rx_row(rec)})
         return out
 

@@ -321,6 +321,45 @@ def identities_status():
         return w.identity_status()
 
 
+COUNTRY_ALIASES = {"KR": "KR", "KOR": "KR", "KOREA": "KR", "한국": "KR", "대한민국": "KR", "US": "US", "USA": "US", "미국": "US", "UNITED STATES": "US",
+                   "JP": "JP", "JPN": "JP", "JAPAN": "JP", "일본": "JP", "日本": "JP"}
+
+
+@app.post("/api/v1/identities/select")
+async def identities_select(body: dict, request: Request):
+    """라우터 로그인에서 병원 국가를 지정하면 호출: {"country": "US", "hospital": "H001", "from": "router"}.
+    에뮬레이터가 그 나라 신원 세트로 즉시 전환한다 (재배정·재시작·DB 초기화 없음, 세트가 없으면 만들고 전환).  같은 값이면 아무것도 안 함.
+    응답: {ok, changed, country, hospital, version, available}.  country 는 KR·US·JP (KOR/USA/JPN·한국어 표기 허용)."""
+    raw = str(body.get("country") or "").strip()
+    if not body.get("hospital"):                                  # 라우터 형식 {"country","by","reason":"login H001 superadmin"}: 병원 코드는 reason 에서
+        import re as _re
+        m = _re.search(r"\b(H\d{2,6})\b", str(body.get("reason") or ""))
+        if m:
+            body = {**body, "hospital": m.group(1)}
+    c = COUNTRY_ALIASES.get(raw.upper(), COUNTRY_ALIASES.get(raw))
+    if not c:
+        raise HTTPException(400, f"unknown country '{raw}' (KR|US|JP)")
+    hosp = "".join(ch for ch in str(body.get("hospital") or "") if ch.isalnum() or ch in "-_")[:32]
+    who = str(body.get("by") or body.get("from") or request.headers.get("X-Source") or "router")[:24]
+    w = E().world
+    before = w.identity_country
+    changed_site = hosp != (cfg.get("transport", "identity_site") or "")
+
+    def run():
+        return _apply_config({"transport": {"identity_country": c, "identity_site": hosp}}, source=f"{who}:identities")
+    await asyncio.to_thread(run)
+    st = w.identity_status()
+    changed = before != st["current"]
+    if changed or changed_site:
+        msg = f"송출 국가 지정 ({who}{' · 병원 ' + hosp if hosp else ''}): {st['labels'][before]} → {st['labels'][st['current']]}" + ("" if changed else " (변경 없음)")
+        try:
+            chat.post("link", msg, kind="system")
+            w.log.add("system", msg)
+        except Exception:
+            pass
+    return {"ok": st["current"] == c, "changed": changed, "current": st["current"], "country": st["current"], "hospital": st["site"], "version": st["version"], "available": st["available"]}
+
+
 @app.post("/api/v1/identities/generate")
 async def identities_generate(body: dict | None = None):
     """{"countries": ["US","JP"]} (비우면 둘 다) — 지금 명단에 대해 국가별 신원 세트를 만들어 저장한다 (나라당 약 3 초)."""
@@ -987,7 +1026,10 @@ async def ws_chat(ws: WebSocket, since: int = -1, sender: str = "gui"):
 @app.get("/api/v1/emr/hospital")
 def emr_hospital():
     w = E().world; h = w.hospital; hp = cfg.get("hospital", default={}) or {}
-    return {**h.describe(), "floors": h.floors, "exam_rooms": {k: h.rooms[v]["id"] for k, v in h.exam_rooms.items()}, "layout_schema": hospital_layout.__doc__,
+    ic = getattr(w, "identity_country", "KR")
+    loc, tz = w.LOCALE.get(ic, ("ko-KR", "Asia/Seoul"))
+    return {**h.describe(), "country": ic, "locale": loc, "timezone": tz, "identity_site": cfg.get("transport", "identity_site") or "", "identity_version": getattr(w, "identity_version", 0),
+            "floors": h.floors, "exam_rooms": {k: h.rooms[v]["id"] for k, v in h.exam_rooms.items()}, "layout_schema": hospital_layout.__doc__,
             "sizing": {"size_by_patients": bool(hp.get("size_by_patients", True)), "headroom_pct": hp.get("headroom_pct", 20), "max_buildings": hp.get("max_buildings", 3),
                        "active_patients": cfg.get("general", "active_patients"), "planned_beds": w.planned_beds(), "beds": h.bed_capacity,
                        "stale": bool(hp.get("size_by_patients", True)) and not hp.get("layout_file") and abs(w.planned_beds() - h.bed_capacity) > max(8, 0.15 * h.bed_capacity)}}
@@ -1208,9 +1250,12 @@ def _news2(num: dict, arrest: bool) -> dict:
 
 @app.get("/api/v1/emr/patients/{pid}")
 def emr_patient(pid: int):
-    v = E().world.patient_view(pid)
+    w = E().world
+    v = w.patient_view(pid)
     if v is None:
         raise HTTPException(404, "patient not found")
+    if pid in w.by_id:
+        v.update(w.identity_fields(w.by_id[pid]))
     ls = emrsim_link.linked_sim()
     if ls is not None:
         v["emr_link"] = ls.identity(pid)
@@ -1247,7 +1292,7 @@ def emr_admissions():
                     "gateway_idx": rec["gw"], "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "gw_id_in_frame": h.gateways[rec["gw"]]["gw_no"] if rec["gw"] >= 0 else None,
                     "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None, "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
                     "ward": p["admission"]["ward"], "mode": p["admission"]["mode"], "doctor": rec["doctor"], "nurse": rec["nurse"], "admit_time": p["admission"]["time"],
-                    "monitoring": p["admission"].get("monitoring")})
+                    "monitoring": p["admission"].get("monitoring"), **w.identity_fields(p)})
     ls = emrsim_link.linked_sim()
     if ls is not None:                                        # 연동 병원 EMR 에서 이 환자를 찾을 키
         ls.advance()

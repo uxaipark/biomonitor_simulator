@@ -105,6 +105,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "storm_smoothing": True,                                                                          # False = every gateway reconnects at once (connection storm)
         "capture": {"enabled": False},                                                                    # ground-truth tap: exact bytes sent -> data/capture/w<worker>.bin
         # ---- 정답 전용 벤치마크 패치 (파형 알고리즘 채점용): 실제 환자가 아닌 가상 패치가 파형 + 정답 레코드(채널 11)를 같이 보낸다
+        "identity_site": "",           # 신원 국가를 정한 병원 코드 (라우터 로그인에서 지정, 예: H001) — 표시·META 용
         "identity_country": "KR",      # 송출 국가: 환자 신원(이름·주소·전화·MRN)을 KR · US · JP 세트 중 무엇으로 보낼지 — 임상 상태는 그대로 (즉시 반영)
         "truth": {"enabled": True, "grade": "precise",                                                     # 등급 세트: basic 간소 16 · standard 일반 32 · precise 정밀 64
                   "hop_s": [120, 480],                                                                     # 리듬/변형 교체 간격 (초, 균등)
@@ -317,6 +318,7 @@ class Config:
         sf["max_bytes_per_gw"] = int(max(65536, min(64 * 1024 * 1024, sf.get("max_bytes_per_gw", 2097152))))
         sf["burst_frames_per_cycle"] = int(max(1, min(1000, sf.get("burst_frames_per_cycle", 40))))
         t["identity_country"] = t.get("identity_country") if t.get("identity_country") in ("KR", "US", "JP") else "KR"
+        t["identity_site"] = "".join(ch for ch in str(t.get("identity_site") or "") if ch.isalnum() or ch in "-_")[:32]
         tr = t.setdefault("truth", {})
         tr["enabled"] = bool(tr.get("enabled", True))
         tr["grade"] = tr.get("grade") if tr.get("grade") in ("basic", "standard", "precise") else "precise"
