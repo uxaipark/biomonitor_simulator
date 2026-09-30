@@ -240,14 +240,18 @@ class World:
         h = self.hospital
         base = getattr(self, "_staff_base", None)
         if base is None or getattr(self, "_staff_base_h", None) is not h:
-            self._staff_base = base = {s["id"]: (s["name"], s.get("name_kana")) for s in h.staff}
+            self._staff_base = base = {s["id"]: (s["name"], s.get("name_kana"), s.get("title")) for s in h.staff}
             self._staff_base_h = h
         seed = int(self.cfg.get("general", "seed"))
         for s in h.staff:
+            name0, kana0, title0 = base[s["id"]]
+            s["title_code"] = title0                                        # 한국어 원문 직함 (코드)
+            s["role_label"] = intl.ROLE_LABEL.get(c, intl.ROLE_LABEL["KR"])[s["role"]]
             if c == "KR":
-                s["name"], s["name_kana"] = base[s["id"]]
+                s["name"], s["name_kana"], s["title"] = name0, kana0, title0
             else:
                 s.update(intl.staff_identity(c, seed, s["id"], s["sex"]))
+                s["title"] = intl.STAFF_TITLE[c].get(title0, title0)
 
     def identity_status(self) -> dict:
         return {"current": self.identity_country, "site": self.cfg.get("transport", "identity_site", default="") or "", "version": getattr(self, "identity_version", 0),

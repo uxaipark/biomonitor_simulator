@@ -181,6 +181,16 @@ IDENT_FIELDS = ("name", "nationality", "nationality_label", "address", "phone", 
 OVERSEAS_KEEP = 0.3                    # 미국·일본 병원: 해외 체류 풀 중 이만큼만 해외 체류로 남고 나머지는 그 나라 거주 MCOT 환자가 된다
 
 
+# 의료진 직함 (한국어 원문은 title_code 로 남긴다 — 라우터가 코드처럼 쓸 수 있게)
+STAFF_TITLE = {
+    "US": {"교수": "Attending Physician (Professor)", "임상조교수": "Clinical Assistant Professor", "전임의": "Fellow", "전공의 4년차": "Resident (PGY-4)",
+           "전공의 3년차": "Resident (PGY-3)", "전공의 2년차": "Resident (PGY-2)", "전공의 1년차": "Intern (PGY-1)", "수간호사": "Nurse Manager", "간호사": "Registered Nurse (RN)"},
+    "JP": {"교수": "教授", "임상조교수": "臨床助教", "전임의": "フェロー", "전공의 4년차": "専攻医 4年目", "전공의 3년차": "専攻医 3年目", "전공의 2년차": "専攻医 2年目",
+           "전공의 1년차": "初期研修医", "수간호사": "看護師長", "간호사": "看護師"},
+}
+ROLE_LABEL = {"US": {"doctor": "Physician", "nurse": "Nurse"}, "JP": {"doctor": "医師", "nurse": "看護師"}, "KR": {"doctor": "의사", "nurse": "간호사"}}
+
+
 def staff_identity(country: str, seed: int, staff_id: str, sex: str) -> dict:
     """의료진(의사·간호사) 이름을 그 나라식으로 — 결정적(병원 시드·직원 번호).  출생연도는 1965~1999 에서."""
     code = {"US": 0x5553, "JP": 0x4A50}[country]
