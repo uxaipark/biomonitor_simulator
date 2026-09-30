@@ -143,3 +143,11 @@ def test_identity_sets_keep_clinical_core():
                 continue
             i = a[p["id"]]
             assert i["address"]["country"] == c and i["home_country"] == c and i["name"] != p["name"] and i["mrn"] != p["mrn"] and i["avatar"]
+
+
+def test_korean_addresses_have_map_coordinates():
+    """한국 거주지에도 지도 좌표(lat/lon)가 있어야 한다 — 없으면 라우터 MCOT 지도가 이전(미국) 위치를 그대로 둔다."""
+    from emulator.hospital.profiles import make_profiles
+    ps = [p for p in make_profiles(2000, 20240905) if not p["overseas"]]
+    assert all(33.0 < p["address"]["lat"] < 38.7 and 124.5 < p["address"]["lon"] < 130.0 for p in ps)
+    assert ps[0]["name"] == "안재민"                                   # 좌표를 붙여도 명단(난수열)은 그대로
