@@ -855,6 +855,9 @@ async function refresh() {
   sparkP.push(L.pkts_ps || 0); sparkB.push((L.bytes_ps || 0) / 1024); if (sparkP.length > 600) { sparkP.shift(); sparkB.shift(); }
   drawSpark($('#sparkPkts'), sparkP.slice(-120), TH().acc); drawSpark($('#sparkBytes'), sparkB.slice(-120), TH().acc2);
   try { renderShell(s, L, T, load); } catch (e) { console.error('shell', e); }
+  { const idv = s.identity ? `${s.identity.country}:${s.identity.version}` : '';             // 송출 국가가 바뀌면 이름·주소가 바뀐 명단을 바로 다시 읽는다
+    if (idv && window.__idv !== undefined && window.__idv !== idv) { patCache.key = ''; loadPatientList(); if ($('[data-tab="pat"]').classList.contains('on')) loadPatients(true); if (curPid) loadPatCard(); toast('송출 국가 전환: 환자 이름·주소가 ' + ({ KR: '대한민국', US: '미국', JP: '일본' }[s.identity.country] || s.identity.country) + ' 신원으로 바뀌었습니다'); }
+    window.__idv = idv; }
   const b = s.bank, p = b.progress;
   $('#bankInfo2').textContent = `${b.loaded ? '로드됨' : '미생성'} · 변형 ${b.variants} · ${b.size_mb} MB · ${p.state}${p.state === 'running' ? ` ${p.done}/${p.total} (${p.message}, ETA ${fmt(p.eta_s)}s)` : ''}`;
   $('#bankBar2').style.width = (p.total ? p.done / p.total * 100 : (b.loaded ? 100 : 0)) + '%';

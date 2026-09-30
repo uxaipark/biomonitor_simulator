@@ -177,26 +177,28 @@ COUNTRY_LABEL = {"KR": "대한민국", "US": "미국", "JP": "일본"}
 
 
 # ------------------------------------------------------------------ 국가별 신원 세트 (임상 코어는 공통, 신원만 나라별)
-IDENT_FIELDS = ("name", "nationality", "nationality_label", "address", "phone", "mrn", "name_kana", "name_family", "name_given", "avatar", "home_country")
+IDENT_FIELDS = ("name", "nationality", "nationality_label", "address", "phone", "mrn", "name_kana", "name_family", "name_given", "avatar", "home_country", "overseas")
+OVERSEAS_KEEP = 0.3                    # 미국·일본 병원: 해외 체류 풀 중 이만큼만 해외 체류로 남고 나머지는 그 나라 거주 MCOT 환자가 된다
 
 
 def make_identities(profiles: list[dict], country: str, seed: int, native_ratio: float = 0.9) -> dict:
     """프로필마다 country 나라의 신원(이름·주소·전화·MRN·국적·아바타)을 만든다.  이름은 그 환자의 성별·출생연도에 맞춘다.
-    해외 체류(MCOT 전용) 프로필은 신원을 바꾸지 않는다(이미 외국 거주자).  결정적: 같은 seed·프로필이면 같은 결과."""
+    해외 체류(MCOT 전용) 프로필: 병원 나라 사람이거나 OVERSEAS_KEEP 밖이면 그 나라 거주 환자(overseas False)로 바꾸고, 나머지만 외국 거주자로
+    남긴다(신원 그대로) — 미국 병원 MCOT 는 미국 거주자가 대부분이어야 한다.  결정적: 같은 seed·프로필이면 같은 결과."""
     from .names import NATION_LABEL
     from .avatars import assign as assign_avatar
     out: dict[int, dict] = {}
     code = {"US": 0x5553, "JP": 0x4A50}[country]
     for p in profiles:
-        if p.get("overseas"):
-            continue
         rng = np.random.default_rng([seed, code, p["id"]])
+        if p.get("overseas") and p.get("nationality") != country and rng.random() < OVERSEAS_KEEP:
+            continue                                                      # 외국 거주자로 남김 (기본 신원 그대로)
         birth_year = int(p["birth_date"][:4])
         native = rng.random() < native_ratio
         name, nat, extra = NAMERS[country](rng, p["sex"], birth_year, native)
         address, phone = ADDRESSERS[country](rng)
         ident = {"name": name, "nationality": nat, "nationality_label": NATION_LABEL.get(nat, nat), "address": address, "phone": phone,
-                 "mrn": MRN[country](seed, p["id"] - 1), "home_country": country, "name_kana": None, "name_family": None, "name_given": None, **extra}
+                 "mrn": MRN[country](seed, p["id"] - 1), "home_country": country, "name_kana": None, "name_family": None, "name_given": None, "overseas": False, **extra}
         ident["avatar"] = assign_avatar(np.random.default_rng([seed, code, p["id"], 7]), {**p, "nationality": nat})
         out[p["id"]] = ident
     return out

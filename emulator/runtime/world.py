@@ -182,7 +182,7 @@ class World:
         return RUNTIME_DIR / f"identities_{c}.json"
 
     def _ident_sig(self, pp: dict) -> dict:
-        return {k: pp.get(k) for k in ("count", "seed", "heart", "korean", "pm", "country")}
+        return {"v": 2, **{k: pp.get(k) for k in ("count", "seed", "heart", "korean", "pm", "country")}}   # v2: 해외 체류 풀 재배치
 
     def _init_identities(self, pp: dict, regen: bool = False) -> None:
         self._base_ident = {p["id"]: {k: p.get(k) for k in intl.IDENT_FIELDS} for p in self.profiles}
@@ -258,6 +258,14 @@ class World:
                     p.pop(k, None)
                 else:
                     p[k] = v
+        for rec in list(self.admitted.values()):                        # 원외 MCOT: 해외 체류 여부가 바뀌었으면 게이트웨이 망 정보도
+            if rec["outpatient"] and rec["mobile_gw"] >= 0:
+                p = self.by_id[rec["id"]]
+                had = "abroad" in self.hospital.gateways[rec["mobile_gw"]]
+                if had != bool(p.get("overseas")):
+                    self._apply_abroad(rec["mobile_gw"], p)
+                    self.gw_state[rec["mobile_gw"]]["base_lat"] = 0.0
+                    self._mcot_uplink(rec["mobile_gw"])
         prev = self.identity_country
         self.identity_country = c
         self.identity_version = getattr(self, "identity_version", 0) + (1 if prev != c or force else 0)
@@ -651,7 +659,10 @@ class World:
         h = self.hospital
         if prof is None:
             # 원외 부착의 일부는 해외 체류 외국인(general.overseas_ratio); 해외 풀이 비면 국내 환자로 대신한다
-            want_ovs = outpatient and self.rng.random() < float(self.cfg.get("general").get("overseas_ratio", 0.0) or 0.0)
+            ovr = float(self.cfg.get("general").get("overseas_ratio", 0.0) or 0.0)
+            if getattr(self, "identity_country", "KR") != "KR":
+                ovr *= intl.OVERSEAS_KEEP                                  # 미국·일본 병원: 해외 체류 풀도 그 비율만 남아 있다 → MCOT 대부분이 그 나라 거주자
+            want_ovs = outpatient and self.rng.random() < ovr
             prof = self._pick_pool_patient(overseas=want_ovs) or (self._pick_pool_patient(overseas=False) if want_ovs else None)
         if prof is None or not self.free_rows or (prof.get("overseas") and not outpatient):
             return None
@@ -674,13 +685,7 @@ class World:
             self.st.gw["active"][free[0]] = 1
             self.gw_state[free[0]]["mobile_batt"] = float(self.rng.uniform(40, 100))
             self.st.gw["status"][free[0]] = 0
-            mg = h.gateways[free[0]]
-            if prof.get("overseas"):                                       # 해외 체류: 현지 망·시간대·통신사 (META abroad, 업링크 지연, 하루 생활 시각)
-                a = prof.get("address") or {}
-                mg["abroad"] = {"country": a.get("country"), "country_label": a.get("country_label"), "region": a.get("region"), "city": a.get("city"),
-                                "district": a.get("district"), "postal": a.get("postal"), "lat": a.get("lat"), "lon": a.get("lon"), "tz": a.get("tz"), "carrier": a.get("carrier")}
-            else:
-                mg.pop("abroad", None)
+            self._apply_abroad(free[0], prof)
             self._mcot_uplink(free[0])
             rec["location"] = -1
             prof["status"] = "outpatient"
@@ -1369,6 +1374,16 @@ class World:
         self.meta_dirty = True
         self.counters["patch_replaced"] += 1
         self.log.add("patch", f"{prof['name']} 패치 교체 {old.serial if old else '-'} → {new.serial} ({reason})", patient_id=prof["id"])
+
+    def _apply_abroad(self, gw: int, prof: dict) -> None:
+        """모바일 게이트웨이의 해외 체류 정보 (META abroad, 업링크 국제 구간, 현지 시각 생활) — 입원 때와 신원 국가 전환 때."""
+        mg = self.hospital.gateways[gw]
+        if prof.get("overseas"):
+            a = prof.get("address") or {}
+            mg["abroad"] = {"country": a.get("country"), "country_label": a.get("country_label"), "region": a.get("region"), "city": a.get("city"),
+                            "district": a.get("district"), "postal": a.get("postal"), "lat": a.get("lat"), "lon": a.get("lon"), "tz": a.get("tz"), "carrier": a.get("carrier")}
+        else:
+            mg.pop("abroad", None)
 
     def _mcot_uplink(self, gw: int, outside: bool = False) -> None:
         """Apply the mobile gateway's cellular/internet delay: a per-unit baseline drawn once from its radio type,

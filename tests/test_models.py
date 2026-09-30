@@ -134,9 +134,12 @@ def test_identity_sets_keep_clinical_core():
     ps = make_profiles(800, 5)
     for c in ("US", "JP"):
         a, b = make_identities(ps, c, 5), make_identities(ps, c, 5)
-        assert a == b and len(a) == sum(1 for p in ps if not p["overseas"])
+        assert a == b and len(a) >= sum(1 for p in ps if not p["overseas"])           # 해외 체류 풀도 대부분 그 나라 거주자로 바뀐다
+        kept = [p for p in ps if p["overseas"] and p["id"] not in a]
+        assert all(p["nationality"] != c for p in kept) and len(kept) < 0.5 * sum(1 for p in ps if p["overseas"])
+        assert all(i["overseas"] is False for i in a.values())
         for p in ps[:100]:
-            if p["overseas"]:
+            if p["id"] not in a:
                 continue
             i = a[p["id"]]
             assert i["address"]["country"] == c and i["home_country"] == c and i["name"] != p["name"] and i["mrn"] != p["mrn"] and i["avatar"]

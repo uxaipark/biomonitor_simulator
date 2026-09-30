@@ -285,6 +285,7 @@ class Engine:
                 "gateways": len(w.hospital.gateways), "gw_active": int((st.gw["active"] > 0).sum()), "sim_time": w.sim_time, "autotune": w.autotune,
                 "bank": {"loaded": self.bank.loaded, "variants": int(self.bank.ecg.shape[0]) if self.bank.loaded else 0, "size_mb": round(self.bank.size_bytes() / 1e6, 1),
                          "progress": self.bank.progress, "ready": self.bank.is_ready()},
+                "identity": {"country": getattr(w, "identity_country", "KR"), "version": getattr(w, "identity_version", 0)},
                 "tick": w._tick_now() if self.running else 0, "chan_mask": int(st.ctl[CTL["chan_mask"]]), "n_workers": int(st.ctl[CTL["n_workers"]])}
 
     def preview_many(self, rows: list[int], tick: int | None = None, numeric: bool = False) -> dict[int, dict | None]:
