@@ -181,6 +181,16 @@ IDENT_FIELDS = ("name", "nationality", "nationality_label", "address", "phone", 
 OVERSEAS_KEEP = 0.3                    # 미국·일본 병원: 해외 체류 풀 중 이만큼만 해외 체류로 남고 나머지는 그 나라 거주 MCOT 환자가 된다
 
 
+def staff_identity(country: str, seed: int, staff_id: str, sex: str) -> dict:
+    """의료진(의사·간호사) 이름을 그 나라식으로 — 결정적(병원 시드·직원 번호).  출생연도는 1965~1999 에서."""
+    code = {"US": 0x5553, "JP": 0x4A50}[country]
+    rng = np.random.default_rng([seed, code, 0x57AF, int(staff_id[1:]) if staff_id[1:].isdigit() else 0])
+    by = int(rng.integers(1965, 2000))
+    native = rng.random() < 0.85
+    name, nat, extra = NAMERS[country](rng, sex, by, native)
+    return {"name": name, "name_kana": extra.get("name_kana"), "nationality": nat}
+
+
 def make_identities(profiles: list[dict], country: str, seed: int, native_ratio: float = 0.9) -> dict:
     """프로필마다 country 나라의 신원(이름·주소·전화·MRN·국적·아바타)을 만든다.  이름은 그 환자의 성별·출생연도에 맞춘다.
     해외 체류(MCOT 전용) 프로필: 병원 나라 사람이거나 OVERSEAS_KEEP 밖이면 그 나라 거주 환자(overseas False)로 바꾸고, 나머지만 외국 거주자로

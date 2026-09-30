@@ -236,6 +236,19 @@ class World:
         home["country"] = c
         return {"name_kana": prof.get("name_kana"), "country": c, "home": home}
 
+    def _apply_staff_identity(self, c: str) -> None:
+        h = self.hospital
+        base = getattr(self, "_staff_base", None)
+        if base is None or getattr(self, "_staff_base_h", None) is not h:
+            self._staff_base = base = {s["id"]: (s["name"], s.get("name_kana")) for s in h.staff}
+            self._staff_base_h = h
+        seed = int(self.cfg.get("general", "seed"))
+        for s in h.staff:
+            if c == "KR":
+                s["name"], s["name_kana"] = base[s["id"]]
+            else:
+                s.update(intl.staff_identity(c, seed, s["id"], s["sex"]))
+
     def identity_status(self) -> dict:
         return {"current": self.identity_country, "site": self.cfg.get("transport", "identity_site", default="") or "", "version": getattr(self, "identity_version", 0),
                 "available": ["KR"] + [c for c in self.IDENT_COUNTRIES if c in self._ident_sets],
@@ -266,6 +279,7 @@ class World:
                     self._apply_abroad(rec["mobile_gw"], p)
                     self.gw_state[rec["mobile_gw"]]["base_lat"] = 0.0
                     self._mcot_uplink(rec["mobile_gw"])
+        self._apply_staff_identity(c)                                   # 의료진 이름도 (라우터 요청 seq 2332)
         prev = self.identity_country
         self.identity_country = c
         self.identity_version = getattr(self, "identity_version", 0) + (1 if prev != c or force else 0)
