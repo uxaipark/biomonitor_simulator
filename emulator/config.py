@@ -159,7 +159,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "rx_enabled": True,            # 모니터링 처방(위중도에 따라 3~14일) 끝나면 모니터링 종료·패치 반납
             "battery_drain_enabled": True,
             "lead_off_enabled": True,
-            "replace_below_pct": 5,
+            "replace_below_pct": 5,        # battery_report=percent 일 때만: 이 % 이하면 교체
+            "battery_report": "level",     # level: 실제 패치처럼 충분/부족 2단계(레코드 battery 100/10 + LOW_BATT 플래그) | percent: % 그대로 (시험용)
+            "low_warn_hours": [4, 24],     # 남은 시간이 이 범위(패치마다 균등)로 내려가면 '부족' 표시 — 부족이면 하루 안에 꺼질 수 있다
+            "swap_delay_hours": [1, 18],   # '부족'을 보고 교체하기까지 걸리는 시간 (밤 22~7시는 ×1.6) — 그 전에 소진되면 꺼졌다가 교체
             "replace_enabled": True,       # 배터리가 기준 이하면 새 패치로 교체 (끄면 방전된 패치는 전송을 멈춤)
         },
         "gateway": {

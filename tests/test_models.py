@@ -151,3 +151,35 @@ def test_korean_addresses_have_map_coordinates():
     ps = [p for p in make_profiles(2000, 20240905) if not p["overseas"]]
     assert all(33.0 < p["address"]["lat"] < 38.7 and 124.5 < p["address"]["lon"] < 130.0 for p in ps)
     assert ps[0]["name"] == "안재민"                                   # 좌표를 붙여도 명단(난수열)은 그대로
+
+
+def test_two_level_battery_gauge_runs_through_world():
+    """연료계 2단계: 부족 표시 → (교체가 늦으면) 소진·전원 꺼짐 → 교체. 레코드 battery 는 100/10 만."""
+    import os, subprocess, sys, json, tempfile
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {root!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 7, 'profile_count': 400, 'bed_capacity': 60, 'active_patients': 40, 'outpatient_count': 4, 'sim_speed': 60.0, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}},
+            'scenario': {{'patch': {{'battery_days': 1.0, 'max_wear_days': 14, 'low_warn_hours': [4, 6], 'swap_delay_hours': [1, 8], 'battery_drain_enabled': True, 'replace_enabled': True}}}}}})
+s = cfg.snapshot()['signals']
+w = World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+w.running = True
+vals = set()
+for i in range(int(36 * 3600 / 60)):
+    w.step(1.0)
+    vals |= set(int(w.st.patch.arr['battery'][r['row']]) for r in w.admitted.values())
+print(json.dumps({{'vals': sorted(vals), 'dead': int(w.counters['patch_battery_dead']), 'replaced': int(w.counters['patch_replaced'])}}))
+w.db.close(); w.st.close(); w.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert set(out["vals"]) <= {100, 10} and 10 in out["vals"], out
+    assert out["replaced"] > 0 and out["dead"] > 0, out                 # 교체가 늦어 꺼지는 패치도 생긴다

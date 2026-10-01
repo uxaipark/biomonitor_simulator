@@ -38,7 +38,7 @@ from ..signals.slow import TEMP_PROFILES, GLUCOSE_PROFILES
 from ..signals import trend as trend_model
 from .realism import Realism
 from ..hospital.layout import CEIL_H
-from .state import SharedState, CTL, FUZZ_KINDS, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED, FLAG_NEW_PATCH, FLAG_CHARGING
+from .state import SharedState, CTL, FUZZ_KINDS, BATT_OK, BATT_LOW, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED, FLAG_NEW_PATCH, FLAG_CHARGING
 from .truthbench import TruthBench, TRUTH_MAX
 
 ACT_ID = {a: i for i, a in enumerate(ACTIVITIES)}
@@ -103,7 +103,8 @@ class EventLog:
 
 
 class Patch:
-    __slots__ = ("row", "serial", "patch_id", "patient_id", "battery", "activated", "attached", "lead_off_until", "new_until", "replaced")
+    __slots__ = ("row", "serial", "patch_id", "patient_id", "battery", "activated", "attached", "lead_off_until", "new_until", "replaced",
+                 "low_h", "low_since", "swap_at", "dead")
 
     def __init__(self, row, serial, patch_id):
         self.row, self.serial, self.patch_id = row, serial, patch_id
@@ -114,6 +115,10 @@ class Patch:
         self.lead_off_until = 0.0
         self.new_until = 0.0
         self.replaced = 0
+        self.low_h = 12.0          # 남은 시간이 이만큼 아래로 내려가면 연료계가 '부족'으로 바뀐다 (패치마다 다름, _new_patch 에서 뽑음)
+        self.low_since = 0.0       # '부족' 표시 시작 시각 (sim)
+        self.swap_at = 0.0         # 의료진이 '부족'을 보고 교체할 시각 (sim)
+        self.dead = False          # 배터리 소진 → 전원 꺼짐 (교체 전까지 무신호)
 
 
 class World:
@@ -505,6 +510,8 @@ class World:
         serial = f"BP-{self.next_patch_serial:06d}"
         p = Patch(row, serial, 0x10000 + self.next_patch_serial)
         self.next_patch_serial += 1
+        lw = self.cfg.get("scenario", "patch", "low_warn_hours", default=[4, 24]) or [4, 24]
+        p.low_h = float(self.rng.uniform(float(lw[0]), float(lw[-1])))     # 실제 패치: 배터리는 충분/부족 2단계 — 부족이면 하루 안에 꺼질 수 있다
         p.activated = self.sim_time
         p.patient_id = patient_id
         self.patches[row] = p
@@ -1362,8 +1369,8 @@ class World:
                 wear = float(pc.get("max_wear_days") or 14)
                 patch.activated = now - wear * 86400.0 + float(self.rng.uniform(0, within))
                 patch.battery = max(pc["replace_below_pct"] + 1.0, 100.0 - 100.0 * wear / float(pc["battery_days"]))
-            elif what == "patch_low_battery":
-                patch.battery = float(pc["replace_below_pct"])
+            elif what == "patch_low_battery":                                # 연료계를 '부족' 직전까지 → 곧 부족 표시, 교체는 의료진 반응 시간 뒤
+                patch.battery = max(0.5, (patch.low_h - 0.05) / (float(pc["battery_days"]) * 24.0) * 100.0)
             elif rec.get("rx"):
                 rec["rx"]["end"] = now + float(self.rng.uniform(0, within))
                 self.by_id[pid]["admission"]["monitoring"] = self._rx_view(rec["rx"])
@@ -1392,6 +1399,15 @@ class World:
         self.meta_dirty = True
         self.counters["patch_replaced"] += 1
         self.log.add("patch", f"{prof['name']} 패치 교체 {old.serial if old else '-'} → {new.serial} ({reason})", patient_id=prof["id"])
+
+    def _batt_view(self, row: int) -> dict:
+        """API 용 배터리: battery_level(충분/부족/꺼짐 — 패치가 실제로 알려 주는 값), 시험자용 정답 battery_true_pct·남은 시간·교체 예정."""
+        p = self.patches.get(row)
+        if p is None:
+            return {}
+        bd = float(self.cfg.get("scenario", "patch", "battery_days") or 15.5)
+        return {"battery_level": "꺼짐" if p.dead else ("부족" if p.low_since else "충분"), "battery_true_pct": round(p.battery, 1),
+                "battery_remain_h": round(p.battery / 100.0 * bd * 24.0, 1), "battery_swap_in_h": round(max(0.0, p.swap_at - self.sim_time) / 3600.0, 1) if p.swap_at else None}
 
     def _apply_abroad(self, gw: int, prof: dict) -> None:
         """모바일 게이트웨이의 해외 체류 정보 (META abroad, 업링크 국제 구간, 현지 시각 생활) — 입원 때와 신원 국가 전환 때."""
@@ -1497,9 +1513,24 @@ class World:
             if drain:
                 patch.battery = max(0.0, patch.battery - drain)
             ft_lb = bool(rec.get("ft_lowbatt"))                              # 현장 테스트: 배터리 부족 표시 (테스트가 풀 때 지움)
-            P["battery"][row] = 8 if ft_lb else int(patch.battery)
+            # 패치 연료계는 충분/부족 2단계뿐이다 (2026-10-01): 남은 시간이 패치마다 다른 low_h(기본 4~24 h) 아래면 '부족',
+            # 그 뒤 하루 안에 꺼질 수 있다.  battery_report=percent 이면 예전처럼 % 를 그대로 보낸다(시험용).
+            remain_h = patch.battery / 100.0 * float(pc["battery_days"]) * 24.0
+            low = ft_lb or (drain > 0 and remain_h <= patch.low_h) or patch.dead
+            if low and not patch.low_since and not ft_lb:
+                patch.low_since = now
+                sd = pc.get("swap_delay_hours") or [1, 18]
+                hour = dt.datetime.fromtimestamp(now).hour
+                night = 1.6 if (hour >= 22 or hour < 7) else 1.0              # 밤에는 늦게 본다
+                patch.swap_at = now + float(self.rng.uniform(float(sd[0]), float(sd[-1]))) * 3600.0 * night
+                self.log.add("patch", f"{prof['name']} 패치 {patch.serial} 배터리 '부족' 표시 (실제 남은 {remain_h:.1f}시간)", patient_id=pid)
+                self.db.add_patch_event(now, patch.serial, pid, "battery_low", f"부족 표시 · 남은 {remain_h:.1f}h")
+            if pc.get("battery_report", "level") == "percent":
+                P["battery"][row] = 8 if ft_lb else int(patch.battery)
+            else:
+                P["battery"][row] = BATT_LOW if low else BATT_OK
             f = int(P["flags"][row])
-            f = (f | FLAG_LOW_BATT) if patch.battery < 15 or ft_lb else (f & ~FLAG_LOW_BATT)
+            f = (f | FLAG_LOW_BATT) if low else (f & ~FLAG_LOW_BATT)
             if patch.new_until and now > patch.new_until:
                 patch.new_until = 0.0
                 f &= ~FLAG_NEW_PATCH
@@ -1530,16 +1561,22 @@ class World:
             if rec.get("batt_dead") and (patch.battery > 0.0 or not drain):  # 새 패치(교체)·배터리 소모 끔 → 다시 전송
                 rec["batt_dead"] = False
                 self._relink(rec, force=True)
+            if drain and patch.battery <= 0.0 and not patch.dead:           # 배터리 소진: 전원이 꺼진다 (교체 전까지 무신호)
+                patch.dead = True
+                rec["batt_dead"] = True
+                self.counters["patch_battery_dead"] += 1
+                self.log.add("patch", f"{prof['name']} 패치 {patch.serial} 배터리 소진 — 전원 꺼짐" + (" (교체 대기)" if pc.get("replace_enabled", True) else " — 교체 안 함 설정"), patient_id=pid)
+                self.db.add_patch_event(now, patch.serial, pid, "battery_dead", "전원 꺼짐")
+                self._relink(rec, force=True)
             if pc.get("replace_enabled", True):
                 wear = pc.get("max_wear_days", 14)
+                level = pc.get("battery_report", "level") != "percent"
                 if wear and now - patch.activated >= wear * 86400.0 and rec["activity"] != "shower":
                     self._replace_patch(rec, f"착용 {wear:g}일 만료")           # 새 패치 = 새 serial·patch_id (재사용 없음)
-                elif patch.battery <= pc["replace_below_pct"] and rec["activity"] != "shower":
+                elif level and patch.swap_at and now >= patch.swap_at and rec["activity"] != "shower":
+                    self._replace_patch(rec, "배터리 소진 후 교체" if patch.dead else "배터리 부족 표시")
+                elif not level and patch.battery <= pc["replace_below_pct"] and rec["activity"] != "shower":
                     self._replace_patch(rec, f"배터리 {patch.battery:.0f}%")
-            elif drain and patch.battery <= 0.0 and not rec.get("batt_dead"):  # 교체하지 않음: 방전된 패치는 전송을 멈춘다
-                rec["batt_dead"] = True
-                self.log.add("patch", f"{prof['name']} 패치 {patch.serial} 배터리 방전 — 교체 안 함 설정이라 전송 중지", patient_id=pid)
-                self._relink(rec, force=True)
 
     # ------------------------------------------------------------------ slow multi-day modulation
     def _step_modulation(self) -> None:
@@ -2206,7 +2243,7 @@ class World:
                               "home_room_name": h.rooms[rec["room_idx"]]["name"] if rec["room_idx"] >= 0 else None,
                               "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None,
                               "shadow": rec["shadow"] or rec["home_state"] == "shadow",
-                              "gateway": gw["id"] if gw else None, "gateway_idx": rec["gw"], "rssi": int(P["rssi"]), "battery": int(P["battery"]),
+                              "gateway": gw["id"] if gw else None, "gateway_idx": rec["gw"], "rssi": int(P["rssi"]), "battery": int(P["battery"]), **self._batt_view(rec["row"]),
                               "lead_off": bool(P["lead_off"]), "spo2_off": bool(P["spo2_off"]), "flags": int(P["flags"]),
                               "patch": patch.serial if patch else None, "patch_id": int(P["patch_id"]), "variant": int(P["variant"]),
                               "rhythm_now": self._variant_rhythm(int(P["variant"])), "episode": bool(rec["episode_until"]),
@@ -2281,7 +2318,7 @@ class World:
                         "pacemaker_type": prof["pacemaker_info"]["type"] if prof.get("pacemaker_info") else None,
                         "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else "MCOT", "ward": prof["admission"]["ward_name"],
                         "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "activity": rec["activity"], "note": rec["note"],
-                        "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]),
+                        "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]), **self._batt_view(row),
                         "patch": self.patches[row].serial if row in self.patches else None, "row": row, "outpatient": rec["outpatient"],
                         "overseas": bool(prof.get("overseas")), "abroad": (h.gateways[rec["mobile_gw"]].get("abroad") if rec["outpatient"] and rec["mobile_gw"] >= 0 else None),
                         **self.identity_fields(prof),

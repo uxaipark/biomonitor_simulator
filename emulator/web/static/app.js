@@ -1089,8 +1089,10 @@ function attnOf(p) {
   if (p.status === 'pool' || p.status === 'discharged') return { _attn: 0, _why: '' };
   if (ATTN_RED.test(p.rhythm_label || '')) { a = 2; why.push(p.rhythm_label); }
   if (p.lead_off) { a = 2; why.push('리드 오프'); }
-  if (p.battery >= 0 && p.battery < 10) { a = 2; why.push(`배터리 ${p.battery}%`); }
-  else if (p.battery >= 0 && p.battery < 20) { a = Math.max(a, 1); why.push(`배터리 ${p.battery}%`); }
+  if (p.battery_level === '꺼짐') { a = 2; why.push('패치 배터리 소진'); }
+  else if (p.battery_level === '부족') { a = 2; why.push('배터리 부족 (하루 안에 꺼질 수 있음)'); }
+  else if (!p.battery_level && p.battery >= 0 && p.battery < 10) { a = 2; why.push(`배터리 ${p.battery}%`); }
+  else if (!p.battery_level && p.battery >= 0 && p.battery < 20) { a = Math.max(a, 1); why.push(`배터리 ${p.battery}%`); }
   if (p.episode) { a = Math.max(a, 1); why.push('부정맥 에피소드'); }
   if (!p.gateway && (p.status === 'admitted' || p.status === 'outpatient' || p.row >= 0)) { a = Math.max(a, 1); why.push('게이트웨이 미연결'); }
   return { _attn: a, _why: why.join(' · ') };
@@ -1126,7 +1128,7 @@ async function loadPatients(force = false) {
     <div><div class="l1">${esc(p.disease)}${p.pacemaker ? ` <span class="tag warn">⚡${(p.pacemaker_type || (p.pacemaker_info && p.pacemaker_info.type)) === 'icd' ? 'ICD' : (p.pacemaker_mode || (p.pacemaker_info && p.pacemaker_info.mode) || 'PM')}</span>` : ''}</div><div class="l2">${esc(p.rhythm_label)}</div></div>
     <div><div class="l1">${esc(p.bed || '-')}${p.overseas ? ` <span class="tag warn" title="${esc(abroadTitle(p.abroad))}">해외 · ${esc((p.abroad && p.abroad.country_label) || '')}</span>` : ''}${p.ward ? ` <span class="sub">${esc(p.ward)}</span>` : ''}</div><div class="l2">${esc(p.specialty || '')}${p.specialty ? ' · ' : ''}${esc(p.gateway || (p.status === 'admitted' || p.status === 'outpatient' ? '연결 없음' : p.status || '-'))}</div></div>
     <div><div class="l1">${p.patch ? `${esc(p.patch)} <span class="sub">#${p.patch_id}</span>` : '-'}</div><div class="l2">${(p.devices || []).filter(x => x !== 'ecg_patch').map(x => DEV && DEV.devices[x] ? DEV.devices[x].short : x).join(' · ') || (p.devices ? 'ECG만' : '-')}</div></div>
-    <div><div class="l1">${esc(p.activity || '-')}${p.note ? ` <span class="sub">${esc(p.note)}</span>` : ''}</div><div class="l2">${p.battery >= 0 ? battIcon(p.battery) : '-'} · RSSI ${p.rssi > -999 ? p.rssi : '-'}</div></div>
+    <div><div class="l1">${esc(p.activity || '-')}${p.note ? ` <span class="sub">${esc(p.note)}</span>` : ''}</div><div class="l2">${p.battery_level ? `<span class="tag ${p.battery_level === '충분' ? 'ok' : 'err'}" title="패치 연료계 (실제 ${p.battery_true_pct ?? '-'}% · 남은 ${p.battery_remain_h ?? '-'}h${p.battery_swap_in_h != null ? ` · 교체 예정 ${p.battery_swap_in_h}h 뒤` : ''})">배터리 ${p.battery_level}</span>` : (p.battery >= 0 ? battIcon(p.battery) : '-')} · RSSI ${p.rssi > -999 ? p.rssi : '-'}</div></div>
     <div title="${p.rx_days ? `모니터링 처방 ${esc(p.rx_tier)} ${p.rx_days}일${p.rx_extended ? ` (연장 ${p.rx_extended}일 포함)` : ''} · 위중도 ${p.rx_acuity} · 남은 ${fmtLeftH(p.rx_left_h)} · 패치 착용 ${p.patch_wear_days}일` : ''}">${p.rx_days ? `<div class="l1"><b>${p.rx_days}일</b> <span class="sub">${esc(p.rx_tier)}${p.rx_extended ? ' +연장' : ''}</span></div><div class="l2">D+${p.rx_day} · 남은 ${fmtLeftH(p.rx_left_h)}${p.patch_wear_days != null ? ` · 착용 ${p.patch_wear_days}일` : ''}</div>` : '<div class="l1">-</div>'}</div>
   </div>`).join('') || '<div class="dd-empty">환자 없음</div>';
   // pagination: 1 … p-2 p-1 [p] p+1 p+2 … N

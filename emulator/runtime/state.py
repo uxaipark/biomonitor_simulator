@@ -98,6 +98,7 @@ TARGET_BUF = 64
 
 FLAG_LEAD_OFF = 0x01
 FLAG_MOTION = 0x02
+BATT_OK, BATT_LOW = 100, 10     # 레코드 battery 바이트: 패치 연료계 2단계 (충분 100 / 부족 10) — scenario.patch.battery_report=percent 면 실제 %
 FLAG_LOW_BATT = 0x04
 FLAG_SPO2_OFF = 0x08
 FLAG_PACED = 0x10
