@@ -610,6 +610,7 @@ class World:
         P["pace_amp"][row] = pmi["spike_amp_mv"] * 1000.0 if pmi else 0.0
         P["pace_detect"][row] = pmi["detect_pct"] if pmi else 0
         P["hr_override"][row] = 0
+        P["beat_tap"][row] = 0
         P["attach_tick"][row] = 0
         P["detach_tick"][row] = 0
         P["flags"][row] = FLAG_PACED if prof["pacemaker"] else 0
@@ -1400,6 +1401,62 @@ class World:
         self.counters["patch_replaced"] += 1
         self.log.add("patch", f"{prof['name']} 패치 교체 {old.serial if old else '-'} → {new.serial} ({reason})", patient_id=prof["id"])
 
+    # ------------------------------------------------------------------ 박동 정답 집계 (라우터 정답지: 기외수축 개수·비율·총 박동)
+    def _step_beat_counts(self) -> None:
+        now = time.time()
+        if now - getattr(self, "_bc_last", 0.0) < 60.0:
+            return
+        self._bc_last = now
+        P = self.st.patch.arr
+        last = self.__dict__.setdefault("_bc_prev", {})
+        rows_out = []
+        t_ms = int(now * 1000)
+        for pid, rec in list(self.admitted.items()):
+            row = rec["row"]
+            pat = self.patches.get(row)
+            if pat is None:
+                continue
+            cur = (int(P["beats_n"][row]), int(P["beats_s"][row]), int(P["beats_v"][row]), int(P["beats_f"][row]), int(P["beats_q"][row]))
+            prev = last.get(row)
+            last[row] = (pat.patch_id, cur)
+            if prev is None or prev[0] != pat.patch_id:
+                continue                                                   # 새 패치: 기준만 잡는다
+            d = [(c - p) & 0xFFFFFFFF for c, p in zip(cur, prev[1])]
+            if d[0] == 0 and not any(d[1:]):
+                continue
+            rows_out.append((pat.patch_id, rec.get("patient_no"), t_ms, d[0], d[1], d[2], d[3], d[4], self._variant_rhythm_code(int(P["variant"][row]))))
+        # 박동 단위 관찰(beat_tap) 만료
+        for row, until in list(getattr(self, "_tap_until", {}).items()):
+            if now >= until:
+                P["beat_tap"][row] = 0
+                del self._tap_until[row]
+        try:
+            self.db.add_beat_counts(rows_out)
+        except Exception:
+            pass
+
+    def _variant_rhythm_code(self, v: int) -> str:
+        try:
+            return self.bank.index["variants"][v]["rhythm"]
+        except (AttributeError, IndexError, KeyError, TypeError):
+            return ""
+
+    def watch_beats(self, patch_ids: list[int], minutes: float = 60.0) -> dict:
+        """일반 환자 패치의 박동 단위 정답을 minutes 동안 남긴다 (최대 64 패치).  GET /api/v1/truth/beats?patch_id= 로 읽는다."""
+        P = self.st.patch.arr
+        self.__dict__.setdefault("_tap_until", {})
+        by_pid = {p.patch_id: row for row, p in self.patches.items()}
+        on, missing = [], []
+        for pid in patch_ids[:64]:
+            row = by_pid.get(int(pid))
+            if row is None:
+                missing.append(pid)
+                continue
+            P["beat_tap"][row] = 1
+            self._tap_until[row] = time.time() + max(1.0, float(minutes)) * 60.0
+            on.append(int(pid))
+        return {"watching": on, "missing": missing, "minutes": minutes, "total_watched": len(self._tap_until)}
+
     def _batt_view(self, row: int) -> dict:
         """API 용 배터리: battery_level(충분/부족/꺼짐 — 패치가 실제로 알려 주는 값), 시험자용 정답 battery_true_pct·남은 시간·교체 예정."""
         p = self.patches.get(row)
@@ -2109,6 +2166,7 @@ class World:
                 self.truth.step(dt_s)                         # 정답 전용 패치: 리듬 교체·아티팩트·잡음·리드오프
             self._step_prescriptions()
             self._step_modulation()
+            self._step_beat_counts()                                        # 1 분마다 환자별 박동 정답 집계 (AAMI N/S/V/F/Q)
             self._step_episodes(dt_s)
             self._step_gateways(dt_s)
             self.real.step(dt_s)                                           # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)

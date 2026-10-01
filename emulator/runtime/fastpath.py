@@ -54,6 +54,7 @@ class Gather:
         # 실제 시그널 송출: row -> (µV int16 배열, 초당 HR, 경로, 재생 시작 tick).  재생 위치는 tick 에서 바로 구한다 —
         # 워커(게이트웨이 샤드)마다 · 미리보기마다 따로 위치를 들고 있으면 환자가 다른 워커의 게이트웨이로 옮길 때 파일이 튄다.
         self.rs_map: dict = {}
+        self._aami = None                                       # 변형별 박동 → AAMI 등급 번호 (0 N 1 S 2 V 3 F 4 Q), 은행에 주석이 있을 때
         self.rs_keys = np.zeros(0, dtype=np.int64)
         self.rs_mtime = 0.0
         self.rs_check = 0.0
@@ -355,6 +356,50 @@ class Gather:
             out, typ = out[keep], typ[keep]
         return out.astype(np.uint16), typ.astype(np.uint8)
 
+    def count_beats(self, rows: np.ndarray, spt: int) -> None:
+        """이번 프레임에 든 정답 박동을 AAMI 등급별로 patch 카운터에 더한다 (모든 환자 패치 — /api/v1/truth/beat_counts).
+        위치는 ecg() 가 이번 tick 에 정한 tick_start 를 그대로 쓴다 (파형과 같은 구간)."""
+        rp = getattr(self.bank, "rpeaks", None)
+        if rp is None or not rows.size:
+            return
+        if self._aami is None:
+            from ..signals.rhythms import BEAT_KINDS, AAMI, AAMI_CLASSES
+            m = np.array([AAMI_CLASSES.index(AAMI.get(k, "Q")) for k in BEAT_KINDS] + [4] * 16, dtype=np.uint8)
+            self._aami = [m[np.asarray(k, dtype=np.int64)] for k in self.bank.rkinds]
+        P = self.st.patch.arr
+        var = P["variant"][rows]
+        hs = P["hr_scale"][rows]
+        start = self.tick_start[rows]
+        n = self.n_ecg
+        add = np.zeros((rows.size, 5), dtype=np.uint32)
+        for i in range(rows.size):
+            v = int(var[i])
+            r = rp[v]
+            if r.size == 0:
+                continue
+            rate = float(hs[i]) if hs[i] > 0.1 else 1.0
+            b = int(start[i]) % n
+            e = b + int(spt * rate)
+            lo, hi = np.searchsorted(r, b), np.searchsorted(r, min(e, n))
+            cls = self._aami[v][lo:hi]
+            if e > n:
+                cls = np.concatenate([cls, self._aami[v][:np.searchsorted(r, e - n)]])
+            if cls.size:
+                add[i] = np.bincount(cls, minlength=5)[:5]
+        tot = add.sum(axis=1)
+        if tot.any():
+            P["beats_n"][rows] += tot.astype(np.uint32)
+            P["beats_s"][rows] += add[:, 1]; P["beats_v"][rows] += add[:, 2]; P["beats_f"][rows] += add[:, 3]; P["beats_q"][rows] += add[:, 4]
+
+    def beats_in_frame(self, row: int, tick: int, spt: int, fs: int) -> list:
+        """일반 환자 패치의 이번 프레임 박동 [(offset, kind)] — beat_tap 패치용 (정답 레코드 없이 링버퍼에만)."""
+        rp = getattr(self.bank, "rpeaks", None)
+        if rp is None:
+            return []
+        v = int(self.st.patch.arr[row]["variant"])
+        o, k = self._marks_in_frame(row, tick, spt, fs, rp[v], self.bank.rkinds[v])
+        return list(zip(o.tolist(), k.tolist()))
+
     def truth_blob(self, row: int, tick: int, spt: int, fs: int, bundle_ms: int, crossfade_ticks: int) -> bytes:
         return self.truth_info(row, tick, spt, fs, bundle_ms, crossfade_ticks)[0]
 
@@ -473,6 +518,10 @@ class FrameBuilder:
         if active.size:
             if chan_mask & (1 << CH_ECG):
                 wave[CH_ECG] = self.g.ecg(active, tick, fs["ecg"] * bundle_ms // 1000, bundle_ms, fs["ecg"], cft)
+                try:
+                    self.g.count_beats(active, fs["ecg"] * bundle_ms // 1000)          # 박동 정답 누적 (AAMI 등급별)
+                except Exception:
+                    pass
             if chan_mask & (1 << CH_PPG):
                 wave[CH_PPG] = self.g.ppg(active, tick, fs["ppg"] * bundle_ms // 1000, bundle_ms, fs["ppg"])
             if chan_mask & (1 << CH_RESP_WAVE):
@@ -562,7 +611,17 @@ class FrameBuilder:
                 for off, ch in pace:
                     ring[base + (self._tr_w % TRUTH_RING)] = (ts_ms + (int(off) * 1000) // fs["ecg"], pid, pseq, int(ch), rcode, tflags, 1)
                     self._tr_w += 1
-            if truth_rows.size:
+            tap_rows = active[(pa["beat_tap"] > 0) & (pa["truth"] == 0)]               # 일반 환자 박동 단위 정답 (POST /api/v1/truth/watch)
+            for r in tap_rows:
+                pr = P[r]
+                try:
+                    beats = self.g.beats_in_frame(int(r), tick, spt_ecg, fs["ecg"])
+                except Exception:
+                    continue
+                for off, kind in beats:
+                    ring[base + (self._tr_w % TRUTH_RING)] = (ts_ms + (int(off) * 1000) // fs["ecg"], int(pr["patch_id"]), int(pr["seq"]), int(kind), 255, int(pr["flags"]) & 0x01, 0)
+                    self._tr_w += 1
+            if truth_rows.size or tap_rows.size:
                 self.st.wstat["truth_w"][self.worker_id] = self._tr_w
         # per-gateway byte ranges of every record array, computed with numpy once per tick: for each key the selected rows
         # are contiguous per gateway (rows are sorted by gateway), so a gateway's block is one slice of the array's bytes

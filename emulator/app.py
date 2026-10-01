@@ -626,25 +626,30 @@ def realism_status():
 
 @app.get("/api/v1/labels")
 def labels(kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(5000, le=200000), offset: int = 0,
-           format: str = "json", include_open: bool = True):
+           format: str = "json", include_open: bool = True, patch_id: str = ""):
     """정답 라벨: 구간 [t_start_ms, t_end_ms] (epoch ms, 프레임 ts_ms 와 같은 시계).  리듬 에피소드는 프레임 단위(번들 주기)로
     정확하고, 나머지는 월드 주기(1 s) 해상도.  kind: rhythm_episode, lead_off, patch_off, no_link, trip, deterioration, code_blue,
     gateway, net_device, power, mcot_device, surge (쉼표로 여러 개).  format=csv 는 내려받기용."""
+    from .runtime.labelcodes import normalize
     w = E().world
-    rows = w.db.labels(kind, patient_id, since_ms, until_ms, limit, offset)
+    pids = [int(x) for x in str(patch_id).replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()] if patch_id else None   # patch_id=983040,65600 (쉼표)
+    w.db.flush()
+    rows = w.db.labels(kind, patient_id, since_ms, until_ms, limit, offset, patch_ids=pids)
     if include_open:
         with w.lock:
             op = w.real.labels_open_view()
         ks = set(k for k in kind.split(",") if k)
-        op = [o for o in op if (not ks or o["kind"] in ks) and (patient_id is None or o["patient_id"] == patient_id) and (not until_ms or o["t_start_ms"] <= until_ms)]
+        op = [o for o in op if (not ks or o["kind"] in ks) and (patient_id is None or o["patient_id"] == patient_id) and (not until_ms or o["t_start_ms"] <= until_ms)
+              and (not pids or o.get("patch_id") in pids)]
         rows = rows + op
+    rows = [normalize(r) for r in rows]                       # value=코드 · display/display_en · meta.mechanism (예전 한국어 값도 변환)
     if format == "csv":
         import csv, io
         buf = io.StringIO(); wr = csv.writer(buf)
-        wr.writerow(["kind", "value", "patient_id", "patch_id", "gw", "t_start_ms", "t_end_ms", "t_start", "t_end", "meta"])
+        wr.writerow(["kind", "value", "display", "patient_id", "patch_id", "gw", "t_start_ms", "t_end_ms", "t_start", "t_end", "meta"])
         iso = lambda ms: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ms / 1000)) + f".{int(ms % 1000):03d}" if ms else ""
         for r in rows:
-            wr.writerow([r["kind"], r["value"], r["patient_id"], r["patch_id"], r["gw"], r["t_start_ms"], r["t_end_ms"], iso(r["t_start_ms"]), iso(r["t_end_ms"]),
+            wr.writerow([r["kind"], r["value"], r["display"], r["patient_id"], r["patch_id"], r["gw"], r["t_start_ms"], r["t_end_ms"], iso(r["t_start_ms"]), iso(r["t_end_ms"]),
                          json.dumps(r["meta"], ensure_ascii=False) if r["meta"] else ""])
         name = f"labels-{time.strftime('%Y%m%d-%H%M%S')}.csv"
         return Response("\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -667,6 +672,44 @@ def truth_beats(patch_id: int | None = None, since_ms: int = 0, until_ms: int = 
     with w.lock:
         rows = w.truth.beats_view(patch_id, since_ms, until_ms, limit, pace=bool(pace))
     return _json({"beats": rows, "count": len(rows)})
+
+
+@app.get("/api/v1/truth/beat_counts")
+def truth_beat_counts(patch_id: str, since_ms: int = 0, until_ms: int = 0, minutes: int = 1):
+    """모든 환자 패치의 박동 정답 집계 (1 분 단위, AAMI N/S/V/F/Q): 총 박동·기외수축 개수·비율.  patch_id=쉼표 여러 개.
+    minutes>1 이면 그 길이로 묶는다.  응답 patches[pid] = {totals{n,N,S,V,F,Q, pvc_pct(V/n), pac_pct(S/n)}, rhythm_minutes, series[...]}."""
+    w = E().world
+    pids = [int(x) for x in patch_id.replace(" ", "").split(",") if x.lstrip("-").isdigit()]
+    if not pids:
+        raise HTTPException(400, "patch_id required")
+    w.db.flush()
+    rows = w.db.beat_counts(pids, since_ms, until_ms)
+    out: dict = {}
+    step = max(1, int(minutes)) * 60000
+    for r in rows:
+        o = out.setdefault(r["patch_id"], {"patient_no": r["patient_id"], "totals": {"n": 0, "N": 0, "S": 0, "V": 0, "F": 0, "Q": 0}, "rhythm_minutes": {}, "series": {}})
+        t = o["totals"]
+        t["n"] += r["n"]; t["S"] += r["s"]; t["V"] += r["v"]; t["F"] += r["f"]; t["Q"] += r["q"]
+        o["rhythm_minutes"][r["rhythm"]] = o["rhythm_minutes"].get(r["rhythm"], 0) + 1
+        b = o["series"].setdefault(r["t_ms"] // step * step, {"t_ms": r["t_ms"] // step * step, "n": 0, "S": 0, "V": 0, "F": 0, "Q": 0})
+        b["n"] += r["n"]; b["S"] += r["s"]; b["V"] += r["v"]; b["F"] += r["f"]; b["Q"] += r["q"]
+    for o in out.values():
+        t = o["totals"]
+        t["N"] = t["n"] - t["S"] - t["V"] - t["F"] - t["Q"]
+        t["pvc_pct"] = round(100.0 * t["V"] / t["n"], 2) if t["n"] else None
+        t["pac_pct"] = round(100.0 * t["S"] / t["n"], 2) if t["n"] else None
+        o["series"] = [{**b, "N": b["n"] - b["S"] - b["V"] - b["F"] - b["Q"]} for b in o["series"].values()]
+    return {"patches": out, "classes": {"N": "정상·각차단·접합부 이탈", "S": "상심실 기외수축(PAC 등)", "V": "심실 기외수축(PVC)·심실 이탈", "F": "융합", "Q": "페이싱·분류불가"},
+            "note": "1 분마다 집계되며 패치가 바뀌면 새 patch_id 로 이어진다.  박동 단위 시각·종류는 POST /api/v1/truth/watch 후 GET /api/v1/truth/beats?patch_id="}
+
+
+@app.post("/api/v1/truth/watch")
+def truth_watch(body: dict):
+    """{"patch_ids": [65600, ...], "minutes": 60} — 일반 환자 패치의 박동 단위 정답(시각·종류)을 그 시간 동안 남긴다 (최대 64).
+    읽기: GET /api/v1/truth/beats?patch_id=… (정답 전용 패치와 같은 형식, kind·aami·condition)."""
+    w = E().world
+    with w.lock:
+        return w.watch_beats([int(x) for x in (body.get("patch_ids") or [])], float(body.get("minutes", 60)))
 
 
 @app.post("/api/v1/truth/score")
@@ -1184,8 +1227,23 @@ def emr_staff(role: str | None = None):
 
 
 @app.get("/api/v1/emr/patients")
-def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: int = Query(100, le=20000), row: int = -1):
+def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: int = Query(100, le=50000), row: int = -1, patch_id: int | None = None):
+    """status=admitted|inpatient|mcot|pool|discharged|all, offset/limit 페이지 (limit ≤ 50,000; 응답 total·next_offset 로 넘김).
+    patch_id=: 그 패치를 쓰는(썼던) 환자 한 명 — 퇴원·교체된 패치도 레지스트리로 찾는다 (기저 리듬 rhythm 포함)."""
     w = E().world
+    if patch_id is not None:
+        live = next((r for r in w.list_admitted() if r.get("patch_id") == patch_id), None)
+        if live:
+            return {"total": 1, "patients": [{**live, "patch_status": "active"}], "next_offset": None}
+        ent = next((e for e in w.patch_registry.values() if e.get("patch_id") == patch_id), None)
+        if ent is None or ent.get("patient_id") not in w.by_id:
+            return {"total": 0, "patients": [], "next_offset": None}
+        p = w.by_id[ent["patient_id"]]
+        d = {k: v for k, v in p.items() if k not in ("avatar", "history", "patch_history")}
+        d.update(w.identity_fields(p))
+        d.update({"rhythm_label": RHYTHMS.get(p.get("rhythm", ""), {}).get("label"), "patch_status": ent["status"], "patch_serial": ent["serial"],
+                  "patch_issued_at": ent.get("issued_at"), "patch_retired_at": ent.get("retired_at"), "patch_retired_reason": ent.get("retired_reason")})
+        return {"total": 1, "patients": [d], "next_offset": None}
     if row >= 0:                                              # single live row (plan marker / moving list click): no 20 000-row scan
         rec = next((r for r in w.list_admitted_rows([row])), None)
         return {"total": 1 if rec else 0, "patients": [rec] if rec else []}
@@ -1208,7 +1266,7 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: 
         if status != "admitted":                              # inpatient = 병원 내 재원, mcot = 원외 모바일 게이트웨이
             want_out = status == "mcot"
             rows = [r for r in rows if bool(r.get("outpatient")) == want_out]
-        return {"total": len(rows), "patients": rows[offset: offset + limit]}
+        return {"total": len(rows), "patients": rows[offset: offset + limit], "next_offset": offset + limit if offset + limit < len(rows) else None}
     items = [p for p in w.profiles if (status == "all" or p["status"] == status)]
     items = [p for p in items if match(p, live.get(p["id"]))]
     out = []
@@ -1222,7 +1280,7 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: 
             d["patch"] = p["admission"].get("patch")
             d["patch_id"] = p["admission"].get("patch_id")
         out.append(d)
-    return {"total": len(items), "patients": out}
+    return {"total": len(items), "patients": out, "next_offset": offset + limit if offset + limit < len(items) else None}
 
 
 def _news2(num: dict, arrest: bool) -> dict:

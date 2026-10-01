@@ -165,6 +165,15 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 * `POST /api/v1/truth/score {"detections": {"<patch_id>": [ts_ms, …]}, "tolerance_ms": 150, "exclude": ["lead_off","settling","switching"]}` — ANSI/AAMI EC57 식 beat-by-beat 대조(시각순 병합, ±허용창 1:1). 전체·패치별·리듬별·조건별(clean/artifact/noise/switching)·박동종류별 TP/FP/FN, **Se = TP/(TP+FN), PPV = TP/(TP+FP), F1**, FN/FP 예시. 제외 조건의 정답 박동은 빼고 그 근처 검출도 FP 로 세지 않는다(기본 제외: 리드오프·재부착 안정화·리듬 전환 크로스페이드 1 초 — 두 변형이 섞여 정답이 모호한 구간). since/until 이 없으면 검출이 걸친 시간창 ±tol 만 본다. 검출 시각은 라우터가 받은 프레임 `ts_ms` 시계 그대로 쓰면 된다. 최근 결과는 ③ 시그널 송출 [정답 전용 패치] 카드에 표시.
 * 오프라인: `tools/qrs_detect.py FRAMES_DIR --out det.json`(레퍼런스 Pan-Tompkins 검출기, 형식 예시) → `tools/qrs_score.py FRAMES_DIR det.json --tol 150`(캡처 프레임의 정답 레코드로 같은 규칙 채점). 라우터가 저장한 프레임과 자기 검출 결과로 그대로 쓸 수 있다.
 
+## 정답 라벨·박동 정답 API (2026-10-01 라우터 요청 반영)
+
+* `GET /api/v1/labels?patch_id=983040,65600` — 패치 지정(쉼표 여러 개). 모든 라벨이 통일 형식: `value` 는 코드(`lead_off`·`patch_off`·`no_link`·`trip`·`down`/`degraded`/`uplink_lost`·`net_device_down`·`power_outage`·`code_blue`·리듬 코드·악화 종류), 표시 이름은 `display`(한국어)·`display_en`, `meta.mechanism` = cardiac(실제 심장 현상)·electrode·signal_path·device·network·power·clinical·workflow. 예전 한국어 값도 읽을 때 코드로 바꿔 준다.
+* `kind=base_rhythm` — 패치 하나가 환자에 붙어 있는 동안의 기저 리듬 구간(교체·퇴원 때 닫힘), `meta.patient_no·disease·pacemaker`. 퇴원·교체된 패치도 `patch_id` 로 찾는다.
+* `sinus_pause`·`asystole` 은 `meta.mechanism=cardiac` 과 `meta.nature`(실제 심장 휴지 — 전극·신호 문제 흉내가 아님)를 단다. 전극 문제는 `lead_off`/`patch_off`(mechanism electrode).
+* `GET /api/v1/emr/patients?patch_id=` — 그 패치를 쓰는(썼던) 환자 한 명(레지스트리로 퇴원·교체 패치도), 기저 리듬 `rhythm`·패치 상태 포함. 목록은 `limit ≤ 50,000` + `offset`, 응답 `next_offset` 로 넘긴다.
+* `GET /api/v1/truth/beat_counts?patch_id=…&since_ms=&until_ms=&minutes=` — 모든 환자 패치의 박동 정답 1 분 집계(AAMI N/S/V/F/Q, 총 박동, `pvc_pct`·`pac_pct`, 리듬별 분). 워커가 프레임마다 루프 은행 주석으로 센다.
+* `POST /api/v1/truth/watch {"patch_ids": […], "minutes": 60}` → 그 패치들의 박동 단위 정답(시각·종류·AAMI)을 `GET /api/v1/truth/beats?patch_id=` 로 (최대 64, 정답 전용 패치와 같은 형식).
+
 ## 건축 도면 엔진 (`emulator/hospital/layout.py`)
 
 병상 수에 맞춰 10종 병원 원형 중 하나가 자동 선택됩니다(설정 `hospital.template` 로 고정 가능): 소규모 단일 이중복도형(≤80), 소규모 L자형(≤140), 중소형 T자형(≤300), 중형 레이스트랙형(≤420), 중형 중정(ㅁ자)형(≤560), 대형 십자형 4익동(≤900), 대형 고층 타워형(≤1200), 대형 분산 간호(포드)형(≤1600), 대학병원 다동 레이스트랙(≤2600), 메디컬센터 Y자형 트리플 타워(≤5000). 층마다 병실 구성(1~8인실)이 섞이며 병동 코어에 간호사실(중앙 모니터 2대)·투약실·청결/오염 처치실·직원휴게실·화장실·샤워실·환자휴게실이 배치되고, 복도 전광판·엘리베이터·계단이 들어갑니다. 1층은 실제 진단부 배치처럼 메인 스트리트 양쪽에 앞·뒤 2열로 로비/접수, 심장 검사(ECG·심초음파), 채혈, 초음파, 내시경(시술·회복·세척), 폐기능, 재활, 외래 진료실 / 응급실(베이·소생실·트리아지·관찰실), 영상의학과(X-ray+조정·탈의, CT+조정·장비, MRI Zone II~IV), 심혈관조영실, 투석실, 약제부, 편의시설을 둡니다. 참고: 간호단위 유형 문헌(단일/이중복도·레이스트랙·분산 포드), 의료법 시행규칙 병실 규격(1~8인실), 영상의학 설계 지침(촬영실+조정실+장비실, MRI 구역).

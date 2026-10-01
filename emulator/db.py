@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS labels (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TE
   t_start_ms INTEGER, t_end_ms INTEGER, meta_json TEXT);
 CREATE INDEX IF NOT EXISTS ix_labels_t ON labels(t_start_ms);
 CREATE INDEX IF NOT EXISTS ix_labels_kind ON labels(kind);
+CREATE INDEX IF NOT EXISTS ix_labels_patch ON labels(patch_id);
+CREATE TABLE IF NOT EXISTS beat_counts (patch_id INTEGER, patient_id INTEGER, t_ms INTEGER, n INTEGER, s INTEGER, v INTEGER, f INTEGER, q INTEGER, rhythm TEXT);
+CREATE INDEX IF NOT EXISTS ix_beat_counts ON beat_counts(patch_id, t_ms);
 """
 
 
@@ -80,7 +83,7 @@ class DB:
 
     def reset(self) -> None:
         with self.lock:
-            for t in ("patients", "admissions", "patches", "patch_events", "exams", "events", "runs", "gateways", "meta", "labels"):
+            for t in ("patients", "admissions", "patches", "patch_events", "exams", "events", "runs", "gateways", "meta", "labels", "beat_counts"):
                 self.conn.execute(f"DELETE FROM {t}")
             self.conn.execute("VACUUM")
 
@@ -199,8 +202,11 @@ class DB:
         self.__dict__.setdefault("_pending_lb", []).append((kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms,
                                                             json.dumps(meta, ensure_ascii=False) if meta else None))
 
-    def labels(self, kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = 5000, offset: int = 0) -> list[dict]:
+    def labels(self, kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = 5000, offset: int = 0,
+               patch_ids: list[int] | None = None) -> list[dict]:
         q, a = "SELECT kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json FROM labels WHERE 1=1", []
+        if patch_ids:
+            q += f" AND patch_id IN ({','.join('?' * len(patch_ids))})"; a += list(patch_ids)
         if kind:
             ks = [k for k in kind.split(",") if k]
             q += f" AND kind IN ({','.join('?' * len(ks))})"; a += ks
@@ -214,6 +220,21 @@ class DB:
         with self.lock:
             rows = self.conn.execute(q, a).fetchall()
         return [{**{k: r[k] for k in r.keys() if k != "meta_json"}, "meta": json.loads(r["meta_json"]) if r["meta_json"] else None} for r in rows]
+
+    def add_beat_counts(self, rows: list[tuple]) -> None:
+        """(patch_id, patient_id, t_ms, n, s, v, f, q, rhythm) — 1 분 단위 박동 정답 집계."""
+        if rows:
+            with self.lock:
+                self.conn.executemany("INSERT INTO beat_counts(patch_id, patient_id, t_ms, n, s, v, f, q, rhythm) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+
+    def beat_counts(self, patch_ids: list[int], since_ms: int = 0, until_ms: int = 0) -> list[dict]:
+        q, a = f"SELECT patch_id, patient_id, t_ms, n, s, v, f, q, rhythm FROM beat_counts WHERE patch_id IN ({','.join('?' * len(patch_ids))})", list(patch_ids)
+        if since_ms:
+            q += " AND t_ms >= ?"; a.append(since_ms)
+        if until_ms:
+            q += " AND t_ms <= ?"; a.append(until_ms)
+        with self.lock:
+            return [dict(r) for r in self.conn.execute(q + " ORDER BY patch_id, t_ms", a).fetchall()]
 
     def label_counts(self) -> dict:
         with self.lock:
@@ -247,6 +268,7 @@ class DB:
             n["admissions"] = c.execute("DELETE FROM admissions WHERE discharge_time IS NOT NULL AND discharge_time < ?", (before,)).rowcount
             n["events"] = c.execute("DELETE FROM events WHERE t < ?", (before,)).rowcount
             n["labels"] = c.execute("DELETE FROM labels WHERE COALESCE(t_end_ms, t_start_ms) < ?", (int(before * 1000),)).rowcount
+            n["beat_counts"] = c.execute("DELETE FROM beat_counts WHERE t_ms < ?", (int(before * 1000),)).rowcount
             n["runs"] = c.execute("DELETE FROM runs WHERE stopped_at IS NOT NULL AND stopped_at < ?", (before,)).rowcount
             n["config_history"] = c.execute("DELETE FROM config_history WHERE t < ?", (before,)).rowcount
             if sum(n.values()):

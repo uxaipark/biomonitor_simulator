@@ -562,21 +562,28 @@ class Realism:
             }
             prev = self.label_seen.get(pid, {})
             base = prof["rhythm"]
+            cur["patch"] = pat
+            # 기저 리듬: 패치 하나가 그 환자에 붙어 있는 동안 한 구간 (라우터 요청 2026-10-01 — 퇴원·교체 뒤에도 patch_id 로 찾을 수 있게)
+            if pat != prev.get("patch"):
+                self._close(("base", pid), now_ms)
+                if pat is not None:
+                    self._open(("base", pid), "base_rhythm", base, now_ms, patient_id=pid, patch_id=pat,
+                               meta={"patient_no": rec.get("patient_no"), "disease": prof.get("disease"), "pacemaker": bool(prof.get("pacemaker"))})
             # 리듬: 에피소드 전환 시각은 프레임 단위로 정확 (switch_tick)
             if cur["rhythm"] != prev.get("rhythm"):
                 t_sw = int(epoch_ms + int(P["switch_tick"][row]) * bms) if epoch_ms else now_ms
                 self._close(("rhythm", pid), t_sw)
                 if cur["rhythm"] and cur["rhythm"] != base:
                     self._open(("rhythm", pid), "rhythm_episode", cur["rhythm"], t_sw, patient_id=pid, patch_id=pat, meta={"base": base})
-            for k, kind, val in (("lead_off", "lead_off", "리드 오프"), ("patch_off", "patch_off", "패치 분리"), ("no_link", "no_link", "게이트웨이 미연결"),
-                                 ("trip", "trip", rec.get("note") or "이동")):
+            for k, kind, val in (("lead_off", "lead_off", "lead_off"), ("patch_off", "patch_off", "patch_off"), ("no_link", "no_link", "no_link"),
+                                 ("trip", "trip", "trip")):
                 if cur[k] and not prev.get(k):
-                    self._open((k, pid), kind, val, now_ms, patient_id=pid, patch_id=pat)
+                    self._open((k, pid), kind, val, now_ms, patient_id=pid, patch_id=pat, meta=({"note": rec.get("note") or ""} if k == "trip" else None))
                 elif not cur[k] and prev.get(k):
                     self._close((k, pid), now_ms)
             self.label_seen[pid] = cur
         for pid in [p for p in self.label_seen if p not in alive]:        # 퇴원: 열린 구간 모두 닫기
-            for k in ("rhythm", "lead_off", "patch_off", "no_link", "trip"):
+            for k in ("rhythm", "lead_off", "patch_off", "no_link", "trip", "base"):
                 self._close((k, pid), now_ms)
             del self.label_seen[pid]
         # 게이트웨이 장애 구간 (정상 이외 상태)

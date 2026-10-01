@@ -48,6 +48,9 @@ PATCH_FIELDS = [
     ("attach_tick", np.int64),   # tick when the patch was (re)attached -> electrode settling transient (0 = none)
     ("detach_tick", np.int64),   # tick when the electrodes came off -> brief violent artefact before the rail
     ("truth", np.uint8),         # 1 = 정답 전용 벤치마크 패치: 프레임마다 TRUTH 레코드(채널 11)를 같이 보낸다
+    ("beat_tap", np.uint8),      # 1 = 일반 환자 패치의 박동 단위 정답을 링버퍼에 남긴다 (POST /api/v1/truth/watch)
+    ("beats_n", np.uint32),      # 박동 정답 누적 카운터 (워커가 프레임마다 더함): 전체 · AAMI S · V · F · Q (N = 전체 - 나머지)
+    ("beats_s", np.uint32), ("beats_v", np.uint32), ("beats_f", np.uint32), ("beats_q", np.uint32),
 ]
 GW_FIELDS = [
     ("active", np.uint8),

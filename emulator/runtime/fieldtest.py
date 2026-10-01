@@ -130,7 +130,8 @@ class FieldTest:
             if real is not None:                                            # 정답 라벨: 무수축 구간 (리듬 변형이 바뀌지 않아 자동 라벨이 안 생긴다)
                 real._close(("rhythm", pid), int(time.time() * 1000))
                 real._open(("ft_asystole", pid), "rhythm_episode", "asystole", int(time.time() * 1000), patient_id=pid,
-                           patch_id=real._patch_id(rec), meta={"source": "fieldtest", "base": prof["rhythm"]})
+                           patch_id=real._patch_id(rec), meta={"source": "fieldtest", "base": prof["rhythm"], "mechanism": "cardiac",
+                                 "nature": "심정지 무수축 — 실제 심장 전기 활동 없음(평탄선 · HR 0 · 동작 아티팩트·잡음 없음), 전극·신호 문제 흉내가 아님"})
         elif ev == "spo2_low":
             m = int(P["chan_mask"][row]); gm = int(w.st.ctl[CTL["chan_mask"]])
             from ..config import CH_SPO2
