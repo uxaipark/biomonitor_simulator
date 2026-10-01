@@ -157,6 +157,7 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 * 정답 블록(v1): `u8 ver | u8 rhythm(RHYTHM_CODES) | u8 rhythm_prev(255 없음) | u8 flags | u8 art_level(×0.01) | u8 noise_level(×0.001) | u16 hr | u8 n_beats + n×(u16 offset, u8 kind) | u8 n_pace + n×u16(bits 0-13 offset, 14-15 chamber)`. 오프셋은 같은 프레임 ECG 블록 안 표본 인덱스, 레코드 seq 는 ECG 레코드와 같다. flags: 0x01 lead_off 0x02 artifact 0x04 noise 0x08 paced 0x10 switching 0x20 settling 0x40 beats_unavailable. 코드표는 `GET /api/v1` 의 채널 11 항목.
 * R-peak·박동 종류 주석은 루프 은행에 들어 있다(2026-09-29 이후 생성분). 옛 은행이면 `beats_unavailable` 플래그가 서고 박동 목록이 비니 [루프 은행 재생성]이 필요하다.
 * 정답 패치는 환자 목록·병상·패치 레지스트리·라벨 API 에 나타나지 않는다(`patch_id` 0xF0000+, `patient_id` 900001+, 시리얼 `TR-xxxx`).
+* **모든 환자 패치에도 정답 레코드** (`transport.truth.all_patients`, 기본 켬, 2026-10-01): 일반 환자 프레임에도 같은 TRUTH 레코드(채널 11, 같은 seq)가 붙는다 — 리듬·R-peak·박동 종류·페이스·리드오프/아티팩트/잡음 플래그. 정답 박동 1 분 집계도 같은 계산에서 나온다. 박동 단위 링버퍼(채점 API)는 정답 전용 패치와 `/truth/watch` 지정 패치만. 비용: 전송량 약 +16 %, 워커 프레임 생성 시간 약 +20 ms/200 ms(환자 1,200명 기준).
 * 박동 종류 14 (N·A·a·V·FV·J·E·S·Vp·AVp·Ap·AsVp·CRT·F) 와 **ANSI/AAMI EC57 5 등급(N/S/V/F/Q)** 매핑이 정답에 붙는다(`parse_truth` 의 `aami`, `/truth/beats` 의 `aami`, 채점의 `by_aami`). 매핑: N·J→N, A·a·S→S, V·E→V, FV→F, 페이싱(Vp·AVp·Ap·AsVp·CRT·F)→Q.
 * 부정맥 생성 (2026-09-29 개선): PVC 는 환자별 결합 간격 일정(±20 ms)·30 % 다초점(두 형태·극성·폭)·커플릿·삽입성(서맥)·삼단맥/사단맥 패턴·완전 보상휴지; PAC 는 결합 간격 일정, 15 % 변행전도(a, RBBB 형), 10 % 차단된 PAC(P 만 + 휴지), 심방 커플릿, 비보상휴지; AFib 은 AV 결절 불응기(≥0.30 s) 있는 RR 분포 + Ashman 변행전도 + 가끔 PVC; VT 는 단형 + capture(N)/fusion(FV) 박동; Wenckebach 는 PR 증가폭 감소·RR 단축 패턴; 동정지 뒤 접합부/심실 이탈.
 

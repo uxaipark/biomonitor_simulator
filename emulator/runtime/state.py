@@ -93,7 +93,7 @@ CTL = {"running": 0, "epoch_ns": 1, "bundle_ms": 2, "chan_mask": 3, "ecg_fs": 4,
        "meta_every": 8, "gwstat_every": 9, "target_port": 10, "socket_mode": 11, "crossfade_ticks": 12, "cfg_version": 13,
        "loop_seconds": 14, "max_backlog": 15, "reconnect_s": 16, "generate_only": 17, "n_workers": 18, "stop_workers": 19,
        "saf_enabled": 20, "saf_max_bytes": 21, "saf_burst": 22, "fuzz_rate": 23, "fuzz_mask": 24, "storm_epoch": 25, "storm_until": 26,
-       "tap": 27, "connect_budget": 28}
+       "tap": 27, "connect_budget": 28, "truth_all": 29}      # truth_all: 모든 환자 패치 프레임에 TRUTH 레코드(채널 11)
 # frame-corruption drill kinds (bit i of CTL fuzz_mask enables FUZZ_KINDS[i])
 FUZZ_KINDS = ["bad_magic", "bad_version", "bad_len", "truncated", "oversize", "garbage", "dup", "reorder", "seq_gap", "bad_record"]
 CTL_SIZE = 32

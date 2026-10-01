@@ -391,6 +391,13 @@ class Gather:
             P["beats_n"][rows] += tot.astype(np.uint32)
             P["beats_s"][rows] += add[:, 1]; P["beats_v"][rows] += add[:, 2]; P["beats_f"][rows] += add[:, 3]; P["beats_q"][rows] += add[:, 4]
 
+    def aami_map(self) -> np.ndarray:
+        """박동 종류 번호 → AAMI 등급 번호 (0 N 1 S 2 V 3 F 4 Q)."""
+        if not hasattr(self, "_amap"):
+            from ..signals.rhythms import BEAT_KINDS, AAMI, AAMI_CLASSES
+            self._amap = np.array([AAMI_CLASSES.index(AAMI.get(k, "Q")) for k in BEAT_KINDS] + [4] * 242, dtype=np.uint8)
+        return self._amap
+
     def beats_in_frame(self, row: int, tick: int, spt: int, fs: int) -> list:
         """일반 환자 패치의 이번 프레임 박동 [(offset, kind)] — beat_tap 패치용 (정답 레코드 없이 링버퍼에만)."""
         rp = getattr(self.bank, "rpeaks", None)
@@ -518,10 +525,11 @@ class FrameBuilder:
         if active.size:
             if chan_mask & (1 << CH_ECG):
                 wave[CH_ECG] = self.g.ecg(active, tick, fs["ecg"] * bundle_ms // 1000, bundle_ms, fs["ecg"], cft)
-                try:
-                    self.g.count_beats(active, fs["ecg"] * bundle_ms // 1000)          # 박동 정답 누적 (AAMI 등급별)
-                except Exception:
-                    pass
+                if not int(c[CTL["truth_all"]]):                                     # 모든 환자 정답 레코드를 만들 때는 거기서 같이 센다
+                    try:
+                        self.g.count_beats(active, fs["ecg"] * bundle_ms // 1000)      # 박동 정답 누적 (AAMI 등급별)
+                    except Exception:
+                        pass
             if chan_mask & (1 << CH_PPG):
                 wave[CH_PPG] = self.g.ppg(active, tick, fs["ppg"] * bundle_ms // 1000, bundle_ms, fs["ppg"])
             if chan_mask & (1 << CH_RESP_WAVE):
@@ -596,6 +604,25 @@ class FrameBuilder:
             truth_rows = active[(pa["truth"] > 0) & ((eff & (1 << CH_TRUTH)) > 0) & ((eff & (1 << CH_ECG)) > 0)]
             ring = self.st.truthlog.arr
             base = self.worker_id * TRUTH_RING
+            # 모든 환자 패치(설정 transport.truth.all_patients): 같은 TRUTH 레코드를 보내고, 박동 집계도 여기서 한다(링버퍼에는 남기지 않음)
+            all_rows = active[(pa["truth"] == 0) & ((eff & (1 << CH_ECG)) > 0)] if (int(c[CTL["truth_all"]]) and (chan_mask & (1 << CH_TRUTH))) else active[:0]
+            if all_rows.size:
+                amap = self.g.aami_map()
+                cnt = np.zeros((all_rows.size, 5), dtype=np.uint32)
+            for j, r in enumerate(all_rows):
+                pr = P[r]
+                try:
+                    blob, rcode, tflags, beats, pace = self.g.truth_info(int(r), tick, spt_ecg, fs["ecg"], bundle_ms, cft)
+                except Exception:
+                    continue
+                pace_by_gw.setdefault(int(pr["gw"]), []).append(
+                    truth_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), blob))
+                for _, kind in beats:
+                    cnt[j, amap[int(kind)]] += 1
+            if all_rows.size:
+                tot = cnt.sum(axis=1)
+                P["beats_n"][all_rows] += tot.astype(np.uint32)
+                P["beats_s"][all_rows] += cnt[:, 1]; P["beats_v"][all_rows] += cnt[:, 2]; P["beats_f"][all_rows] += cnt[:, 3]; P["beats_q"][all_rows] += cnt[:, 4]
             for r in truth_rows:
                 pr = P[r]
                 try:

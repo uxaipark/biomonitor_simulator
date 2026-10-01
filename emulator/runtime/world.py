@@ -490,6 +490,7 @@ class World:
         c[CTL["fuzz_mask"]] = sum(1 << FUZZ_KINDS.index(k) for k in fz.get("kinds", []) if k in FUZZ_KINDS)
         c[CTL["connect_budget"]] = 3 if t.get("storm_smoothing", True) else 100000
         c[CTL["tap"]] = 1 if t.get("capture", {}).get("enabled") else 0
+        c[CTL["truth_all"]] = 1 if (t.get("truth") or {}).get("all_patients", True) else 0
         self.st.set_target(t["target_ip"])
         P = self.st.patch.arr
         rs = RESP_SOURCES.index(s["resp_source"])
