@@ -106,8 +106,8 @@ class RouterServer:
             return_after = True
         else:
             return_after = False
-        if not return_after:
-            row["last_seq"] = seq
+        if not return_after and (last is None or 0 < ((seq - last) & 0xFFFFFFFF) < 0x80000000):
+            row["last_seq"] = seq                                   # 앞으로 가는 seq 만: 늦게 온 재전송으로 되돌아가면 이미 받은 구간을 다시 NACK 했다
         row["last_ts"] = max(ts_ms, row.get("last_ts", 0))
         row["last_seen"] = time.time()
         if flags & F_KEEPALIVE:

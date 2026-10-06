@@ -458,6 +458,9 @@ class Gather:
         lo2, hi2 = np.searchsorted(pos, vo), np.searchsorted(pos, vo + wrap)
         hi2 = np.where(wrap > 0, hi2, lo2)
         c1, c2 = hi1 - lo1, hi2 - lo2
+        if (c1 < 0).any() or (c2 < 0).any():                 # 주석이 정렬되지 않은 은행(로드 때 정렬하지만 방어선): 워커를 죽이지 말고 이번 프레임 표시를 비운다
+            c1, c2 = np.maximum(c1, 0), np.maximum(c2, 0)
+            hi1, hi2 = lo1 + c1, lo2 + c2
         tot = c1 + c2
         if not tot.any():
             return empty
@@ -1226,15 +1229,17 @@ class Sender:
             return
         S["nack_rx"][gw] += 1
         q = self.keep.get(gw)
-        want = set(range(seq_from, seq_to + 1)) if seq_to >= seq_from else {seq_from}
+        # 범위를 set 으로 펼치지 않는다: NACK 0..0xFFFFFFFF 하나로 워커가 OOM 될 수 있었다.  seq 감김(2^32)도 거리로 판정, 최대 4096 개.
+        d = (seq_to - seq_from) & 0xFFFFFFFF
+        span = 0 if d >= 0x80000000 else min(d, 4095)                # 거꾸로 된 범위는 예전처럼 seq_from 하나만
         found = 0
         if q:
             for sq, _t, data in q:
-                if sq in want:
+                if ((sq - seq_from) & 0xFFFFFFFF) <= span:
                     self._enqueue(gw, data, now, max_backlog, resend=True)
                     found += 1
         S["resent"][gw] += found
-        S["resend_miss"][gw] += max(0, len(want) - found)
+        S["resend_miss"][gw] += max(0, span + 1 - found)
 
     def _enqueue(self, gw: int, data: bytes, now: float, max_backlog: int, resend: bool = False):
         S = self.st.stat.arr

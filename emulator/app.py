@@ -199,13 +199,13 @@ async def patch_config(patch: dict, request: Request):
 
 
 @app.get("/api/v1/config/history")
-def config_history(limit: int = Query(200, le=2000), offset: int = 0, path: str = ""):
+def config_history(limit: int = Query(200, ge=1, le=2000), offset: int = Query(0, ge=0), path: str = ""):
     """Every setting change with time, source (gui/api/autotune/reset/restore), run id, path and old -> new value."""
     return E().world.db.config_history(limit, offset, path)
 
 
 @app.get("/api/v1/runs")
-def runs(limit: int = Query(50, le=500), offset: int = 0):
+def runs(limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0)):
     """Transmission runs with the full scenario snapshot taken at start (GET /runs/{id}/config)."""
     return {"runs": E().world.db.runs(limit, offset), "current": getattr(E(), "run_id", None) if E().running else None}
 
@@ -636,7 +636,7 @@ def realism_status():
 
 
 @app.get("/api/v1/labels")
-def labels(kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(5000, le=200000), offset: int = 0,
+def labels(kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(5000, ge=1, le=200000), offset: int = Query(0, ge=0),
            format: str = "json", include_open: bool = True, patch_id: str = ""):
     """정답 라벨: 구간 [t_start_ms, t_end_ms] (epoch ms, 프레임 ts_ms 와 같은 시계).  리듬 에피소드는 프레임 단위(번들 주기)로
     정확하고, 나머지는 월드 주기(1 s) 해상도.  kind: rhythm_episode, lead_off, patch_off, no_link, trip, deterioration, code_blue,
@@ -676,7 +676,7 @@ def truth_status():
 
 
 @app.get("/api/v1/truth/beats")
-def truth_beats(patch_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(20000, le=200000), pace: int = 0):
+def truth_beats(patch_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = Query(20000, ge=1, le=200000), pace: int = 0):
     """정답 박동(R-peak) 절대 시각 목록 — 워커가 프레임에 실은 정답과 같은 값(프레임 ts_ms + 오프셋). pace=1 이면 페이스 스파이크.
     항목: ts_ms, patch_id, kind(박동 종류)/chamber, rhythm, flags, condition(clean|artifact|noise|switching|settling|lead_off)."""
     w = E().world
@@ -734,7 +734,7 @@ def truth_score(body: dict):
         for d in det:
             m.setdefault(int(d["patch_id"]), []).append(int(d["ts_ms"]))
         det = m
-    tol = int(body.get("tolerance_ms", 150))
+    tol = max(0, min(1000, int(body.get("tolerance_ms", 150))))                # 음수면 전부 FN/FP 로 Se/PPV 0 % 가 조용히 나갔다
     ex = body.get("exclude", list(EXCLUDE_DEFAULT))
     w = E().world
     with w.lock:
@@ -840,7 +840,7 @@ def stats():
 
 
 @app.get("/api/v1/events")
-def events(since: int = 0, limit: int = 200):
+def events(since: int = 0, limit: int = Query(200, ge=1, le=5000)):
     return {"events": E().log.recent(since, limit)}
 
 
@@ -1238,7 +1238,7 @@ def emr_staff(role: str | None = None):
 
 
 @app.get("/api/v1/emr/patients")
-def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: int = Query(100, le=50000), row: int = -1, patch_id: int | None = None):
+def emr_patients(status: str = "admitted", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=50000), row: int = -1, patch_id: int | None = None):
     """status=admitted|inpatient|mcot|pool|discharged|all, offset/limit 페이지 (limit ≤ 50,000; 응답 total·next_offset 로 넘김).
     patch_id=: 그 패치를 쓰는(썼던) 환자 한 명 — 퇴원·교체된 패치도 레지스트리로 찾는다 (기저 리듬 rhythm 포함)."""
     w = E().world
@@ -1434,7 +1434,7 @@ def emr_schedules():
 
 
 @app.get("/api/v1/emr/patches")
-def emr_patches(status: str = "all", q: str = "", offset: int = 0, limit: int = Query(100, le=1000), sort: str = "patch_id", dir: str = "desc"):
+def emr_patches(status: str = "all", q: str = "", offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000), sort: str = "patch_id", dir: str = "desc"):
     """Patch registry: every patch ever issued (active + retired), unique serial/patch_id, lifecycle reasons.
     sort = serial|patch_id|status|patient_name|issued_at|issued_reason|retired_at|retired_reason|battery, dir = asc|desc."""
     return E().world.patch_registry_view(status, q, offset, limit, sort, dir)
@@ -1465,7 +1465,8 @@ def signals_preview(row: int, n: int = 1):
     e = E()
     out = []
     tick = e.world._tick_now()
-    for k in range(max(1, min(n, 50))):
+    n = max(1, min(n, 50))                                                    # tick 계산에도 잘린 n 을 쓴다
+    for k in range(n):
         p = e.preview(row, tick - n + 1 + k)
         if p is None:
             raise HTTPException(404, "no active patch at this row")

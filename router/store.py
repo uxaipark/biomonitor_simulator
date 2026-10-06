@@ -113,11 +113,11 @@ class PatchStore:
             ix["patient_id"] = patient_id
             ix["gw_id"] = gw_id
             last = ix.get("last_seq")
-            if last is not None:                                   # per-patch loss accounting from the patch's own packet counter
-                d = (seq - last) & 0xFFFFFFFF
-                if 1 < d < 0x80000000:
-                    ix["lost"] = ix.get("lost", 0) + d - 1
-            ix["last_seq"] = seq
+            d = (seq - last) & 0xFFFFFFFF if last is not None else 1
+            if last is not None and 1 < d < 0x80000000:          # per-patch loss accounting from the patch's own packet counter
+                ix["lost"] = ix.get("lost", 0) + d - 1
+            if 0 < d < 0x80000000:                                 # 역행(재정렬·재전송·중복)은 last_seq 를 되돌리지 않는다 — 되돌리면 다음 정상 seq 에서 유실이 이중 집계됐다
+                ix["last_seq"] = seq
             self.dirty_index.add(patch_id)
 
     def set_meta(self, gw_id: int, meta: dict) -> None:

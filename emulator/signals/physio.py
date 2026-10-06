@@ -189,7 +189,7 @@ def generate_bundle(rhythm: str, seed: int, ecg_fs: int = 250, ppg_fs: int = 100
     if conducted_idx:
         ct = times[conducted_idx]
         ck = [kinds[i] for i in conducted_idx]
-        crr = np.diff(ct, prepend=ct[0] - np.median(np.diff(ct)) if len(ct) > 2 else 1.0)
+        crr = np.diff(ct, prepend=(ct[0] - np.median(np.diff(ct))) if len(ct) > 2 else (ct[0] - 1.0))   # 연산자 우선순위: 박동 2개 이하면 1 초 전
         med = np.median(crr) if len(crr) else 1.0
         amp = np.clip(crr / med, 0.35, 1.6) ** 0.6
         for j, k in enumerate(ck):
@@ -224,7 +224,7 @@ def generate_bundle(rhythm: str, seed: int, ecg_fs: int = 250, ppg_fs: int = 100
             if cnt >= 2:
                 hr = 60.0 * (cnt - 1) / (ext[hi - 1] - ext[lo])
             elif cnt == 1:
-                hr = 60.0 / max(0.3, (s + 1.0) - ext[lo]) if (s + 1.0 - ext[lo]) > 1.5 else 60.0 / np.median(np.diff(ct))
+                hr = 60.0 / max(0.3, (s + 1.0) - ext[lo]) if (s + 1.0 - ext[lo]) > 1.5 else (60.0 / max(0.3, float(np.median(np.diff(ct)))) if len(ct) > 1 else 0.0)
             else:
                 hr = 0.0
             hr_sec[s] = int(np.clip(round(hr), 0, 250))

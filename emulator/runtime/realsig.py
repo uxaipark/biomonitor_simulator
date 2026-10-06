@@ -269,6 +269,8 @@ def parse_file(path: str, target_fs: int) -> tuple[np.ndarray, np.ndarray, dict]
     fs_src = "시간 열"
     if not fs or not (20 <= fs <= 100_000):
         fs = _hint_fs(p.name) or next((float(v) for k, v in sn["info"].items() if "rate" in k.lower() and re.match(r"^[\d.]+$", v)), None)
+        if fs and not (20 <= fs <= 100_000):                         # 파일 이름·머리의 표본율도 시간 열과 같은 범위만 믿는다 (2 Hz 면 125 배 느린 파형·OOM)
+            fs = None
         fs_src = "파일 이름/머리" if fs else f"가정({target_fs} Hz)"
         fs = fs or float(target_fs)
     c = _pick_signal(titles, cols)
@@ -292,6 +294,8 @@ def parse_file(path: str, target_fs: int) -> tuple[np.ndarray, np.ndarray, dict]
     x = x * scale
     x -= np.median(x)
     n_out = int(round(len(x) * target_fs / fs))
+    if n_out > 6 * 3600 * target_fs:                                 # 6 시간 상한 (메인 프로세스 메모리 보호)
+        raise ValueError(f"너무 깁니다 ({len(x) / fs / 3600:.1f} 시간, 최대 6 시간)")
     if n_out < target_fs:
         raise ValueError(f"너무 짧습니다 ({len(x) / fs:.2f} 초)")
     xo = x if n_out == len(x) else np.interp(np.arange(n_out) * (fs / target_fs), np.arange(len(x)), x)

@@ -2454,7 +2454,7 @@ function gwSummary(gws) {
   const conn = gws.reduce((a, g) => a + g.n_conn, 0), tcp = gws.filter(g => g.connected).length, cap = gws.reduce((a, g) => a + g.capacity, 0);
   const n = gws.length || 1, avg = (k) => gws.reduce((a, g) => a + g[k], 0) / n, mx = (k) => gws.reduce((a, g) => Math.max(a, g[k]), 0);
   el.innerHTML = isFolded('gwBody')
-    ? `<span class="fsum"><span>총 <b>${gws.length}</b> (고정 ${fixed.length} · 모바일 ${mob})</span><span class="ok">정상 <b>${st[0]}</b></span><span class="warn">저하 <b>${st[1]}</b></span><span class="err">장애 <b>${st[2]}</b></span><span>BLE 연결 <b>${fmt(conn)}</b> <span class="sub">(GW당 최대 ${Math.max(...gws.map(g => g.capacity))} · 총 용량 ${fmt(cap)})</span></span><span>TCP on <b>${tcp}</b></span><span>평균 지연 <b>${avg('latency_ms').toFixed(1)} ms</b></span><span>평균 pkts <b>${fmt(Math.round(avg('pkts')))}</b></span><span>CPU max <b>${mx('cpu')}%</b></span><span>MEM max <b>${mx('mem')}%</b></span><span>NET max <b>${mx('net')}%</b></span></span>`
+    ? `<span class="fsum"><span>총 <b>${gws.length}</b> (고정 ${fixed.length} · 모바일 ${mob})</span><span class="ok">정상 <b>${st[0]}</b></span><span class="warn">저하 <b>${st[1]}</b></span><span class="err">장애 <b>${st[2]}</b></span><span>BLE 연결 <b>${fmt(conn)}</b> <span class="sub">(GW당 최대 ${gws.length ? Math.max(...gws.map(g => g.capacity)) : 0} · 총 용량 ${fmt(cap)})</span></span><span>TCP on <b>${tcp}</b></span><span>평균 지연 <b>${avg('latency_ms').toFixed(1)} ms</b></span><span>평균 pkts <b>${fmt(Math.round(avg('pkts')))}</b></span><span>CPU max <b>${mx('cpu')}%</b></span><span>MEM max <b>${mx('mem')}%</b></span><span>NET max <b>${mx('net')}%</b></span></span>`
     : `<span class="fsum"><span><b>${gws.length}</b>대</span>${st[2] ? `<span class="err">장애 <b>${st[2]}</b></span>` : ''}${st[1] ? `<span class="warn">저하 <b>${st[1]}</b></span>` : ''}</span>`;
 }
 function wardSummary(wards) {
@@ -2578,7 +2578,7 @@ async function loadTrend() {
     const cv = document.getElementById(cid); const box = cv.closest('.trend');
     box.classList.toggle('off', !chs.has(need[k]));
     drawTrend(cv, trendData.t, trendData[k], TH()[col] || TH().acc, k);
-    const arr = trendData[k]; const mn = Math.min(...arr), mx = Math.max(...arr);
+    const arr = trendData[k] || []; const mn = arr.length ? Math.min(...arr) : NaN, mx = arr.length ? Math.max(...arr) : NaN;
     document.getElementById(cid + 'Range').textContent = `${fmt(mn, k === 'temp' ? 1 : 0)} ~ ${fmt(mx, k === 'temp' ? 1 : 0)}`;
   }
 }
@@ -2589,6 +2589,7 @@ function drawTrend(cv, ts, ys, color, key, hoverIdx = -1) {
   cv._trend = { ts, ys, color, key };
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); const th = TH();
   g.fillStyle = th.waveBg; g.fillRect(0, 0, w, h);
+  if (!ys || ys.length < 2) return;                                       // 표본 0~1개: Infinity·0 나누기 대신 빈 차트
   const padL = 34, padB = 16, padT = 6, iw = w - padL - 4, ih = h - padT - padB;
   let mn = Math.min(...ys), mx = Math.max(...ys); const span = Math.max(mx - mn, { temp: 1, spo2: 4, resp: 6, hr: 20, glucose: 60 }[key] || 1);
   const mid = (mn + mx) / 2; mn = mid - span / 2 * 1.15; mx = mid + span / 2 * 1.15;

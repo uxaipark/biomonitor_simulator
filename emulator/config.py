@@ -294,7 +294,12 @@ class Config:
         g["census_mode"] = g.get("census_mode") if g.get("census_mode") in ("fixed", "weekly") else "fixed"
         g["fixed_step"] = bool(g.get("fixed_step", False))
         g["fixed_start"] = str(g.get("fixed_start") or "").strip()
+        g["admissions_per_hour"] = _num(g.get("admissions_per_hour"), 0, 500, 4)        # 음수면 poisson(lam<0) 예외로 월드 스텝이 매초 멈췄다
+        g["discharges_per_hour"] = _num(g.get("discharges_per_hour"), 0, 500, 4)
         s = d["signals"]
+        s["ppg_fs"] = _num(s.get("ppg_fs"), 25, 500, 100, True)                           # 0·음수·실수면 워커 전부 종료 또는 은행 생성 실패
+        s["resp_fs"] = _num(s.get("resp_fs"), 5, 100, 25, True)
+        s["accel_fs"] = _num(s.get("accel_fs"), 10, 200, 50, True)
         s["ecg_fs"] = 500 if int(s["ecg_fs"]) >= 500 else 250
         s["variants_per_rhythm"] = int(max(1, min(200, s["variants_per_rhythm"])))
         # 세 가지 생성물은 시드를 따로 쓴다 (예전 설정은 하나였던 seed 로 채워 기존 명단·루프 은행이 그대로 유효)
@@ -317,6 +322,11 @@ class Config:
         t["target_port"] = int(max(1, min(65535, t["target_port"])))
         # 워커당 1 소켓(다중화)은 현장에 없는 구성이라 UI에서 뺐다: 디지털 트윈은 게이트웨이당 1 소켓으로 고정
         t["socket_mode"] = "per_gateway"
+        t["max_send_backlog_bytes"] = _num(t.get("max_send_backlog_bytes"), 65536, 64 * 1024 * 1024, 262144, True)   # 0 이면 한 바이트도 못 보냈다
+        t["saf_worker_max_mb"] = _num(t.get("saf_worker_max_mb"), 1, 1024, 64)
+        t["resend_keep_mb"] = _num(t.get("resend_keep_mb"), 1, 1024, 64)
+        t["resend_keep_s"] = _num(t.get("resend_keep_s"), 1, 300, 10)
+        t["reconnect_interval_s"] = _num(t.get("reconnect_interval_s"), 0.2, 600, 3.0)
         sf = t.setdefault("store_forward", {})
         sf["enabled"] = bool(sf.get("enabled", True))
         sf["max_bytes_per_gw"] = int(max(65536, min(64 * 1024 * 1024, sf.get("max_bytes_per_gw", 2097152))))
@@ -366,11 +376,30 @@ class Config:
         sc["gateway"]["fault_intensity"] = int(max(0, min(100, sc["gateway"]["fault_intensity"])))
         sc["patch"]["battery_days"] = float(max(0.01, min(30, sc["patch"]["battery_days"])))
         sc["patch"]["max_wear_days"] = float(max(0.0, min(30, sc["patch"].get("max_wear_days", 14))))
+        for k, dflt in (("low_warn_hours", [4, 24]), ("swap_delay_hours", [1, 18])):        # 스칼라로 들어오면 lw[0] 에서 매초 TypeError
+            v = sc["patch"].get(k, dflt)
+            v = v if isinstance(v, (list, tuple)) and v else [v, v]
+            lo, hi = _num(v[0], 0, 240, dflt[0]), _num(v[-1], 0, 240, dflt[-1])
+            sc["patch"][k] = [min(lo, hi), max(lo, hi)]
+        rf = sc.setdefault("rf_noise", {"enabled": False, "level": 60})
+        rf["level"] = _num(rf.get("level"), 0, 100, 60)                                    # 음수면 normal(scale<0) 예외로 월드 정지
         try:
             wr = float(sc["patch"].get("wear_ratio", 50))
         except (TypeError, ValueError):
             wr = 50.0
         sc["patch"]["wear_ratio"] = float(max(0.0, min(100.0, wr if wr == wr else 50.0)))     # NaN → 기본값
+
+
+def _num(v, lo, hi, default, as_int: bool = False):
+    """설정 숫자 정규화: 숫자가 아니거나 NaN·inf 면 기본값, 범위 밖이면 경계로."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        x = float(default)
+    if x != x or x in (float("inf"), float("-inf")):
+        x = float(default)
+    x = max(float(lo), min(float(hi), x))
+    return int(round(x)) if as_int else x
 
 
 def channel_mask(enabled: dict[str, bool]) -> int:

@@ -2449,8 +2449,8 @@ class World:
         overruns = int(W["overruns"][alive].sum()) if n_w else 0
         backlog = int(S["drop_backlog"].sum())
         prev = self.stats_prev
-        ow = overruns - prev.get("overruns", overruns)
-        bw = backlog - prev.get("backlog", backlog)
+        ow = max(0, overruns - prev.get("overruns", overruns))              # 통계가 0 으로 비워진 뒤(재시작)면 음수 → 0
+        bw = max(0, backlog - prev.get("backlog", backlog))
         self.stats_prev = {"overruns": overruns, "backlog": backlog}
         generate_only = self.st.ctl[CTL["generate_only"]] > 0
         healthy = n_w > 0 and ow == 0 and (build + send) < 0.7 * bundle_us and (generate_only or bw == 0)
@@ -2891,7 +2891,8 @@ class World:
                 return f"connection storm: {h.n_fixed_gateways} gateways reconnecting at once"
             if what == "half_open":
                 # hung gateway(s): TCP stays established but nothing is sent (no keepalive) for `duration` s
-                dur = float(params.get("duration", 60)); n = int(params.get("count", 1))
+                dur = float(params.get("duration", 60)); n = max(1, int(params.get("count", 1)))
+                dur = max(1.0, min(86400.0, dur if dur == dur else 60.0))
                 gws = [target] if target is not None and 0 <= target < h.n_fixed_gateways else [int(x) for x in self.rng.choice(h.n_fixed_gateways, size=min(n, h.n_fixed_gateways), replace=False)]
                 for gw in gws:
                     G["silent"][gw] = 1

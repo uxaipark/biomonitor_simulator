@@ -1050,6 +1050,8 @@ def validate(data: dict) -> list[str]:
     for k in ("hospital", "buildings", "floors"):
         if k not in data:
             errs.append(f"missing {k}")
+    if not any(b for fl in data.get("floors", []) for r in fl.get("rooms", []) for b in r.get("beds", [])):
+        errs.append("no beds in layout")
     for fl in data.get("floors", []):
         for r in fl.get("rooms", []):
             if "poly" not in r or len(r["poly"]) < 3:
@@ -1057,6 +1059,9 @@ def validate(data: dict) -> list[str]:
             for b in r.get("beds", []):
                 if "x" not in b or "y" not in b:
                     errs.append(f"bed {b.get('id')} needs x/y")
+        for ci, c in enumerate(fl.get("corridors", [])):               # 빈 poly 는 Hospital 생성(_poly_bbox min()) 에서 터져 재구성·재시작이 막혔다
+            if not isinstance(c, dict) or len(c.get("poly") or []) < 3:
+                errs.append(f"corridor {ci} on floor {fl.get('floor')} needs poly (3+ points)")
         zones = {w["id"]: w.get("zones", []) for w in fl.get("wards", [])}
         for r in fl.get("rooms", []):
             z = zones.get(r.get("ward"))

@@ -155,6 +155,8 @@ class Engine:
         w.apply_config()
         st.ctl[CTL["epoch_ns"]] = time.time_ns()
         st.ctl[CTL["stop_workers"]] = 0
+        self._last_totals = {}                                          # 통계를 0 으로 비우기 전에: 사이에 수집하면 0 - 이전 누적 = 음수 pkt/s
+        w.stats_prev = {}                                               # autotune 첫 창이 음수 차이로 '불안정' 판정되지 않게
         st.stat.arr[:] = 0
         st.wstat.arr[:] = 0
         w.write_meta(force=True)
@@ -257,7 +259,7 @@ class Engine:
         now = time.time()
         prev = self._last_totals
         dt = now - prev.get("t", now - 1) if prev else 1.0
-        rate = {k: (tot[k] - prev.get(k, tot[k])) / max(dt, 1e-3) for k in ("pkts", "bytes", "drop_emul", "drop_backlog", "drop_noconn", "overruns")}
+        rate = {k: max(0.0, tot[k] - prev.get(k, tot[k])) / max(dt, 1e-3) for k in ("pkts", "bytes", "drop_emul", "drop_backlog", "drop_noconn", "overruns")}
         self._last_totals = {**tot, "t": now}
         alive = W["alive"] > 0
         P = st.patch.arr

@@ -216,7 +216,7 @@ class DB:
             q += " AND (t_end_ms IS NULL OR t_end_ms >= ?)"; a.append(since_ms)
         if until_ms:
             q += " AND t_start_ms <= ?"; a.append(until_ms)
-        q += " ORDER BY t_start_ms LIMIT ? OFFSET ?"; a += [limit, offset]
+        q += " ORDER BY t_start_ms LIMIT ? OFFSET ?"; a += [max(1, int(limit)), max(0, int(offset))]
         with self.lock:
             rows = self.conn.execute(q, a).fetchall()
         return [{**{k: r[k] for k in r.keys() if k != "meta_json"}, "meta": json.loads(r["meta_json"]) if r["meta_json"] else None} for r in rows]
@@ -332,8 +332,9 @@ class DB:
         low = s.lower()
         if not (low.startswith("select") or low.startswith("with")) or any(k in low for k in (" insert ", " update ", " delete ", " drop ", " alter ", " attach ", " pragma ", "create ")):
             raise ValueError("read-only: SELECT only")
+        limit = max(1, min(500, int(limit)))                         # 음수 LIMIT 는 SQLite 에서 무제한 → 락을 쥔 채 큰 테이블 전체를 읽었다
         with self.lock:
-            cur = self.conn.execute(f"SELECT * FROM ({s}) LIMIT {int(limit)}", params)
+            cur = self.conn.execute(f"SELECT * FROM ({s}) LIMIT {limit}", params)
             cols = [d[0] for d in cur.description] if cur.description else []
             rows = [list(r) for r in cur.fetchall()]
         return {"columns": cols, "rows": rows, "truncated": len(rows) >= limit}
