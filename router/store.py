@@ -80,6 +80,8 @@ def iter_entries(path: str | os.PathLike):
         yield ts, gw, pid, seq, fl, bat, rssi, chans
 
 
+PATCH_SEQ_RESTART_MAX, PATCH_SEQ_RESTART_MIN_BACK = 8, 256          # emulator/runtime/verify.py 와 같은 기준 (store 는 단독으로도 import 된다)
+
 class PatchStore:
     def __init__(self, root: str | os.PathLike, flush_interval: float = 1.0, max_open: int = 256, rotate_s: int = 3600):
         self.root = Path(root)
@@ -117,6 +119,9 @@ class PatchStore:
             if last is not None and 1 < d < 0x80000000:          # per-patch loss accounting from the patch's own packet counter
                 ix["lost"] = ix.get("lost", 0) + d - 1
             if 0 < d < 0x80000000:                                 # 역행(재정렬·재전송·중복)은 last_seq 를 되돌리지 않는다 — 되돌리면 다음 정상 seq 에서 유실이 이중 집계됐다
+                ix["last_seq"] = seq
+            elif last is not None and d >= 0x80000000 and seq <= PATCH_SEQ_RESTART_MAX and ((last - seq) & 0xFFFFFFFF) >= PATCH_SEQ_RESTART_MIN_BACK:
+                ix["restarts"] = ix.get("restarts", 0) + 1              # 패치 번호가 0 근처로 돌아감 = 장애 (패치는 소진 전에 꺼지지 않는다)
                 ix["last_seq"] = seq
             self.dirty_index.add(patch_id)
 

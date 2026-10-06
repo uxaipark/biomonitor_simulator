@@ -104,3 +104,27 @@ w.db.close(); w.st.close(); w.st.unlink()
     assert out["stock"] > 0 and set(("serial", "patch_id", "status", "lot", "expiry", "location", "ward", "received_at")) <= set(smp) and smp["status"] == "stock", out
     assert out["from_stock"] and out["ward_ok"] and out["picked"] and out["dup"] == "rejected", out
     assert out["min_left"] >= 0 and out["inv"] == [], out          # 재고 >= 패치 착용 환자 수
+
+
+def test_patch_seq_restart_is_flagged_as_error():
+    """패치는 소진 전에 꺼지지 않는다: 같은 patch_id 의 번호가 0 근처로 돌아가면 재정렬이 아니라 patch_seq_restart(오류)."""
+    import struct
+    sys.path.insert(0, ROOT)
+    from emulator.config import CH_HR
+    from emulator.runtime import protocol as P
+    from emulator.runtime.verify import StreamChecker
+    def rec(pseq):
+        return struct.pack("<IIIBBbB", 0x10005, 77, pseq, 0, 100, -60, 1) + struct.pack("<BBH", CH_HR, P.DTYPE_CODE["uint8"], 1) + b"\x48"
+    c = StreamChecker()
+    seqs = list(range(1000, 1010)) + [1008] + [0, 1, 2]            # 1008: 늦게 온 재전송(재정렬), 0: 재시작
+    for i, q in enumerate(seqs):
+        c.feed(P.frame(9, i + 1, 1_790_000_000_000 + i * 200, 1, rec(q), 0))
+    sm = c.summary()
+    assert sm["patch_seq_restart"] == 1 and sm["patch_seq_reorder"] == 1 and sm["patch_seq_gap"] == 0, sm
+
+
+def test_truth_patch_seq_never_restarts():
+    sys.path.insert(0, ROOT)
+    from emulator.runtime.truthbench import truth_seq_base
+    a, b = truth_seq_base(1_791_000_000.0), truth_seq_base(1_791_000_060.0)
+    assert b - a == 1200 and a > 10_000_000                          # 1 분 뒤 재시작해도 그 사이 최대 프레임 수(50 ms 묶음)보다 크다

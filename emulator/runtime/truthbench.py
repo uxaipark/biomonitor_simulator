@@ -157,6 +157,15 @@ EVENTS = {"artifact": (10.0, 60.0), "noise": (10.0, 40.0), "lead_off": (10.0, 40
 ACT_MOVING = ["walking", "turning", "sitting_up", "exercise"]
 
 
+
+SEQ_EPOCH = 1_750_000_000          # 2025-06-15 UTC
+
+
+def truth_seq_base(now: float | None = None) -> int:
+    """고정 patch_id 인 정답 패치의 시작 패킷 번호: 2025-06 부터 50 ms(가장 짧은 묶음) 단위 경과.  프레임은 그보다 자주 나갈 수 없으니
+    이전 실행이 보낸 마지막 번호보다 항상 크다 (2^32 를 넘으면 정상적인 감김처럼 이어진다, 약 6.8 년)."""
+    return int(((now if now is not None else time.time()) - SEQ_EPOCH) * 20) & 0xFFFFFFFF
+
 class TruthBench:
     def __init__(self, w, rows: list[int], gws: list[int]):
         self.w = w
@@ -184,6 +193,7 @@ class TruthBench:
         from .world import ACT_ID, POSTURE_ID
         self.state = {}
         self._plan_rows(self.cfg())
+        seq_base = truth_seq_base()
         for k, row in enumerate(self.rows):
             rhythm = self._plan[k % len(self._plan)]
             P[row] = 0                                                       # 모든 필드 0 으로
@@ -202,6 +212,7 @@ class TruthBench:
             P["rssi"][row] = -55
             P["hr_scale"][row] = 1.0
             P["chan_mask"][row] = (1 << CH_ECG) | (1 << CH_HR) | (1 << CH_PACE) | (1 << CH_TRUTH)
+            P["seq"][row] = seq_base                                       # 정답 패치는 patch_id 가 고정 → 재시작해도 번호가 0 으로 돌아가지 않게 벽시계 기준에서 이어 간다
             self._apply_rhythm_device(row, rhythm, k)
             self.state[row] = {"k": k, "rhythm": rhythm, "hop_at": w.sim_time + float(self.rng.uniform(*self._hop())), "event": None, "until": 0.0}
         self.apply_config()

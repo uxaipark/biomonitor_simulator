@@ -140,6 +140,7 @@ class World:
         self.patch_registry: dict[str, dict] = {}  # serial -> lifecycle record (never deleted)
         self.stock: dict[str, list[str]] = {}       # 재고 보관 위치(병동 id 또는 "MCOT") -> 미사용 패치 serial (유효기간 빠른 순)
         self.stock_lot_no = 0
+        self._seq_tick: dict[int, int] = {}          # 연결이 끊긴 패치: 마지막으로 패킷 번호를 올린 tick (끊긴 동안에도 패치는 켜져 있어 번호가 계속 간다)
         self.stock_alarm: dict | None = None        # 마지막 재고 부족 알람 (자동 입고로 해소되면 None)
         self.free_rows: list[int] = []
         self.next_patch_serial = 1
@@ -528,6 +529,8 @@ class World:
         p.activated = self.sim_time
         p.patient_id = patient_id
         self.patches[row] = p
+        self.st.patch["seq"][row] = 0                  # 새 기기: 자기 패킷 번호는 처음부터 (같은 patch_id 로 0 이 다시 나오는 일은 없다 — 패치는 소진 전에 꺼지지 않는다)
+        self._seq_tick[row] = -1
         self.patch_registry[serial] = {**(ent or {}), "serial": serial, "patch_id": p.patch_id, "patient_id": patient_id,
                                        "patient_name": self.by_id[patient_id]["name"] if patient_id in self.by_id else None,
                                        "status": "active", "issued_at": self.sim_time, "issued_reason": reason,
@@ -639,6 +642,28 @@ class World:
         self.counters["patch_detached"] = self.counters.get("patch_detached", 0) + 1
         self.log.add("patch", f"{prof['name']} 패치 {patch.serial if patch else '-'} 제거 ({reason}) — 위치 추적 없음, 병상 고정", patient_id=pid)
         return {"ok": True, "changed": True, "patch": patch.serial if patch else None}
+
+    def _step_offline_seq(self) -> None:
+        """BLE 연결이 끊긴(음영·게이트웨이 장애·전파 방해) 패치도 켜져 있으므로 프레임마다 자기 패킷 번호를 올린다.
+        그래야 다시 붙었을 때 라우터가 끊긴 구간을 seq 공백(유실)으로 본다 — 예전에는 번호가 멈춰 패치가 꺼졌다 켜진 것처럼 이어졌다.
+        소진으로 꺼진 패치(batt_dead)와 미착용 환자는 제외.  연결된 패치는 워커가 올린다."""
+        if not self.running:
+            self._seq_tick = {}
+            return
+        now = self._tick_now()
+        P = self.st.patch.arr
+        live = set()
+        for rec in list(self.admitted.values()):
+            if rec["gw"] >= 0 or not rec.get("worn", True) or rec.get("batt_dead"):
+                continue
+            row = rec["row"]
+            live.add(row)
+            last = self._seq_tick.get(row, -1)
+            if last >= 0 and now > last:
+                P["seq"][row] = (int(P["seq"][row]) + (now - last)) & 0xFFFFFFFF
+            self._seq_tick[row] = now
+        for row in [r for r in self._seq_tick if r not in live]:
+            del self._seq_tick[row]
 
     def _step_wear_ratio(self) -> None:
         """착용 비율 설정이 바뀌면(시작 직후 포함) 목표 비율에 맞춰 무작위 환자에게 붙이거나 뗀다 (한 번에 최대 300명)."""
@@ -1922,7 +1947,7 @@ class World:
                 if removed and removed <= now and not rec.get("mri_pending"):
                     rec["patch_removed_until"] = 0.0
             P["flags"][row] = f
-            if rec.get("batt_dead") and (patch.battery > 0.0 or not drain):  # 새 패치(교체)·배터리 소모 끔 → 다시 전송
+            if rec.get("batt_dead") and not patch.dead:                      # 새 패치(교체)만 다시 전송 — 소진으로 꺼진 패치는 다시 켜지지 않는다 (배터리 소모를 꺼도)
                 rec["batt_dead"] = False
                 self._relink(rec, force=True)
             if drain and patch.battery <= 0.0 and not patch.dead:           # 배터리 소진: 전원이 꺼진다 (교체 전까지 무신호)
@@ -2503,6 +2528,7 @@ class World:
                 if pid % 5 == k or (rec["gw"] >= 0 and G["status"][rec["gw"]] == 2) or (rec["gw"] < 0):
                     self._relink(rec)
             self._tnote("relink", t0)
+            T("seq_offline", self._step_offline_seq)
             T("write_meta", self.write_meta)
             T("invariants", self._step_invariants)
             T("autotune", self._step_autotune, real_dt)

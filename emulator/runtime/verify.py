@@ -46,6 +46,10 @@ def decode_records(payload: memoryview, off: int, n_rec: int):
         raise ValueError("trailing bytes after records")
 
 
+
+PATCH_SEQ_RESTART_MAX = 8           # 이 번호 이하로 되돌아가면 '재시작' 후보
+PATCH_SEQ_RESTART_MIN_BACK = 256     # ... 그리고 직전 번호보다 이만큼 이상 뒤일 때 (재전송·재정렬 창은 이보다 훨씬 짧다)
+
 class StreamChecker:
     """One per TCP connection (or per capture file).  Counters are global and per gw_id."""
 
@@ -205,6 +209,10 @@ class StreamChecker:
                 d = (pseq - last) & 0xFFFFFFFF
                 if d == 0:
                     self.counts["patch_seq_dup"] += 1; pp["dup"] += 1
+                elif d > 0x80000000 and pseq <= PATCH_SEQ_RESTART_MAX and ((last - pseq) & 0xFFFFFFFF) >= PATCH_SEQ_RESTART_MIN_BACK:
+                    # 패치 번호가 처음(0 근처)으로 돌아감 = 오류.  패치는 배터리가 다할 때까지 꺼지지 않으므로 재부팅·재시작은 정상 동작이 아니다
+                    # (새 패치는 새 patch_id 로 온다).  장애로 보고 이후 번호는 새 기준으로 이어서 센다.
+                    self.counts["patch_seq_restart"] += 1; pp["restart"] += 1
                 elif d > 0x80000000:
                     self.counts["patch_seq_reorder"] += 1; pp["reorder"] += 1
                     continue
@@ -217,5 +225,5 @@ class StreamChecker:
 
     def summary(self) -> dict:
         keys = ["bad_magic", "bad_version", "bad_len", "oversize", "truncated", "resync", "garbage_bytes", "seq_gap", "seq_dup", "seq_reorder", "ts_backwards",
-                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "bad_crc", "resend_ok", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
+                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "patch_seq_restart", "bad_crc", "resend_ok", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
         return {"frames": self.frames, "gateways": len(self.per_gw), **{k: int(self.counts.get(k, 0)) for k in keys}}
