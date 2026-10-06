@@ -425,7 +425,7 @@ function scnFill() {
   renderPresets(); syncDropdowns(); mixNote(); scnMark();
 }
 function scnRefresh() { if (!CFG) return; scnCompute(); scnFill(); }
-function scnEdit(p, v) { setPath(SCN_DRAFT, p, v); setPath(SV, p, v); scnMark(); }
+function scnEdit(p, v) { setPath(SCN_DRAFT, p, v); setPath(SV, p, v); scnMark(); wearHint(); }
 function fillForm() {
   const li = $('#layoutImported'); if (li) li.hidden = !(CFG.hospital && CFG.hospital.layout_file);
   scnCompute();
@@ -437,7 +437,7 @@ function fillForm() {
   }
   $('#g_active').max = SV.general.bed_capacity;
   const fk = $('#fz_kinds'); if (fk) fk.value = ((SV.transport.fuzz || {}).kinds || []).join(',');
-  renderChips(); renderPresets(); syncDropdowns(); mixNote(); scnMark();
+  renderChips(); renderPresets(); syncDropdowns(); mixNote(); scnMark(); wearHint();
 }
 $('#fz_kinds').addEventListener('change', () => { const kinds = $('#fz_kinds').value.split(',').map(x => x.trim()).filter(Boolean); scnEdit(['transport', 'fuzz', 'kinds'], kinds); });
 $('#capClear').onclick = async () => { const r = await post('/capture', { clear: true }); toast('캡처 파일 삭제'); renderCapture(r); };
@@ -2694,6 +2694,12 @@ async function loadRegistry() {
   $('#regCount').textContent = `사용 중 ${fmt(r.active)} · 재고 ${fmt(r.stock || 0)} · 사용 완료 ${fmt(r.retired)} · 다음 발급 번호 ${r.next_serial} · 표시 ${regOff + 1}-${Math.min(r.total, regOff + 60)} / ${fmt(r.total)}`;
   $('#regTable tbody').innerHTML = r.patches.map(p => `<tr><td class="mono">${p.serial}</td><td>${p.patch_id}</td><td>${p.status === 'active' ? '<span class="tag ok">사용 중</span>' : '<span class="tag">사용 완료</span>'}</td><td>${p.patient_name || '-'} <span class="sub">#${p.patient_id || '-'}</span></td><td>${p.issued_at ? p.issued_at.slice(5, 16) : '-'}</td><td>${esc(p.issued_reason || '')}</td><td>${p.retired_at ? p.retired_at.slice(5, 16) : '-'}</td><td>${esc(p.retired_reason || '')}</td><td>${p.battery == null ? '-' : battIcon(p.battery)}</td></tr>`).join('');
 }
+function wearHint() {                                                     // 착용 비율 옆: 입원 환자 수 × 비율 = 착용 인원
+  const n = Number($('#g_active').value) || 0, r = Number($('#p_wr').value) || 0;
+  const on = Math.round(n * r / 100);
+  $('#p_wr_n').textContent = `착용 ${fmt(on)}명 · 미착용 ${fmt(n - on)}명`;
+}
+['g_active', 'p_wr'].forEach(id => document.getElementById(id).addEventListener('input', wearHint));
 async function loadStock() {
   try {
     const r = await api('/emr/patches?status=stock&limit=1');
