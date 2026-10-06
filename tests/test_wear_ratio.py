@@ -201,3 +201,54 @@ w2.db.close(); w2.st.close(); w2.st.unlink()
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["ok1"] and out["ok2"] and 99000001 <= out["truth"][0] and out["truth"][1] <= 99999999, out
     assert out["n2"] >= out["n1"], out
+
+
+def test_router_stock_requests_scheduled_delivery():
+    """라우터 재고 요청: 납품일 입고 시각에 입고(보관함 지정·착용 환자 수 비례), request_id 멱등, 주말·지난 날짜·형식 거절, 취소, 자동 입고 끄기."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 5, 'profile_count': 500, 'bed_capacity': 80, 'active_patients': 60, 'outpatient_count': 4, 'sim_speed': 60.0, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}}, 'scenario': {{'patch': {{'auto_restock': False}}}}}})
+s = cfg.snapshot()['signals']
+w = World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+w.running = True
+tot = lambda: sum(len(v) for v in w.stock.values())
+k = w._stock_keys()[0]
+a, new_a = w.create_stock_request({{'request_id': 'r1', 'ward': '', 'qty': 500, 'deliver_on': '2026-09-21', 'source': 'router'}})
+b, _ = w.create_stock_request({{'request_id': 'r2', 'ward': k, 'qty': 100, 'deliver_on': '2026-09-21'}})
+c, _ = w.create_stock_request({{'request_id': 'r3', 'ward': 'MCOT', 'qty': 100, 'deliver_on': '2026-09-22'}})
+a2, new_a2 = w.create_stock_request({{'request_id': 'r1', 'ward': '', 'qty': 999, 'deliver_on': '2026-09-23'}})
+errs = []
+for bad in ({{'request_id': 'x1', 'qty': 100, 'deliver_on': '2026-09-26'}}, {{'request_id': 'x2', 'qty': 100, 'deliver_on': '2026-09-18'}},
+            {{'request_id': 'x3', 'qty': 0, 'deliver_on': '2026-09-22'}}, {{'request_id': 'x4', 'qty': 100, 'deliver_on': '22-09-2026'}}, {{'request_id': 'x5', 'qty': 100, 'deliver_on': '2026-09-22', 'ward': 'NOPE'}}):
+    try:
+        w.create_stock_request(bad); errs.append('accepted')
+    except (ValueError, KeyError):
+        errs.append('rejected')
+w.cancel_stock_request('r3')
+t0 = tot(); auto0 = w.counters.get('stock_received', 0)
+for i in range(30):          # 09:00 → 09:30: 아직 입고 전
+    w.step(1.0)
+before_due = w.stock_requests['r1']['status']
+for i in range(40):          # → 10:10
+    w.step(1.0)
+v = w.stock_requests_view()
+r1 = w.stock_requests['r1']
+print(json.dumps({{'new_a': new_a, 'new_a2': new_a2, 'a2_qty': a2['qty'], 'errs': errs, 'before_due': before_due, 'r1': r1['status'], 'r2': w.stock_requests['r2']['status'],
+                  'r3': w.stock_requests['r3']['status'], 'r1_sum': sum(r1['by_ward'].values()), 'r1_n': len(r1['by_ward']), 'n_req': v['total'], 'auto': v['auto_restock']}}, default=str))
+w.db.close(); w.st.close(); w.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["new_a"] and not out["new_a2"] and out["a2_qty"] == 500, out                   # 같은 request_id: 처음 기록 그대로
+    assert out["errs"] == ["rejected"] * 5, out                                              # 주말·지난 날짜·수량 0·형식·없는 보관함
+    assert out["before_due"] == "scheduled" and out["r1"] == "delivered" and out["r2"] == "delivered" and out["r3"] == "cancelled", out
+    assert out["r1_sum"] == 500 and out["r1_n"] > 1 and out["n_req"] == 3 and out["auto"] is False, out

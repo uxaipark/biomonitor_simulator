@@ -9,7 +9,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -109,7 +109,7 @@ def discovery():
         "endpoints": {
             "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "truth_beats": "GET /api/v1/truth/beats?patch_id=&since_ms=&until_ms=&pace= (정답 R-peak 절대 시각)", "truth_score": "POST /api/v1/truth/score {detections:{patch_id:[ts_ms..]}, tolerance_ms:150} → QRS 검출 Se/PPV/F1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
-                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_stock": "GET /api/v1/emr/patches?status=stock&ward=&q=&limit= (병원 재고 미사용 패치: 로트·유효기간·보관 위치) · POST /api/v1/emr/patches/stock {count, ward, request_id} 수동 입고", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
+                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_stock": "GET /api/v1/emr/patches?status=stock&ward=&q=&limit= (병원 재고 미사용 패치: 로트·유효기간·보관 위치) · POST /api/v1/emr/patches/stock {count, ward, request_id} 수동 입고", "stock_requests": "POST /api/v1/emr/stock/requests {request_id, ward, qty, deliver_on} · GET /api/v1/emr/stock/requests · POST /api/v1/emr/stock/requests/{id}/cancel (납품일 입고)", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
                     "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds (x·y 중심, angle 머리 방향 도, bed_size_m 0.9 x 2.0)", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
@@ -1417,6 +1417,45 @@ def emr_stock_receive(body: dict | None = None):
             _stock_req.clear()
         _stock_req[rid] = {**r, "request_id": rid}
     return {**r, "request_id": rid or None}
+
+
+@app.post("/api/v1/emr/stock/requests", status_code=201)
+def emr_stock_request(body: dict, response: Response):
+    """라우터 재고 요청 (납품일 지정): {request_id, hospital, ward(""=병원 전체 → 보관함별 착용 환자 수 비례 | 병동 id | "MCOT"), qty, deliver_on:"YYYY-MM-DD",
+    note, basis, by, source}.  → 201 {request_id, status:"scheduled", deliver_on, message}.  납품일 scenario.patch.stock_delivery_hour(기본 10)시에 입고,
+    events kind "patch".  같은 request_id 는 처음 결과 그대로(200).  거절 422/404 {"detail": 한국어}."""
+    w = E().world
+    with w.lock:
+        try:
+            r, new = w.create_stock_request(body or {})
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        except KeyError:
+            raise HTTPException(404, "그런 보관함(병동)이 없습니다")
+    if not new:
+        response.status_code = 200
+    return {k: v for k, v in r.items() if k != "created_at"}
+
+
+@app.get("/api/v1/emr/stock/requests")
+def emr_stock_requests(status: str = "", limit: int = Query(500, ge=1, le=2000)):
+    """재고 요청 목록: {requests:[{request_id, status: scheduled|delivered|cancelled, deliver_on, qty, ward, ward_name, delivered_at, lot, by_ward, note, by, ...}], scheduled_qty, auto_restock}."""
+    w = E().world
+    with w.lock:
+        return w.stock_requests_view(status, limit)
+
+
+@app.post("/api/v1/emr/stock/requests/{request_id}/cancel")
+def emr_stock_request_cancel(request_id: str, body: dict | None = None):
+    w = E().world
+    with w.lock:
+        try:
+            r = w.cancel_stock_request(request_id, str((body or {}).get("by") or ""))
+        except KeyError:
+            raise HTTPException(404, "그런 재고 요청이 없습니다")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+    return {k: v for k, v in r.items() if k != "created_at"}
 
 
 @app.get("/api/v1/patch/wear")

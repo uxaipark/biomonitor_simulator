@@ -156,6 +156,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "patch": {
             "battery_days": 15.5,          # 패치 배터리 수명
             "max_wear_days": 14,           # 최대 착용 기간: 넘으면 새 번호 패치로 교체
+            "auto_restock": True,          # 재고 < 착용 환자 수면 에뮬레이터가 스스로 입고. 라우터의 자동 재고 요청을 쓰면 끈다 (알람은 계속)
+            "stock_delivery_hour": 10,     # 재고 요청(납품일 지정)이 그날 몇 시에 입고되는지 (시뮬 현지 시각)
             "stock_unit": 100,             # 병원 재고(미사용 패치) 목표 = 패치 착용 환자 수.  모자라면 알람 후 이 단위로 자동 입고 — 라우터 환자 관리가 여기서 미사용 패치를 고른다
             "stock_shelf_days": 540,       # 입고 시 유효기간 (일)
             "wear_ratio": 50,              # 입원 환자 중 패치 착용 비율 (%) — 미착용 환자는 송신·위치 추적이 없어 병실에 고정 (MCOT 는 항상 착용)
@@ -379,6 +381,8 @@ class Config:
         sc["patch"]["battery_days"] = float(max(0.01, min(30, sc["patch"]["battery_days"])))
         sc["patch"]["max_wear_days"] = float(max(0.0, min(30, sc["patch"].get("max_wear_days", 14))))
         sc["patch"]["stock_unit"] = _num(sc["patch"].get("stock_unit"), 1, 10000, 100, True)
+        sc["patch"]["auto_restock"] = bool(sc["patch"].get("auto_restock", True))
+        sc["patch"]["stock_delivery_hour"] = _num(sc["patch"].get("stock_delivery_hour"), 0, 23, 10, True)
         sc["patch"]["stock_shelf_days"] = _num(sc["patch"].get("stock_shelf_days"), 30, 3650, 540, True)
         for k, dflt in (("low_warn_hours", [4, 24]), ("swap_delay_hours", [1, 18])):        # 스칼라로 들어오면 lw[0] 에서 매초 TypeError
             v = sc["patch"].get(k, dflt)

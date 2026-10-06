@@ -142,6 +142,7 @@ class World:
         self.stock_lot_no = 0
         self._seq_tick: dict[int, int] = {}          # 연결이 끊긴 패치: 마지막으로 패킷 번호를 올린 tick (끊긴 동안에도 패치는 켜져 있어 번호가 계속 간다)
         self.stock_alarm: dict | None = None        # 마지막 재고 부족 알람 (자동 입고로 해소되면 None)
+        self.stock_requests: dict[str, dict] = {}   # 라우터 재고 요청 (납품일 지정): request_id -> 기록
         self.free_rows: list[int] = []
         self.next_patch_serial = 1
         self.gw_state: list[dict] = []
@@ -743,6 +744,7 @@ class World:
             self.stock[key].append(r["serial"])
         for k in self.stock:
             self.stock[k].sort(key=lambda sr: (self.patch_registry[sr].get("expiry") or "", sr))
+        self.stock_requests = {r["request_id"]: r for r in self.db.load_stock_requests()}
         rn = getattr(self, "_renumber_stock", None)
         if rn:
             lot = self._new_lot()
@@ -820,16 +822,28 @@ class World:
         total_need = sum(need.values())
         have = {k: len(self.stock.setdefault(k, [])) for k in need}
         total = sum(len(v) for v in self.stock.values())
+        self._deliver_due_requests()
+        total = sum(len(v) for v in self.stock.values())
         if total >= total_need:
             self.stock_alarm = None
             return
-        unit = int(self.cfg.get("scenario", "patch", "stock_unit", default=100) or 100)
+        pc = self.cfg.get("scenario", "patch")
+        unit = int(pc.get("stock_unit", 100) or 100)
+        auto = bool(pc.get("auto_restock", True))
         short = total_need - total
         order = -(-short // unit) * unit
-        self.stock_alarm = {"t": self.sim_time, "need": total_need, "stock": total, "short": short, "order": order, "unit": unit}
+        prev = self.stock_alarm
+        self.stock_alarm = {"t": self.sim_time, "need": total_need, "stock": total, "short": short, "order": order, "unit": unit, "auto_restock": auto}
         self.counters["stock_alarms"] = self.counters.get("stock_alarms", 0) + 1
-        if not getattr(self, "_boot_fill", False):
-            self.log.add("patch", f"⚠ 재고 부족 알람: 패치 착용 {total_need:,}명 대비 미사용 재고 {total:,}개 ({short:,}개 부족) → {unit}개 단위로 {order:,}개 보충 필요")
+        if not getattr(self, "_boot_fill", False) and (auto or not prev or self.sim_time - prev.get("logged", 0) >= 3600):
+            self.stock_alarm["logged"] = self.sim_time
+            self.log.add("patch", f"⚠ 재고 부족 알람: 패치 착용 {total_need:,}명 대비 미사용 재고 {total:,}개 ({short:,}개 부족) → {unit}개 단위로 {order:,}개 보충 필요"
+                         + ("" if auto else " — 자동 입고 꺼짐 (재고 요청 필요)"))
+        elif prev and prev.get("logged"):
+            self.stock_alarm["logged"] = prev["logged"]
+        if not auto:
+            return
+        have = {k: len(self.stock.setdefault(k, [])) for k in need}
         alloc = self._alloc_stock(order, need, have)
         lot = self._new_lot()
         for k, n in alloc.items():
@@ -873,6 +887,101 @@ class World:
         self.log.add("patch", f"재고 패치 수동 입고 {count:,}개 ({by}) — 로트 {lot[0]}, 유효기간 {lot[1]} → " + ", ".join(f"{k} {v}" for k, v in sorted(spread.items(), key=lambda x: -x[1]))[:300]
                      + f" · 재고 {total:,} / 착용 환자 {need:,}")
         return {"ok": True, "received": count, "lot": lot[0], "expiry": lot[1], "by_ward": spread, "stock": total, "required": need}
+
+    # ------------------------------------------------------------------ 라우터 재고 요청 (납품일 지정, 2026-10-06)
+    def _alloc_by_need(self, qty: int) -> dict:
+        """병원 전체 요청: 보관함별 착용 환자 수에 비례해 나눈다 (최대 나머지).  착용 환자가 없으면 고르게."""
+        need = self.stock_need()
+        keys = list(need)
+        tot = sum(need.values())
+        w = {k: (need[k] / tot if tot else 1.0 / len(keys)) for k in keys}
+        base = {k: int(qty * w[k]) for k in keys}
+        rest = qty - sum(base.values())
+        for k in sorted(keys, key=lambda x: -(qty * w[x] - base[x]))[:rest]:
+            base[k] += 1
+        return base
+
+    def create_stock_request(self, b: dict) -> tuple[dict, bool]:
+        """POST /api/v1/emr/stock/requests.  반환 (기록, 새로 만들었는지).  같은 request_id 는 처음 기록 그대로."""
+        rid = str(b.get("request_id") or "").strip()
+        if not rid:
+            raise ValueError("request_id 가 없습니다")
+        if rid in self.stock_requests:
+            return self.stock_requests[rid], False
+        try:
+            qty = int(b.get("qty"))
+        except (TypeError, ValueError):
+            raise ValueError("요청 수량(qty)이 숫자가 아닙니다")
+        if qty <= 0 or qty > 100000:
+            raise ValueError("요청 수량은 1~100,000 개입니다")
+        ward = str(b.get("ward") or "")
+        if ward and ward not in self._stock_keys():
+            raise KeyError(ward)
+        try:
+            day = dt.date.fromisoformat(str(b.get("deliver_on") or ""))
+        except ValueError:
+            raise ValueError("납품일(deliver_on)은 YYYY-MM-DD 형식이어야 합니다")
+        today = dt.datetime.fromtimestamp(self.sim_time).date()
+        if day < today:
+            raise ValueError(f"납품일 {day.isoformat()} 이(가) 이미 지났습니다 (오늘 {today.isoformat()})")
+        if day.weekday() >= 5:
+            raise ValueError(f"납품일 {day.isoformat()} 은(는) 주말입니다 — 워킹데이만 납품합니다")
+        if (day - today).days > 366:
+            raise ValueError("납품일은 1년 안이어야 합니다")
+        _, wname = self._stock_location(ward) if ward else ("", "병원 전체")
+        r = {"request_id": rid, "hospital": b.get("hospital"), "ward": ward, "ward_name": wname, "qty": qty, "deliver_on": day.isoformat(),
+             "note": b.get("note"), "basis": b.get("basis"), "by": b.get("by"), "source": b.get("source") or "api", "status": "scheduled",
+             "created_at": self.sim_time, "requested_at": dt.datetime.fromtimestamp(self.sim_time).isoformat(timespec="seconds"),
+             "delivered_at": None, "lot": None, "by_ward": None}
+        r["message"] = f"{wname} 재고 {qty:,}개 — {day.isoformat()} {int(self.cfg.get('scenario', 'patch', 'stock_delivery_hour', default=10))}시 납품 예정"
+        self.stock_requests[rid] = r
+        self.db.upsert_stock_request(r)
+        self.counters["stock_requests"] = self.counters.get("stock_requests", 0) + 1
+        self.log.add("patch", f"재고 요청 접수 ({r['source']}{' · ' + str(r['by']) if r.get('by') else ''}): {r['message']}"
+                     + (f" — {r['note']}" if r.get("note") else "") + f" [{rid}]")
+        return r, True
+
+    def cancel_stock_request(self, rid: str, by: str = "") -> dict:
+        r = self.stock_requests.get(rid)
+        if r is None:
+            raise KeyError(rid)
+        if r["status"] == "delivered":
+            raise ValueError("이미 입고된 요청은 취소할 수 없습니다")
+        if r["status"] != "cancelled":
+            r.update(status="cancelled", cancelled_at=dt.datetime.fromtimestamp(self.sim_time).isoformat(timespec="seconds"), cancelled_by=by or None)
+            self.db.upsert_stock_request(r)
+            self.log.add("patch", f"재고 요청 취소: {r['ward_name']} {r['qty']:,}개 ({r['deliver_on']}) [{rid}]")
+        return r
+
+    def _deliver_due_requests(self) -> None:
+        """납품일 입고 시각이 된 요청을 입고한다 (보관함 지정 또는 착용 환자 수 비례 배분, 요청마다 로트 하나)."""
+        if not self.stock_requests:
+            return
+        now = dt.datetime.fromtimestamp(self.sim_time)
+        hour = int(self.cfg.get("scenario", "patch", "stock_delivery_hour", default=10) or 0)
+        for r in list(self.stock_requests.values()):
+            if r["status"] != "scheduled":
+                continue
+            due = dt.datetime.combine(dt.date.fromisoformat(r["deliver_on"]), dt.time(hour))
+            if now < due:
+                continue
+            alloc = {r["ward"]: r["qty"]} if r["ward"] else self._alloc_by_need(r["qty"])
+            lot = self._new_lot()
+            for k, n in alloc.items():
+                self._deliver_stock(k, n, "요청 납품", lot=lot, quiet=True)
+            spread = {self._stock_location(k)[1]: n for k, n in alloc.items() if n}
+            r.update(status="delivered", delivered_at=now.isoformat(timespec="seconds"), lot=lot[0], expiry=lot[1], by_ward=spread)
+            self.db.upsert_stock_request(r)
+            total = sum(len(v) for v in self.stock.values())
+            self.counters["stock_requested_delivered"] = self.counters.get("stock_requested_delivered", 0) + r["qty"]
+            self.log.add("patch", f"재고 요청 납품 입고 {r['qty']:,}개 → {r['ward_name']} (로트 {lot[0]}, 유효기간 {lot[1]}) · 재고 {total:,} [{r['request_id']}]")
+
+    def stock_requests_view(self, status: str = "", limit: int = 500) -> dict:
+        items = [r for r in self.stock_requests.values() if not status or r["status"] == status]
+        items.sort(key=lambda r: r.get("created_at") or 0, reverse=True)
+        out = [{k: v for k, v in r.items() if k != "created_at"} for r in items[:limit]]
+        return {"requests": out, "total": len(items), "scheduled_qty": sum(r["qty"] for r in items if r["status"] == "scheduled"),
+                "auto_restock": bool(self.cfg.get("scenario", "patch", "auto_restock", default=True))}
 
     def stock_view(self, ward: str = "", q: str = "", limit: int = 100, offset: int = 0) -> dict:
         """GET /api/v1/emr/patches?status=stock — 라우터 계약: {stock, patches:[{serial, patch_id, status, lot, expiry, location, ward, received_at}]}."""

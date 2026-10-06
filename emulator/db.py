@@ -35,6 +35,7 @@ CREATE INDEX IF NOT EXISTS ix_patches_patient ON patches(patient_id);
 CREATE INDEX IF NOT EXISTS ix_patches_status ON patches(status);
 CREATE TABLE IF NOT EXISTS patch_events (id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, serial TEXT, patient_id INTEGER, kind TEXT, detail TEXT);
 CREATE TABLE IF NOT EXISTS patch_stock (serial TEXT PRIMARY KEY, lot TEXT, expiry TEXT, location TEXT, ward TEXT, received_at REAL);
+CREATE TABLE IF NOT EXISTS stock_requests (request_id TEXT PRIMARY KEY, status TEXT, deliver_on TEXT, created_at REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS exams (id INTEGER PRIMARY KEY AUTOINCREMENT, admission_id INTEGER, patient_id INTEGER, type TEXT, room TEXT,
   scheduled_at REAL, duration_min INTEGER, patch_policy TEXT, done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, t REAL, kind TEXT, msg TEXT, patient_id INTEGER, gw INTEGER);
@@ -87,7 +88,7 @@ class DB:
 
     def reset(self) -> None:
         with self.lock:
-            for t in ("patients", "admissions", "patches", "patch_events", "patch_stock", "exams", "events", "runs", "gateways", "meta", "labels", "beat_counts"):
+            for t in ("patients", "admissions", "patches", "patch_events", "patch_stock", "stock_requests", "exams", "events", "runs", "gateways", "meta", "labels", "beat_counts"):
                 self.conn.execute(f"DELETE FROM {t}")
             self.conn.execute("VACUUM")
 
@@ -211,6 +212,16 @@ class DB:
                 q = ",".join("?" * len(part))
                 self.conn.execute(f"DELETE FROM patches WHERE status='stock' AND serial IN ({q})", part)
                 self.conn.execute(f"DELETE FROM patch_stock WHERE serial IN ({q})", part)
+
+    def upsert_stock_request(self, r: dict) -> None:
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO stock_requests VALUES (?,?,?,?,?)",
+                              (r["request_id"], r["status"], r["deliver_on"], r.get("created_at"), json.dumps(r, ensure_ascii=False)))
+
+    def load_stock_requests(self, limit: int = 2000) -> list[dict]:
+        with self.lock:
+            rows = self.conn.execute("SELECT data FROM stock_requests ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
+        return [json.loads(r["data"]) for r in rows][::-1]
 
     def load_stock(self) -> list[dict]:
         """재시작 뒤에도 보관함에 남아 있는(아직 발급 안 된) 재고 패치."""
