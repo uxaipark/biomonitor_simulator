@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS patches (
 CREATE INDEX IF NOT EXISTS ix_patches_patient ON patches(patient_id);
 CREATE INDEX IF NOT EXISTS ix_patches_status ON patches(status);
 CREATE TABLE IF NOT EXISTS patch_events (id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL, serial TEXT, patient_id INTEGER, kind TEXT, detail TEXT);
+CREATE TABLE IF NOT EXISTS patch_stock (serial TEXT PRIMARY KEY, lot TEXT, expiry TEXT, location TEXT, ward TEXT, received_at REAL);
 CREATE TABLE IF NOT EXISTS exams (id INTEGER PRIMARY KEY AUTOINCREMENT, admission_id INTEGER, patient_id INTEGER, type TEXT, room TEXT,
   scheduled_at REAL, duration_min INTEGER, patch_policy TEXT, done INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, t REAL, kind TEXT, msg TEXT, patient_id INTEGER, gw INTEGER);
@@ -83,7 +84,7 @@ class DB:
 
     def reset(self) -> None:
         with self.lock:
-            for t in ("patients", "admissions", "patches", "patch_events", "exams", "events", "runs", "gateways", "meta", "labels", "beat_counts"):
+            for t in ("patients", "admissions", "patches", "patch_events", "patch_stock", "exams", "events", "runs", "gateways", "meta", "labels", "beat_counts"):
                 self.conn.execute(f"DELETE FROM {t}")
             self.conn.execute("VACUUM")
 
@@ -189,6 +190,30 @@ class DB:
             self.conn.execute("INSERT OR REPLACE INTO patches VALUES (?,?,?,?,?,?,?,?,?,?)",
                               (e["serial"], e["patch_id"], e["patient_id"], e["patient_name"], e["status"], e["issued_at"], e["issued_reason"],
                                e["retired_at"], e["retired_reason"], e["battery_at_retire"]))
+
+    def upsert_stock(self, e: dict) -> None:
+        """병원 재고 패치의 입고 정보 (로트·유효기간·보관 위치·병동).  발급 뒤에도 출처 기록으로 남긴다."""
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO patch_stock VALUES (?,?,?,?,?,?)",
+                              (e["serial"], e.get("lot"), e.get("expiry"), e.get("location"), e.get("ward"), e.get("received_at")))
+
+    def load_stock(self) -> list[dict]:
+        """재시작 뒤에도 보관함에 남아 있는(아직 발급 안 된) 재고 패치."""
+        with self.lock:
+            rows = self.conn.execute("SELECT p.serial, p.patch_id, p.status, s.lot, s.expiry, s.location, s.ward, s.received_at "
+                                     "FROM patches p JOIN patch_stock s ON s.serial = p.serial WHERE p.status = 'stock' ORDER BY p.patch_id").fetchall()
+        return [dict(r) for r in rows]
+
+    def stock_info(self, serials: list[str]) -> dict:
+        if not serials:
+            return {}
+        out = {}
+        with self.lock:
+            for i in range(0, len(serials), 500):
+                part = serials[i:i + 500]
+                for r in self.conn.execute(f"SELECT * FROM patch_stock WHERE serial IN ({','.join('?' * len(part))})", part).fetchall():
+                    out[r["serial"]] = dict(r)
+        return out
 
     def add_patch_event(self, t: float, serial: str, pid: int, kind: str, detail: str) -> None:
         self._pending_pe.append((t, serial, pid, kind, detail))   # written with the next flush() (once a second), not one transaction each

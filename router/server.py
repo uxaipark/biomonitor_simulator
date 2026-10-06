@@ -217,6 +217,7 @@ class RouterServer:
 
     # ---------------------------------------------------------------- run
     async def serve(self) -> None:
+        self._loop = asyncio.get_running_loop()
         self._server = await asyncio.start_server(self._handle, self.host, self.port, backlog=4096, limit=1 << 20)
         self._event("system", f"listening on {self.host}:{self.port}")
         hk = asyncio.create_task(self._housekeeping())
@@ -228,5 +229,17 @@ class RouterServer:
             self.store.close()
 
     def stop(self) -> None:
-        if self._server:
-            self._server.close()
+        """다른 스레드에서 불려도 안전하게: 서버 닫기는 이벤트 루프 스레드에서 (직접 close() 하면 serve_forever 와 경쟁해 _waiters 가 None 인 채 터졌다)."""
+        if not self._server:
+            return
+        loop = getattr(self, "_loop", None)
+        if loop is not None and loop.is_running():
+            try:
+                asyncio.get_running_loop()
+                same = asyncio.get_running_loop() is loop
+            except RuntimeError:
+                same = False
+            if not same:
+                loop.call_soon_threadsafe(self._server.close)
+                return
+        self._server.close()

@@ -156,6 +156,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "patch": {
             "battery_days": 15.5,          # 패치 배터리 수명
             "max_wear_days": 14,           # 최대 착용 기간: 넘으면 새 번호 패치로 교체
+            "stock_unit": 100,             # 병원 재고(미사용 패치) 목표 = 패치 착용 환자 수.  모자라면 알람 후 이 단위로 자동 입고 — 라우터 환자 관리가 여기서 미사용 패치를 고른다
+            "stock_shelf_days": 540,       # 입고 시 유효기간 (일)
             "wear_ratio": 50,              # 입원 환자 중 패치 착용 비율 (%) — 미착용 환자는 송신·위치 추적이 없어 병실에 고정 (MCOT 는 항상 착용)
             "rx_enabled": True,            # 모니터링 처방(위중도에 따라 3~14일) 끝나면 모니터링 종료·패치 반납
             "battery_drain_enabled": True,
@@ -376,6 +378,8 @@ class Config:
         sc["gateway"]["fault_intensity"] = int(max(0, min(100, sc["gateway"]["fault_intensity"])))
         sc["patch"]["battery_days"] = float(max(0.01, min(30, sc["patch"]["battery_days"])))
         sc["patch"]["max_wear_days"] = float(max(0.0, min(30, sc["patch"].get("max_wear_days", 14))))
+        sc["patch"]["stock_unit"] = _num(sc["patch"].get("stock_unit"), 1, 10000, 100, True)
+        sc["patch"]["stock_shelf_days"] = _num(sc["patch"].get("stock_shelf_days"), 30, 3650, 540, True)
         for k, dflt in (("low_warn_hours", [4, 24]), ("swap_delay_hours", [1, 18])):        # 스칼라로 들어오면 lw[0] 에서 매초 TypeError
             v = sc["patch"].get(k, dflt)
             v = v if isinstance(v, (list, tuple)) and v else [v, v]

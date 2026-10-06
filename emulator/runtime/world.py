@@ -138,6 +138,9 @@ class World:
         self.admitted: dict[int, dict] = {}       # patient_id -> runtime record
         self.patches: dict[int, Patch] = {}       # row -> Patch
         self.patch_registry: dict[str, dict] = {}  # serial -> lifecycle record (never deleted)
+        self.stock: dict[str, list[str]] = {}       # 재고 보관 위치(병동 id 또는 "MCOT") -> 미사용 패치 serial (유효기간 빠른 순)
+        self.stock_lot_no = 0
+        self.stock_alarm: dict | None = None        # 마지막 재고 부족 알람 (자동 입고로 해소되면 None)
         self.free_rows: list[int] = []
         self.next_patch_serial = 1
         self.gw_state: list[dict] = []
@@ -398,7 +401,7 @@ class World:
             self.patch_registry = {}
             if kept:
                 # active patches + the most recent retired ones only (memory stays flat across restarts; older history lives in the DB)
-                for r in self.db.query("SELECT * FROM patches ORDER BY (status='active') DESC, patch_id DESC", limit=20000)["rows"]:
+                for r in self.db.query("SELECT * FROM patches ORDER BY (status IN ('active','stock')) DESC, patch_id DESC", limit=20000)["rows"]:
                     cols = ["serial", "patch_id", "patient_id", "patient_name", "status", "issued_at", "issued_reason", "retired_at", "retired_reason", "battery_at_retire"]
                     e = dict(zip(cols, r))
                     e["row"] = None
@@ -460,7 +463,9 @@ class World:
             self.truth.setup()
             self.log.add("system", f"월드 구성 완료: 병상 {self.hospital.bed_capacity}, 게이트웨이 {n_gw}, 프로필 {len(self.profiles)} ({time.time() - t0:.1f}s)")
             self.meta_dirty = True
+            self._init_stock()
             self._sync_population(initial=True)
+            self._step_stock(force=True)                    # 시작 직후 재고를 착용 환자 수 이상으로
 
     def apply_config(self) -> None:
         """Push transport/signal config into the control array (safe at runtime)."""
@@ -506,17 +511,24 @@ class World:
         self.meta_dirty = True
 
     # ------------------------------------------------------------------ helpers
-    def _new_patch(self, row: int, patient_id: int = 0, reason: str = "신규 발급") -> Patch:
-        """Issue a brand-new patch: serial/patch_id are monotonic and never reused (registry keeps every patch)."""
-        serial = f"BP-{self.next_patch_serial:06d}"
-        p = Patch(row, serial, 0x10000 + self.next_patch_serial)
-        self.next_patch_serial += 1
+    def _new_patch(self, row: int, patient_id: int = 0, reason: str = "신규 발급", stock_key: str | None = None, serial: str | None = None) -> Patch:
+        """Issue a brand-new patch: serial/patch_id are monotonic and never reused (registry keeps every patch).
+        stock_key 가 있으면 그 병동(또는 MCOT 센터) 보관함의 재고에서 유효기간이 빠른 것부터 꺼낸다 — 비어 있으면 긴급 입고.
+        serial 을 주면 그 재고 패치를 쓴다 (라우터 환자 관리에서 고른 미사용 패치)."""
+        ent = self._take_stock(stock_key, serial) if (stock_key or serial) else None
+        if ent is not None:
+            serial = ent["serial"]
+            p = Patch(row, serial, int(ent["patch_id"]))
+        else:
+            serial = f"BP-{self.next_patch_serial:06d}"
+            p = Patch(row, serial, 0x10000 + self.next_patch_serial)
+            self.next_patch_serial += 1
         lw = self.cfg.get("scenario", "patch", "low_warn_hours", default=[4, 24]) or [4, 24]
         p.low_h = float(self.rng.uniform(float(lw[0]), float(lw[-1])))     # 실제 패치: 배터리는 충분/부족 2단계 — 부족이면 하루 안에 꺼질 수 있다
         p.activated = self.sim_time
         p.patient_id = patient_id
         self.patches[row] = p
-        self.patch_registry[serial] = {"serial": serial, "patch_id": p.patch_id, "patient_id": patient_id,
+        self.patch_registry[serial] = {**(ent or {}), "serial": serial, "patch_id": p.patch_id, "patient_id": patient_id,
                                        "patient_name": self.by_id[patient_id]["name"] if patient_id in self.by_id else None,
                                        "status": "active", "issued_at": self.sim_time, "issued_reason": reason,
                                        "retired_at": None, "retired_reason": None, "battery_at_retire": None, "row": row}
@@ -557,7 +569,7 @@ class World:
         return {"inpatients": n, "worn": worn, "unworn": n - worn, "worn_pct": round(100.0 * worn / n, 1) if n else None,
                 "target_pct": self._wear_ratio(), "mcot": len(self.admitted) - n}
 
-    def attach_patch(self, pid: int, reason: str = "패치 착용") -> dict:
+    def attach_patch(self, pid: int, reason: str = "패치 착용", serial: str | None = None) -> dict:
         rec = self.admitted.get(pid)
         if rec is None:
             raise KeyError(pid)
@@ -565,7 +577,9 @@ class World:
             return {"ok": True, "changed": False, "patch": self.patches[rec["row"]].serial if rec["row"] in self.patches else None}
         row = rec["row"]
         prof = self.by_id[pid]
-        patch = self._new_patch(row, pid, reason)
+        if serial is not None and (self.patch_registry.get(serial) or {}).get("status") != "stock":
+            raise ValueError(f"패치 {serial} 은(는) 재고(미사용) 상태가 아닙니다")
+        patch = self._new_patch(row, pid, reason, stock_key=self._stock_key(rec), serial=serial)
         patch.new_until = self.sim_time + 30
         P = self.st.patch.arr
         P["patch_id"][row] = patch.patch_id
@@ -654,7 +668,158 @@ class World:
                 st = self.wear_stats()
                 self.log.add("patch", f"패치 착용 비율 {ratio:g}% 적용 — 입원 {st['inpatients']}명 중 착용 {st['worn']}명")
 
-    def patch_registry_view(self, status: str = "all", q: str = "", offset: int = 0, limit: int = 100, sort: str = "patch_id", direction: str = "desc") -> dict:
+    # ------------------------------------------------------------------ 병원 재고 패치 (2026-10-06, 라우터 환자 관리)
+    # 병동마다 처치실 보관함에 미사용 패치가 있고(MCOT 센터 포함), 새 패치는 그 보관함에서 유효기간이 빠른 것부터 꺼낸다.
+    # 재고 패치는 이미 serial·patch_id 가 정해져 있다(입고 때 발번).  재고가 stock_reorder_at 이하면 목표 수까지 새 로트로 입고된다.
+    def _stock_keys(self) -> list[str]:
+        return [w["id"] for w in self.hospital.wards] + ["MCOT"]
+
+    def _stock_key(self, rec: dict) -> str:
+        if rec.get("outpatient"):
+            return "MCOT"
+        w = rec.get("ward_idx", -1)
+        return self.hospital.wards[w]["id"] if 0 <= w < len(self.hospital.wards) else "MCOT"
+
+    def _stock_location(self, key: str) -> tuple[str, str]:
+        if key == "MCOT":
+            return "MCOT 센터 보관함", "원외 (MCOT)"
+        w = next((x for x in self.hospital.wards if x["id"] == key), None)
+        name = w["name"] if w else key
+        return f"{name} 처치실 보관함", name
+
+    def _init_stock(self) -> None:
+        """재시작: DB 에 남은 재고(보관함의 미사용 패치)를 되살리고, 목표 수까지 채운다."""
+        self.stock = {k: [] for k in self._stock_keys()}
+        for r in self.db.load_stock():
+            key = r["ward"] if r["ward"] in self.stock else "MCOT"
+            e = self.patch_registry.get(r["serial"]) or {}
+            e.update(serial=r["serial"], patch_id=int(r["patch_id"]), patient_id=0, patient_name=None, status="stock", issued_at=None, issued_reason=None,
+                     retired_at=None, retired_reason=None, battery_at_retire=None, row=None, lot=r["lot"], expiry=r["expiry"], location=r["location"],
+                     ward=key, received_at=r["received_at"])
+            self.patch_registry[r["serial"]] = e
+            self.stock[key].append(r["serial"])
+        for k in self.stock:
+            self.stock[k].sort(key=lambda sr: (self.patch_registry[sr].get("expiry") or "", sr))
+
+    def _new_lot(self) -> tuple[str, str]:
+        """입고 1 회 = 로트 1 개.  유효기간은 제조 후 경과가 로트마다 조금 다르다."""
+        pc = self.cfg.get("scenario", "patch")
+        self.stock_lot_no += 1
+        d = dt.datetime.fromtimestamp(self.sim_time)
+        shelf = int(pc.get("stock_shelf_days", 540) or 540)
+        return f"L{d:%y%m}-{self.stock_lot_no:04d}", (d + dt.timedelta(days=shelf - int(self.rng.integers(0, max(1, shelf // 6))))).date().isoformat()
+
+    def _deliver_stock(self, key: str, n: int, why: str = "자동 입고", lot: tuple[str, str] | None = None, quiet: bool = False) -> int:
+        if n <= 0:
+            return 0
+        lot, expiry = lot or self._new_lot()
+        loc, _ = self._stock_location(key)
+        lst = self.stock.setdefault(key, [])
+        for _ in range(n):
+            serial = f"BP-{self.next_patch_serial:06d}"
+            e = {"serial": serial, "patch_id": 0x10000 + self.next_patch_serial, "patient_id": 0, "patient_name": None, "status": "stock",
+                 "issued_at": None, "issued_reason": None, "retired_at": None, "retired_reason": None, "battery_at_retire": None, "row": None,
+                 "lot": lot, "expiry": expiry, "location": loc, "ward": key, "received_at": self.sim_time}
+            self.next_patch_serial += 1
+            self.patch_registry[serial] = e
+            self.db.upsert_patch(e)
+            self.db.upsert_stock(e)
+            lst.append(serial)
+        lst.sort(key=lambda sr: (self.patch_registry[sr].get("expiry") or "", sr))
+        self.counters["stock_received"] = self.counters.get("stock_received", 0) + n
+        if not quiet and not getattr(self, "_boot_fill", False):
+            self.log.add("patch", f"재고 패치 {why}: {loc} {n}개 (로트 {lot}, 유효기간 {expiry})")
+        return n
+
+    def _take_stock(self, key: str | None, serial: str | None = None) -> dict | None:
+        """보관함에서 패치 하나를 꺼낸다 (serial 지정이면 그것, 아니면 유효기간 빠른 것).  그 보관함이 비면 재고가 가장 많은
+        보관함에서 가져오고(병동 간 융통), 병원 전체가 비면 한 단위 긴급 입고."""
+        if serial is not None:
+            e = self.patch_registry.get(serial)
+            if not e or e.get("status") != "stock":
+                return None
+            lst = self.stock.get(e.get("ward"), [])
+            if serial in lst:
+                lst.remove(serial)
+            return e
+        if key is None:
+            return None
+        lst = self.stock.setdefault(key, [])
+        if not lst:
+            src = max(self.stock.values(), key=len) if self.stock else []
+            if src:
+                return self.patch_registry[src.pop(0)]
+            self._deliver_stock(key, int(self.cfg.get("scenario", "patch", "stock_unit", default=100) or 100), "긴급 입고")
+        return self.patch_registry[lst.pop(0)] if lst else None
+
+    def stock_need(self) -> dict:
+        """보관함별 목표 재고 = 그 병동(또는 MCOT)의 패치 착용 환자 수."""
+        need = {k: 0 for k in self._stock_keys()}
+        for r in list(self.admitted.values()):
+            if r.get("worn", True):
+                k = self._stock_key(r)
+                need[k] = need.get(k, 0) + 1
+        return need
+
+    def _step_stock(self, force: bool = False) -> None:
+        """1 분(시뮬)마다 재고 점검: 병원 전체 재고가 패치 착용 환자 수보다 적으면 알람을 내고 stock_unit(기본 100) 단위로 자동 입고한다.
+        입고분은 보관함별 부족분이 큰 곳부터 나눈다."""
+        if not force and self.sim_time - getattr(self, "_stock_t", 0.0) < 60:
+            return
+        self._stock_t = self.sim_time
+        need = self.stock_need()
+        total_need = sum(need.values())
+        have = {k: len(self.stock.setdefault(k, [])) for k in need}
+        total = sum(len(v) for v in self.stock.values())
+        if total >= total_need:
+            self.stock_alarm = None
+            return
+        unit = int(self.cfg.get("scenario", "patch", "stock_unit", default=100) or 100)
+        short = total_need - total
+        order = -(-short // unit) * unit
+        self.stock_alarm = {"t": self.sim_time, "need": total_need, "stock": total, "short": short, "order": order, "unit": unit}
+        self.counters["stock_alarms"] = self.counters.get("stock_alarms", 0) + 1
+        if not getattr(self, "_boot_fill", False):
+            self.log.add("patch", f"⚠ 재고 부족 알람: 패치 착용 {total_need:,}명 대비 미사용 재고 {total:,}개 ({short:,}개 부족) → {unit}개 단위로 {order:,}개 보충 필요")
+        alloc = {k: 0 for k in need}
+        left = order
+        while left > 0:                                         # 부족분이 큰 보관함부터 하나씩 (같으면 착용 환자가 많은 곳)
+            k = max(need, key=lambda x: (need[x] - have[x] - alloc[x], need[x]))
+            alloc[k] += 1
+            left -= 1
+        lot = self._new_lot()
+        for k, n in alloc.items():
+            self._deliver_stock(k, n, "자동 입고", lot=lot, quiet=True)
+        if not getattr(self, "_boot_fill", False):
+            spread = ", ".join(f"{self._stock_location(k)[1]} {n}" for k, n in sorted(alloc.items(), key=lambda x: -x[1]) if n)
+            self.log.add("patch", f"재고 패치 자동 입고 {order:,}개 (로트 {lot[0]}, 유효기간 {lot[1]}) → {len([n for n in alloc.values() if n])}개 보관함: {spread[:300]}")
+
+    def stock_view(self, ward: str = "", q: str = "", limit: int = 100, offset: int = 0) -> dict:
+        """GET /api/v1/emr/patches?status=stock — 라우터 계약: {stock, patches:[{serial, patch_id, status, lot, expiry, location, ward, received_at}]}."""
+        fmt = lambda t: dt.datetime.fromtimestamp(t).isoformat(timespec="seconds") if t else None
+        keys = [ward] if ward else list(self.stock)
+        items = []
+        for k in keys:
+            for sr in list(self.stock.get(k, [])):
+                e = self.patch_registry.get(sr)
+                if e and e.get("status") == "stock":
+                    items.append(e)
+        if q:
+            ql = q.lower()
+            items = [e for e in items if ql in e["serial"].lower() or ql == str(e["patch_id"]) or ql in (e.get("lot") or "").lower() or ql in (e.get("location") or "").lower()]
+        by_ward = collections.Counter(e["ward"] for e in items)
+        out = []
+        for e in items[offset: offset + limit]:
+            _, wname = self._stock_location(e["ward"])
+            out.append({"serial": e["serial"], "patch_id": e["patch_id"], "status": "stock", "lot": e.get("lot"), "expiry": e.get("expiry"),
+                        "location": e.get("location"), "ward": e["ward"], "ward_name": wname, "received_at": fmt(e.get("received_at"))})
+        need = self.stock_need()
+        return {"stock": len(items), "total": len(items), "by_ward": dict(by_ward), "required": sum(need.values()) if not ward else need.get(ward, 0),
+                "required_by_ward": need, "alarm": getattr(self, "stock_alarm", None), "next_offset": offset + limit if offset + limit < len(items) else None, "patches": out}
+
+    def patch_registry_view(self, status: str = "all", q: str = "", offset: int = 0, limit: int = 100, sort: str = "patch_id", direction: str = "desc", ward: str = "") -> dict:
+        if status == "stock":
+            return self.stock_view(ward, q, limit, offset)
         items = list(self.patch_registry.values())
         if status in ("active", "retired"):
             items = [e for e in items if e["status"] == status]
@@ -676,7 +841,8 @@ class World:
             out.append({**e, "issued_at": fmt(e["issued_at"]), "retired_at": fmt(e["retired_at"]),
                         "battery": round(live.battery, 1) if live and live.serial == e["serial"] else e["battery_at_retire"]})
         n_active = sum(1 for e in self.patch_registry.values() if e["status"] == "active")
-        return {"total": len(items), "active": n_active, "retired": len(self.patch_registry) - n_active, "next_serial": f"BP-{self.next_patch_serial:06d}", "patches": out}
+        n_stock = sum(len(v) for v in self.stock.values())
+        return {"total": len(items), "active": n_active, "stock": n_stock, "retired": len(self.patch_registry) - n_active - n_stock, "next_serial": f"BP-{self.next_patch_serial:06d}", "patches": out}
 
     def _variant_for(self, rhythm: str, age: int) -> int:
         vs = self.rhythm_variants.get(rhythm) or self.rhythm_variants.get("nsr") or [0]
@@ -815,7 +981,7 @@ class World:
             return None
         row = self.free_rows.pop()
         worn = outpatient or self.rng.random() * 100.0 < self._wear_ratio()        # 입원 환자 중 일부만 패치 착용 (MCOT 는 항상)
-        patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착") if worn else None
+        patch = None                                                                 # 병상(병동)이 정해진 뒤 그 병동 보관함에서 꺼낸다
         rec = {"id": prof["id"], "row": row, "outpatient": outpatient, "admit_time": self.sim_time, "bed_idx": -1, "room_idx": -1,
                "ward_idx": -1, "doctor": None, "nurse": None, "exams": [], "location": -1, "activity": "still", "activity_until": 0.0,
                "trip": [], "trip_step_until": 0.0, "posture": "supine", "episode_until": 0.0, "base_variant": int(self.st.patch["variant"][row]),
@@ -859,6 +1025,8 @@ class World:
             rec["exams"] = make_exam_schedule(self.rng, prof, self.sim_time, available=set(h.exam_rooms.keys()))
             self._book_exams(rec, rec["exams"])                  # no two patients get the same station at the same time
             prof["status"] = "admitted"
+        if worn:
+            patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착", stock_key=self._stock_key(rec))
         prof["admission"] = {"time": dt.datetime.fromtimestamp(self.sim_time).isoformat(timespec="seconds"),
                              "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None,
                              "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
@@ -1524,7 +1692,7 @@ class World:
         old = self.patches.get(row)
         prof = self.by_id[rec["id"]]
         self._retire_patch(old, reason)
-        new = self._new_patch(row, prof["id"], f"교체: {reason}")
+        new = self._new_patch(row, prof["id"], f"교체: {reason}", stock_key=self._stock_key(rec))
         new.replaced = (old.replaced + 1) if old else 0
         new.new_until = self.sim_time + 30
         P = self.st.patch.arr
@@ -2302,6 +2470,7 @@ class World:
             T = self._tstep
             T("population", self._sync_population)
             T("wear_ratio", self._step_wear_ratio)
+            T("stock", self._step_stock)
             T("adt", self._step_adt, dt_s)
             t0 = time.perf_counter()
             for pid, rec in list(self.admitted.items()):

@@ -59,3 +59,48 @@ w.db.close(); w.st.close(); w.st.unlink()
     assert out["st100"]["unworn"] == 0 and out["st0"]["worn"] == 0, out
     for k in ("inv50", "inv0"):
         assert out[k] == [], (k, out[k])
+
+
+def test_hospital_stock_patches():
+    """병원 재고: 입고(로트·유효기간), 발급은 그 병동 보관함에서, 지정 serial 착용, 착용 환자 수보다 적으면 100 단위 자동 입고, 재고 목록 API 형식."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 5, 'profile_count': 500, 'bed_capacity': 80, 'active_patients': 60, 'outpatient_count': 4, 'sim_speed': 30.0, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}},
+            'scenario': {{'patch': {{'wear_ratio': 50, 'stock_unit': 100}}}}}})
+s = cfg.snapshot()['signals']
+w = World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+w.running = True
+for i in range(30):
+    w.step(1.0)
+v = w.patch_registry_view('stock', limit=1000)
+from_stock = all(w.patch_registry[p.serial].get('lot') for p in w.patches.values())
+ward_ok = all(w.patch_registry[p.serial]['ward'] in w.stock for p in w.patches.values())     # 보관함이 비면 다른 병동 보관함에서 융통
+pid = next(p for p, r in w.admitted.items() if not r['outpatient'] and not r.get('worn', True))
+key = w._stock_key(w.admitted[pid]); pick = w.stock[key][-1]
+r = w.attach_patch(pid, 'test', serial=pick)
+picked_ok = r['patch'] == pick and w.patch_registry[pick]['status'] == 'active' and pick not in w.stock[key]
+try:
+    w.attach_patch(next(p for p, r in w.admitted.items() if not r['outpatient'] and not r.get('worn', True)), 'test', serial=pick); dup = 'accepted'
+except ValueError:
+    dup = 'rejected'
+w.step(61.0)
+min_left = sum(len(x) for x in w.stock.values()) - sum(w.stock_need().values())
+print(json.dumps({{'stock': v['stock'], 'keys': len(w.stock), 'sample': v['patches'][0], 'from_stock': from_stock, 'ward_ok': ward_ok, 'picked': picked_ok, 'dup': dup,
+                  'min_left': min_left, 'inv': w.invariants(fresh=True)['violations']}}, default=str))
+w.db.close(); w.st.close(); w.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    smp = out["sample"]
+    assert out["stock"] > 0 and set(("serial", "patch_id", "status", "lot", "expiry", "location", "ward", "received_at")) <= set(smp) and smp["status"] == "stock", out
+    assert out["from_stock"] and out["ward_ok"] and out["picked"] and out["dup"] == "rejected", out
+    assert out["min_left"] >= 0 and out["inv"] == [], out          # 재고 >= 패치 착용 환자 수
