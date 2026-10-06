@@ -218,7 +218,7 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                                                "_note": "병원 게이트웨이만. 같은 switch/ap 를 공유하는 GW 는 함께 끊긴다"},
                                        "uplink": "LTE|5G (MCOT 모바일 게이트웨이만)",
                                        "bundle_ms": bundle_ms, "tick": "frame tick counter", "channels_enabled": ["keys"],
-                                       "patches": [{"patch_id": "u32", "serial": "BP-xxxxxx", "patient_id": "u32", "mrn": "", "fw": "",
+                                       "patches": [{"patch_id": "u32", "serial": "8-digit number (= patch_id), e.g. 10132809", "patient_id": "u32", "mrn": "", "fw": "",
                                                     "home": {"sido": "서울", "sigungu": "강남구", "dong": "역삼동", "label": "서울 강남구 역삼동"},
                                                     "resp_source": "capacitive|edr|spo2", "spo2_source": "fingertip|ring|wrist_ptt",
                                                     "channels": [{"id": 1, "key": "ecg", "fs": 250, "dtype": "int16", "scale": 0.001, "unit": "mV"}]}]}},

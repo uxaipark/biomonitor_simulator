@@ -152,7 +152,7 @@ def grade_sets() -> dict:
     return {g: {"label": lab, "patches": n, "rhythms": [{"key": r, "label": RHYTHMS[r]["label"], "cls": RHYTHMS[r]["cls"], "n": k} for r, k in PLANS[g].items()]}
             for g, (lab, n) in GRADES.items()}
 TRUTH_PATIENT_BASE = 900001            # 레코드 patient_id (실제 환자번호와 겹치지 않음)
-TRUTH_PATCH_BASE = 0xF0000             # 레코드 patch_id (BP 패치는 0x10000 + 시리얼)
+TRUTH_PATCH_BASE = 99_000_001          # 레코드 patch_id = 시리얼, 숫자 8 자리 (환자 패치는 10,000,000 + 일련; 2026-10-06 이전 0xF0000)
 EVENTS = {"artifact": (10.0, 60.0), "noise": (10.0, 40.0), "lead_off": (10.0, 40.0)}
 ACT_MOVING = ["walking", "turning", "sitting_up", "exercise"]
 
@@ -429,7 +429,7 @@ class TruthBench:
             gw = int(P["gw"][row])
             if gw < 0:
                 continue
-            out.setdefault(gw, []).append({"patch_id": int(P["patch_id"][row]), "serial": f"TR-{k + 1:04d}", "patient_id": int(P["patient_id"][row]), "profile_id": None,
+            out.setdefault(gw, []).append({"patch_id": int(P["patch_id"][row]), "serial": f"{int(P['patch_id'][row]):08d}", "patient_id": int(P["patient_id"][row]), "profile_id": None,
                                            "mrn": f"TRUTH-{k + 1:02d}", "benchmark": True, "home": None, "fw": "truth-patch 1.0", "resp_source": None, "spo2_source": None,
                                            "devices": [{"key": "ecg_patch", "label": "ECG 패치 (정답 벤치마크)"}], "channels": chans,
                                            "pacemaker": ({"type": "benchmark", "mode": self.state[row]["rhythm"], "lead": None, "detect_pct": 85} if P["paced"][row] else None)})
@@ -441,7 +441,7 @@ class TruthBench:
         items = []
         for k, row in enumerate(self.rows[: self.n]):
             st = self.state.get(row, {})
-            items.append({"k": k + 1, "serial": f"TR-{k + 1:04d}", "patch_id": int(P["patch_id"][row]), "patient_id": int(P["patient_id"][row]), "gateway": int(P["gw"][row]),
+            items.append({"k": k + 1, "serial": f"{int(P['patch_id'][row]):08d}", "patch_id": int(P["patch_id"][row]), "patient_id": int(P["patient_id"][row]), "gateway": int(P["gw"][row]),
                           "rhythm": st.get("rhythm"), "rhythm_label": RHYTHMS.get(st.get("rhythm", ""), {}).get("label"), "variant": int(P["variant"][row]),
                           "paced": bool(P["paced"][row]), "event": st.get("event"), "event_left_s": max(0.0, st.get("until", 0.0) - self.w.sim_time) if st.get("event") else 0.0,
                           "next_hop_s": max(0.0, st.get("hop_at", 0.0) - self.w.sim_time), "lead_off": bool(P["lead_off"][row]), "art_gain": round(float(P["art_gain"][row]), 2),

@@ -163,3 +163,41 @@ w.db.close(); w.st.close(); w.st.unlink()
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["after"] == out["before"] + 200 and out["r1"]["received"] == 100 and sum(out["r1"]["by_ward"].values()) == 100, out
     assert out["ward_add"] == 100 and out["lot_differs"] and out["errs"] == ["rejected"] * 3, out
+
+
+def test_patch_numbers_are_8_digits_and_old_stock_renumbered():
+    """패치 번호 = 숫자 8 자리(시리얼 = patch_id).  옛 번호(BP-xxxxxx) 미사용 재고는 재시작 때 같은 수량을 새 번호로 다시 입고."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 5, 'profile_count': 500, 'bed_capacity': 80, 'active_patients': 60, 'outpatient_count': 4, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}}}})
+s = cfg.snapshot()['signals']
+mk = lambda: World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+w = mk()
+ok1 = all(e['serial'].isdigit() and len(e['serial']) == 8 and int(e['serial']) == e['patch_id'] for e in w.patch_registry.values())
+truth = [int(x) for x in w.st.patch.arr['patch_id'][w.truth.rows]]
+n_stock = sum(len(v) for v in w.stock.values())
+# 옛 번호 재고를 흉내: 하나를 BP- 로 바꿔 DB 에 넣는다
+k = w._stock_keys()[0]
+w.db.upsert_patch({{'serial': 'BP-000777', 'patch_id': 0x10000 + 777, 'patient_id': 0, 'patient_name': None, 'status': 'stock', 'issued_at': None, 'issued_reason': None,
+                   'retired_at': None, 'retired_reason': None, 'battery_at_retire': None}})
+w.db.upsert_stock({{'serial': 'BP-000777', 'lot': 'L0', 'expiry': '2028-01-01', 'location': 'x', 'ward': k, 'received_at': 0}})
+w.db.close(); w.st.close(); w.st.unlink()
+w2 = mk()
+stock2 = [sr for v in w2.stock.values() for sr in v]
+ok2 = 'BP-000777' not in w2.patch_registry and all(sr.isdigit() and len(sr) == 8 for sr in stock2)
+print(json.dumps({{'ok1': ok1, 'truth': [min(truth), max(truth)], 'ok2': ok2, 'n1': n_stock, 'n2': len(stock2)}}))
+w2.db.close(); w2.st.close(); w2.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["ok1"] and out["ok2"] and 99000001 <= out["truth"][0] and out["truth"][1] <= 99999999, out
+    assert out["n2"] >= out["n1"], out

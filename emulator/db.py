@@ -56,6 +56,9 @@ CREATE INDEX IF NOT EXISTS ix_beat_counts ON beat_counts(patch_id, t_ms);
 """
 
 
+
+PATCH_NO_BASE = 10_000_000          # 패치 번호 = 숫자 8 자리 (시리얼 문자열 = patch_id 와 같은 숫자)
+
 class DB:
     def __init__(self, path: Path = DB_PATH):
         self.path = path
@@ -127,7 +130,10 @@ class DB:
     def max_patch_serial(self) -> int:
         with self.lock:
             r = self.conn.execute("SELECT MAX(patch_id) AS m FROM patches").fetchone()
-        return int(r["m"] - 0x10000) if r and r["m"] else 0
+        if not r or not r["m"]:
+            return 0
+        m = int(r["m"])
+        return m - PATCH_NO_BASE if m >= PATCH_NO_BASE else m - 0x10000      # 2026-10-06 이전: 0x10000 + n, 이후: 8 자리 10,000,000 + n
 
     # ------------------------------------------------------------- patients
     def upsert_patients(self, profiles: list[dict]) -> None:
@@ -196,6 +202,15 @@ class DB:
         with self.lock:
             self.conn.execute("INSERT OR REPLACE INTO patch_stock VALUES (?,?,?,?,?,?)",
                               (e["serial"], e.get("lot"), e.get("expiry"), e.get("location"), e.get("ward"), e.get("received_at")))
+
+    def delete_stock(self, serials: list[str]) -> None:
+        """전송된 적 없는 재고 패치를 지운다 (번호 체계 변경 때 새 번호로 다시 입고하기 위해)."""
+        with self.lock:
+            for i in range(0, len(serials), 500):
+                part = serials[i:i + 500]
+                q = ",".join("?" * len(part))
+                self.conn.execute(f"DELETE FROM patches WHERE status='stock' AND serial IN ({q})", part)
+                self.conn.execute(f"DELETE FROM patch_stock WHERE serial IN ({q})", part)
 
     def load_stock(self) -> list[dict]:
         """재시작 뒤에도 보관함에 남아 있는(아직 발급 안 된) 재고 패치."""

@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from ..config import Config, channel_mask, CHANNELS, CHANNEL_BY_KEY, RESP_SOURCES, SPO2_SOURCES, BASE_DIR
-from ..db import DB
+from ..db import PATCH_NO_BASE, DB
 from ..hospital.hospital import Hospital, EXAM_ROOMS, NO_BLE_ROOMS, GW_TYPE_ID
 from ..hospital import layout as hospital_layout
 from ..hospital.profiles import EXAM_TYPES, make_profiles, make_exam_schedule
@@ -424,7 +424,7 @@ class World:
             else:
                 self.next_gw_no = len(gws) + 1
                 self.db.upsert_gateways([self._gw_db_row(g, "초기 설치") for g in gws])
-            self.log.add("system", f"DB {'이력 유지' if kept else '새로 생성'}: {self.db.path.name} (다음 패치 번호 BP-{self.next_patch_serial:06d}, 다음 게이트웨이 번호 {self.next_gw_no})")
+            self.log.add("system", f"DB {'이력 유지' if kept else '새로 생성'}: {self.db.path.name} (다음 패치 번호 {self._fmt_patch_no(self.next_patch_serial)}, 다음 게이트웨이 번호 {self.next_gw_no})")
             self.free_rows = list(range(n_patch - TRUTH_MAX - 1, -1, -1))
             self.pool_cursor = 0
             self.gw_state = []
@@ -521,9 +521,8 @@ class World:
             serial = ent["serial"]
             p = Patch(row, serial, int(ent["patch_id"]))
         else:
-            serial = f"BP-{self.next_patch_serial:06d}"
-            p = Patch(row, serial, 0x10000 + self.next_patch_serial)
-            self.next_patch_serial += 1
+            serial, pid_ = self._next_patch_no()
+            p = Patch(row, serial, pid_)
         lw = self.cfg.get("scenario", "patch", "low_warn_hours", default=[4, 24]) or [4, 24]
         p.low_h = float(self.rng.uniform(float(lw[0]), float(lw[-1])))     # 실제 패치: 배터리는 충분/부족 2단계 — 부족이면 하루 안에 꺼질 수 있다
         p.activated = self.sim_time
@@ -696,6 +695,16 @@ class World:
     # ------------------------------------------------------------------ 병원 재고 패치 (2026-10-06, 라우터 환자 관리)
     # 병동마다 처치실 보관함에 미사용 패치가 있고(MCOT 센터 포함), 새 패치는 그 보관함에서 유효기간이 빠른 것부터 꺼낸다.
     # 재고 패치는 이미 serial·patch_id 가 정해져 있다(입고 때 발번).  재고가 stock_reorder_at 이하면 목표 수까지 새 로트로 입고된다.
+    @staticmethod
+    def _fmt_patch_no(n: int) -> str:
+        return f"{PATCH_NO_BASE + int(n):08d}"
+
+    def _next_patch_no(self) -> tuple[str, int]:
+        """새 패치 번호: 숫자 8 자리 (10,000,000 + 일련).  시리얼 문자열과 레코드 patch_id 가 같은 숫자다.  재사용 없음."""
+        n = self.next_patch_serial
+        self.next_patch_serial += 1
+        return self._fmt_patch_no(n), PATCH_NO_BASE + n
+
     def _stock_keys(self) -> list[str]:
         return [w["id"] for w in self.hospital.wards] + ["MCOT"]
 
@@ -715,7 +724,16 @@ class World:
     def _init_stock(self) -> None:
         """재시작: DB 에 남은 재고(보관함의 미사용 패치)를 되살리고, 목표 수까지 채운다."""
         self.stock = {k: [] for k in self._stock_keys()}
-        for r in self.db.load_stock():
+        rows = self.db.load_stock()
+        old = [r for r in rows if not str(r["serial"]).isdigit() or len(str(r["serial"])) != 8]
+        if old:                                                     # 옛 번호(BP-xxxxxx) 재고: 전송된 적이 없으니 같은 수량을 8 자리 번호로 다시 입고
+            self.db.delete_stock([r["serial"] for r in old])
+            for r in old:
+                self.patch_registry.pop(r["serial"], None)
+            regroup = collections.Counter(r["ward"] if r["ward"] in self.stock else "MCOT" for r in old)
+            rows = [r for r in rows if r not in old]
+            self._renumber_stock = dict(regroup)
+        for r in rows:
             key = r["ward"] if r["ward"] in self.stock else "MCOT"
             e = self.patch_registry.get(r["serial"]) or {}
             e.update(serial=r["serial"], patch_id=int(r["patch_id"]), patient_id=0, patient_name=None, status="stock", issued_at=None, issued_reason=None,
@@ -725,6 +743,13 @@ class World:
             self.stock[key].append(r["serial"])
         for k in self.stock:
             self.stock[k].sort(key=lambda sr: (self.patch_registry[sr].get("expiry") or "", sr))
+        rn = getattr(self, "_renumber_stock", None)
+        if rn:
+            lot = self._new_lot()
+            for k, n in rn.items():
+                self._deliver_stock(k, n, "번호 체계 변경(8자리) 재입고", lot=lot, quiet=True)
+            self.log.add("patch", f"패치 번호를 숫자 8자리로 변경: 미사용 재고 {sum(rn.values()):,}개를 새 번호로 다시 매김 (로트 {lot[0]})")
+            self._renumber_stock = None
 
     def _new_lot(self) -> tuple[str, str]:
         """입고 1 회 = 로트 1 개.  유효기간은 제조 후 경과가 로트마다 조금 다르다."""
@@ -741,11 +766,10 @@ class World:
         loc, _ = self._stock_location(key)
         lst = self.stock.setdefault(key, [])
         for _ in range(n):
-            serial = f"BP-{self.next_patch_serial:06d}"
-            e = {"serial": serial, "patch_id": 0x10000 + self.next_patch_serial, "patient_id": 0, "patient_name": None, "status": "stock",
+            serial, pid_ = self._next_patch_no()
+            e = {"serial": serial, "patch_id": pid_, "patient_id": 0, "patient_name": None, "status": "stock",
                  "issued_at": None, "issued_reason": None, "retired_at": None, "retired_reason": None, "battery_at_retire": None, "row": None,
                  "lot": lot, "expiry": expiry, "location": loc, "ward": key, "received_at": self.sim_time}
-            self.next_patch_serial += 1
             self.patch_registry[serial] = e
             self.db.upsert_patch(e)
             self.db.upsert_stock(e)
@@ -898,7 +922,7 @@ class World:
                         "battery": round(live.battery, 1) if live and live.serial == e["serial"] else e["battery_at_retire"]})
         n_active = sum(1 for e in self.patch_registry.values() if e["status"] == "active")
         n_stock = sum(len(v) for v in self.stock.values())
-        return {"total": len(items), "active": n_active, "stock": n_stock, "retired": len(self.patch_registry) - n_active - n_stock, "next_serial": f"BP-{self.next_patch_serial:06d}", "patches": out}
+        return {"total": len(items), "active": n_active, "stock": n_stock, "retired": len(self.patch_registry) - n_active - n_stock, "next_serial": self._fmt_patch_no(self.next_patch_serial), "patches": out}
 
     def _variant_for(self, rhythm: str, age: int) -> int:
         vs = self.rhythm_variants.get(rhythm) or self.rhythm_variants.get("nsr") or [0]

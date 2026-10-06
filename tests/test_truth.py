@@ -23,11 +23,11 @@ def test_truth_block_roundtrip():
 def test_truth_record_passes_the_stream_checker():
     ecg = np.zeros(50, dtype="<i2").tobytes()
     import struct
-    rec_ecg = struct.pack("<IIIBBbB", 0xF0000, 900001, 7, 0, 100, -55, 1) + struct.pack("<BBH", CH_ECG, P.DTYPE_CODE["int16"], 50) + ecg
+    rec_ecg = struct.pack("<IIIBBbB", 99000001, 900001, 7, 0, 100, -55, 1) + struct.pack("<BBH", CH_ECG, P.DTYPE_CODE["int16"], 50) + ecg
     blob = P.truth_block(P.RHYTHM_CODE_ID["pvc"], 255, 0, 0, 0, 72, [(10, 0), (40, 2)], [])
-    rec_tr = P.truth_record(0xF0000, 900001, 7, 0, 100, -55, blob)
+    rec_tr = P.truth_record(99000001, 900001, 7, 0, 100, -55, blob)
     recs = list(decode_records(memoryview(rec_ecg + rec_tr), 0, 2))
-    assert len(recs) == 2 and recs[1][0] == 0xF0000 and recs[1][2] == 7 and CH_TRUTH in recs[1][6]
+    assert len(recs) == 2 and recs[1][0] == 99000001 and recs[1][2] == 7 and CH_TRUTH in recs[1][6]
     dt, n, data = recs[1][6][CH_TRUTH]
     assert dt == P.DTYPE_CODE["uint8"] and n == len(blob) and P.parse_truth(bytes(data))["beats"][1]["kind"] == "V"
     fr = P.frame(1778, 1, 1_790_000_000_000, 2, rec_ecg + rec_tr, 0)

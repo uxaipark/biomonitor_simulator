@@ -583,7 +583,7 @@ def samples(sim, root: str) -> list[dict]:
         hr = {"resourceType": "Observation", "status": "final", "category": cat, "code": {"coding": [{"system": "http://loinc.org", "code": "8867-4", "display": "Heart rate"}], "text": "Heart rate"},
               "subject": subj, **({("context" if F.stu3(sim) else "encounter"): enc_ref} if enc_ref else {}), "effectiveDateTime": eff,
               "valueQuantity": {"value": 82, "unit": "beats/minute", "system": "http://unitsofmeasure.org", "code": "/min"},
-              "device": {"display": "BIOSIM-PATCH BP-000123"}}
+              "device": {"display": "BIOSIM-PATCH 10000123"}}
         hr["meta"] = {"profile": [F.profiles(sim)["hr"]]}
         temp_q = {"value": c_to_f(36.9), "unit": "degF", "system": "http://unitsofmeasure.org", "code": "[degF]"} if us else {"value": 36.9, "unit": "Cel", "system": "http://unitsofmeasure.org", "code": "Cel"}
         bundle = {"resourceType": "Bundle", "type": "transaction", "entry": [
@@ -614,7 +614,7 @@ def samples(sim, root: str) -> list[dict]:
                     "headers": {**auth_hdr, "Content-Type": "application/x-www-form-urlencoded"},
                     "body": urlencode({"departmentid": "1", "source": "DEVICE", "vitals": json.dumps(vit)})})
     elif s["protocol"] == "kr-json":
-        body = {"HOSP_CD": s["hosp_code"], "PT_NO": p["ids"]["mrn"], "ADM_NO": e["visit"] if e else "", "MSR_DTM": sim.local(now - 60).strftime("%Y%m%d%H%M%S"), "DEVICE_ID": "BP-000123",
+        body = {"HOSP_CD": s["hosp_code"], "PT_NO": p["ids"]["mrn"], "ADM_NO": e["visit"] if e else "", "MSR_DTM": sim.local(now - 60).strftime("%Y%m%d%H%M%S"), "DEVICE_ID": "10000123",
                 "VS_LIST": [{"VS_CD": "PR", "VS_VAL": "82"}, {"VS_CD": "RR", "VS_VAL": "18"}, {"VS_CD": "SPO2", "VS_VAL": "97"}, {"VS_CD": "BT", "VS_VAL": "36.8"}]}
         out.append({"title": "바이탈 등록 (세로형 VS_LIST)", "method": "POST", "url": f"{base}/api/v1/vs", "headers": {**auth_hdr, "Content-Type": "application/json; charset=UTF-8"},
                     "body": json.dumps(body, ensure_ascii=False, indent=2)})
@@ -623,7 +623,7 @@ def samples(sim, root: str) -> list[dict]:
         xml = (f'<?xml version="1.0" encoding="EUC-KR"?>\n<IF_MSG><HEADER><IF_ID>EMR_VS_0002</IF_ID><SND_SYS_CD>{a["snd_sys"]}</SND_SYS_CD><RCV_SYS_CD>OCS</RCV_SYS_CD>'
                f'<TRX_ID>BM{int(now)}</TRX_ID><TRX_DTM>{lt.strftime("%Y%m%d%H%M%S")}</TRX_DTM></HEADER><BODY><DATA_LIST><DATA><PTNT_NO>{p["ids"]["mrn"]}</PTNT_NO>'
                f'<VS_DT>{lt.strftime("%Y%m%d")}</VS_DT><VS_TM>{lt.strftime("%H%M")}</VS_TM><BT>36.8</BT><PR>82</PR><RR>18</RR><BP_H></BP_H><BP_L></BP_L><SPO2>97</SPO2>'
-               f'<EQUIP_ID>BP-000123</EQUIP_ID></DATA></DATA_LIST></BODY></IF_MSG>')
+               f'<EQUIP_ID>10000123</EQUIP_ID></DATA></DATA_LIST></BODY></IF_MSG>')
         out.append({"title": "바이탈 등록 전문 EMR_VS_0002 (가로형, EUC-KR 로 인코딩해서 전송)", "method": "POST", "url": f"{base}/if",
                     "headers": {"Content-Type": "text/xml; charset=EUC-KR"}, "body": xml, "encoding": "cp949"})
     elif s["protocol"] == "cda":

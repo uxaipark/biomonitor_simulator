@@ -643,7 +643,7 @@ def labels(kind: str = "", patient_id: int | None = None, since_ms: int = 0, unt
     gateway, net_device, power, mcot_device, surge (쉼표로 여러 개).  format=csv 는 내려받기용."""
     from .runtime.labelcodes import normalize
     w = E().world
-    pids = [int(x) for x in str(patch_id).replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()] if patch_id else None   # patch_id=983040,65600 (쉼표)
+    pids = [int(x) for x in str(patch_id).replace(" ", "").split(",") if x.strip().lstrip("-").isdigit()] if patch_id else None   # patch_id=99000001,10132809 (쉼표)
     w.db.flush()
     rows = w.db.labels(kind, patient_id, since_ms, until_ms, limit, offset, patch_ids=pids)
     if include_open:
