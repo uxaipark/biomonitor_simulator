@@ -175,7 +175,7 @@ w.running = True
 vals = set()
 for i in range(int(36 * 3600 / 60)):
     w.step(1.0)
-    vals |= set(int(w.st.patch.arr['battery'][r['row']]) for r in w.admitted.values())
+    vals |= set(int(w.st.patch.arr['battery'][r['row']]) for r in w.admitted.values() if r.get('worn', True))
 print(json.dumps({{'vals': sorted(vals), 'dead': int(w.counters['patch_battery_dead']), 'replaced': int(w.counters['patch_replaced'])}}))
 w.db.close(); w.st.close(); w.st.unlink()
 """

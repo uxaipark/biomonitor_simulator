@@ -109,7 +109,7 @@ def discovery():
         "endpoints": {
             "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "truth_beats": "GET /api/v1/truth/beats?patch_id=&since_ms=&until_ms=&pace= (정답 R-peak 절대 시각)", "truth_score": "POST /api/v1/truth/score {detections:{patch_id:[ts_ms..]}, tolerance_ms:150} → QRS 검출 Se/PPV/F1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
-                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}",
+                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
                     "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds (x·y 중심, angle 머리 방향 도, bed_size_m 0.9 x 2.0)", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
@@ -371,6 +371,17 @@ async def identities_generate(body: dict | None = None):
             return w.generate_identities(cs)
     r = await asyncio.to_thread(run)
     return {"generated": r, **w.identity_status()}
+
+
+@app.get("/api/v1/debug/step")
+def debug_step(reset: int = 0):
+    """월드 1 Hz 단계별 소요 시간 (ms): ema · 최대 · 최근 최대(감쇠) · 호출 수.  ?reset=1 로 초기화."""
+    w = E().world
+    d = getattr(w, "step_prof", {})
+    out = {k: {"ema_ms": round(v[0], 2), "max_ms": round(v[1], 1), "recent_max_ms": round(v[2], 1), "n": v[3]} for k, v in sorted(d.items(), key=lambda kv: -kv[1][2])}
+    if reset:
+        w.step_prof = {}
+    return {"steps": out, "world_step_ms": round(E().world_step_ms, 1) if hasattr(E(), "world_step_ms") else None}
 
 
 @app.get("/api/v1/debug/memory")
@@ -1232,7 +1243,7 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = 0, limit: 
     patch_id=: 그 패치를 쓰는(썼던) 환자 한 명 — 퇴원·교체된 패치도 레지스트리로 찾는다 (기저 리듬 rhythm 포함)."""
     w = E().world
     if patch_id is not None:
-        live = next((r for r in w.list_admitted() if r.get("patch_id") == patch_id), None)
+        live = next((r for r in w.list_admitted() if patch_id and r.get("patch_id") == patch_id), None)    # 0 = 미착용 환자 행 → 매칭하지 않음
         if live:
             return {"total": 1, "patients": [{**live, "patch_status": "active"}], "next_offset": None}
         ent = next((e for e in w.patch_registry.values() if e.get("patch_id") == patch_id), None)
@@ -1377,6 +1388,34 @@ def emr_set_devices(pid: int, body: dict):
         raise HTTPException(404, "patient not found")
     devs = w.set_devices(pid, list(body.get("devices", [])))
     return {"patient_id": pid, "devices": devs}
+
+
+@app.get("/api/v1/patch/wear")
+def patch_wear_stats():
+    """입원 환자 패치 착용 현황: inpatients·worn·unworn·worn_pct·target_pct(scenario.patch.wear_ratio)·mcot(항상 착용)."""
+    w = E().world
+    with w.lock:
+        return w.wear_stats()
+
+
+@app.post("/api/v1/emr/patients/{pid}/patch")
+def emr_patch_wear(pid: int, body: dict):
+    """{action: attach|detach, reason}: 재원 환자에게 새 패치를 붙이거나(새 serial·patch_id, NEW_PATCH + META) 뗀다(반납, 송신·위치 추적 중지, 병상 고정)."""
+    w = E().world
+    act = str(body.get("action", "")).lower()
+    if act not in ("attach", "detach"):
+        raise HTTPException(400, "action must be attach or detach")
+    with w.lock:
+        try:
+            if act == "attach":
+                r = w.attach_patch(pid, str(body.get("reason") or "수동 착용"))
+            else:
+                r = w.detach_patch(pid, str(body.get("reason") or "수동 제거"))
+        except KeyError:
+            raise HTTPException(404, "admitted patient not found")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        return {**r, "patient_id": pid, "wear": w.wear_stats()}
 
 
 @app.post("/api/v1/control/devices/apply")

@@ -226,6 +226,13 @@ class LoopBank:
             has = all(f"r{i}" in z.files for i in range(self.ecg.shape[0]))       # 2026-09-29 이전 은행에는 R-peak 주석이 없다 → 재생성 필요
             self.rpeaks = [z[f"r{i}"] for i in range(self.ecg.shape[0])] if has else None
             self.rkinds = [z[f"k{i}"] for i in range(self.ecg.shape[0])] if has else None
+        if self.rpeaks is not None:                     # 2026-10-06 이전 은행: 루프 끝 박동이 0 으로 감겨 맨 뒤에 있는 변형이 있다 → 정렬
+            for i, r in enumerate(self.rpeaks):
+                if r.size > 1 and np.any(r[1:] < r[:-1]):
+                    o = np.argsort(r, kind="stable"); self.rpeaks[i], self.rkinds[i] = r[o], self.rkinds[i][o]
+        for i, r in enumerate(self.pace):
+            if r.size > 1 and np.any(r[1:] < r[:-1]):
+                o = np.argsort(r, kind="stable"); self.pace[i], self.pace_type[i] = r[o], self.pace_type[i][o]
         self.accel = np.load(self.dir / "bank_accel.npy", mmap_mode="r")
         self.art = np.load(self.dir / "bank_art.npy", mmap_mode="r")
         self.level = np.load(self.dir / "bank_level.npy")

@@ -8,6 +8,8 @@ tests/test_world_scenarios.py 가 가속 시뮬레이션 뒤에 돌린다.
 from __future__ import annotations
 
 import collections
+
+import numpy as np
 import time
 
 
@@ -70,18 +72,24 @@ def check(w) -> dict:
     # 4. 패치: 입원 행마다 활성 패치, 시리얼 중복 없음, 레지스트리 상태 일치
     serials = collections.Counter(p.serial for p in w.patches.values())
     add("patch_serial_duplicate", [s for s, n in serials.items() if n > 1])
-    no_patch = [(pid, rec["row"]) for pid, rec in admitted if rec["row"] not in w.patches]
+    no_patch = [(pid, rec["row"]) for pid, rec in admitted if rec.get("worn", True) and rec["row"] not in w.patches]   # 미착용 환자(wear_ratio)는 패치가 없는 게 정상
     add("admitted_without_patch", no_patch)
-    orphan = [row for row in w.patches if row not in {rec["row"] for _, rec in admitted}]
+    admitted_rows = {rec["row"] for _, rec in admitted}                 # 한 번만 만든다 (예전엔 행마다 다시 만들어 60 초마다 1.7 초 걸렸다)
+    orphan = [row for row in w.patches if row not in admitted_rows]
     add("patch_without_patient", orphan, "입원 기록이 없는 행에 활성 패치")
     reg_bad = [p.serial for p in w.patches.values() if w.patch_registry.get(p.serial, {}).get("status") != "active"]
     add("patch_registry_status_mismatch", reg_bad)
     # 5. 처방·공유 배열
     add("admitted_without_prescription", [pid for pid, rec in admitted if not rec.get("rx")])
     P = w.st.patch.arr
-    inactive = [(pid, rec["row"]) for pid, rec in admitted if int(P["active"][rec["row"]]) != 1]
+    inactive = [(pid, rec["row"]) for pid, rec in admitted if rec.get("worn", True) and int(P["active"][rec["row"]]) != 1]
+    add("unworn_with_patch", [(pid, rec["row"]) for pid, rec in admitted if not rec.get("worn", True) and (rec["row"] in w.patches or int(P["active"][rec["row"]]) == 1 or rec["gw"] >= 0)],
+        "미착용 환자에게 패치·송신·게이트웨이 연결이 남음")
+    add("unworn_off_bed", [pid for pid, rec in admitted if not rec.get("worn", True) and rec["room_idx"] >= 0 and rec["location"] != rec["room_idx"]],
+        "미착용 환자가 병실 밖에 있음 (위치를 모르므로 병상 고정이어야 함)")
     add("admitted_row_inactive", inactive, "입원 환자의 공유 배열 active 가 0")
-    ghost = [int(r) for r in range(len(P)) if int(P["active"][r]) == 1 and r not in {rec["row"] for _, rec in admitted} and r not in truth_rows]
+    act_rows = np.flatnonzero(P["active"] == 1)
+    ghost = [int(r) for r in act_rows if int(r) not in admitted_rows and int(r) not in truth_rows]
     add("active_row_without_patient", ghost)
     # 6. 정답 라벨: 열린 구간은 재원 환자·존재하는 게이트웨이만
     real = getattr(w, "real", None)

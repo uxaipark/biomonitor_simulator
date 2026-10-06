@@ -534,6 +534,126 @@ class World:
             self.db.upsert_patch(e)
             self.db.add_patch_event(self.sim_time, patch.serial, patch.patient_id, "retired", reason)
 
+    # ------------------------------------------------------------------ 패치 착용 비율 (2026-10-06)
+    # 입원 환자 모두가 패치를 붙이는 것은 아니다.  미착용 환자는 EMR 에는 재원으로 남지만 신호를 보내지 않고, BLE 위치도 없으니
+    # 동선을 알 수 없다 → 자기 병상에 고정한다.  scenario.patch.wear_ratio(%)는 새 입원의 착용 확률이자, 값이 바뀌면 맞춰 갈 목표다.
+    # 라우터 환자 관리(패치 등록·반납)는 attach_patch / detach_patch 를 쓴다.
+    def _wear_ratio(self) -> float:
+        try:
+            v = float(self.cfg.get("scenario", "patch", "wear_ratio", default=50))
+        except (TypeError, ValueError):
+            return 50.0
+        return 50.0 if v != v else max(0.0, min(100.0, v))
+
+    def _drop_unissued(self, row: int, patch: "Patch | None") -> None:
+        """입원이 자리 부족으로 무산될 때 막 발급한 패치를 되돌린다."""
+        if patch is not None:
+            self.patches.pop(row, None)
+
+    def wear_stats(self) -> dict:
+        ins = [r for r in list(self.admitted.values()) if not r["outpatient"]]
+        worn = sum(1 for r in ins if r.get("worn", True))
+        n = len(ins)
+        return {"inpatients": n, "worn": worn, "unworn": n - worn, "worn_pct": round(100.0 * worn / n, 1) if n else None,
+                "target_pct": self._wear_ratio(), "mcot": len(self.admitted) - n}
+
+    def attach_patch(self, pid: int, reason: str = "패치 착용") -> dict:
+        rec = self.admitted.get(pid)
+        if rec is None:
+            raise KeyError(pid)
+        if rec.get("worn", True):
+            return {"ok": True, "changed": False, "patch": self.patches[rec["row"]].serial if rec["row"] in self.patches else None}
+        row = rec["row"]
+        prof = self.by_id[pid]
+        patch = self._new_patch(row, pid, reason)
+        patch.new_until = self.sim_time + 30
+        P = self.st.patch.arr
+        P["patch_id"][row] = patch.patch_id
+        P["battery"][row] = 100
+        P["lead_off"][row] = 0
+        P["flags"][row] = (int(P["flags"][row]) & ~FLAG_LEAD_OFF) | FLAG_NEW_PATCH
+        P["attach_tick"][row] = self._tick_now() if self.running else 0
+        rec["worn"] = True
+        rec["location"] = rec["room_idx"]
+        rec["activity_until"] = 0.0
+        prof["admission"]["patch"] = patch.serial
+        prof["admission"]["patch_id"] = patch.patch_id
+        self._relink(rec, force=True)
+        P["active"][row] = 1
+        self.meta_dirty = True
+        self.counters["patch_attached"] = self.counters.get("patch_attached", 0) + 1
+        self.log.add("patch", f"{prof['name']} 패치 착용 {patch.serial} ({reason})", patient_id=pid)
+        return {"ok": True, "changed": True, "patch": patch.serial, "patch_id": patch.patch_id}
+
+    def detach_patch(self, pid: int, reason: str = "패치 제거") -> dict:
+        rec = self.admitted.get(pid)
+        if rec is None:
+            raise KeyError(pid)
+        if rec["outpatient"]:
+            raise ValueError("원외 MCOT 환자는 패치를 떼면 모니터링 종료(퇴원)입니다")
+        if not rec.get("worn", True):
+            return {"ok": True, "changed": False}
+        row = rec["row"]
+        prof = self.by_id[pid]
+        patch = self.patches.pop(row, None)
+        self._retire_patch(patch, reason)
+        self._unlink(rec)
+        P = self.st.patch.arr
+        P["active"][row] = 0
+        P["patch_id"][row] = 0
+        P["lead_off"][row] = 0
+        P["battery"][row] = 0
+        P["flags"][row] = int(P["flags"][row]) & ~(FLAG_LEAD_OFF | FLAG_NEW_PATCH | FLAG_LOW_BATT)
+        rec["worn"] = False
+        if rec.get("exam_room"):                       # 이동 중이었으면 _next_trip_step 의 마무리와 같게 정리
+            self.exam_load[rec["exam_room"]] = max(0, self.exam_load[rec["exam_room"]] - 1)
+            rec["exam_room"] = None
+        rec["trip"] = []
+        rec["trip_plan"] = []
+        rec["trip_step_until"] = 0.0
+        rec["stage_label"] = ""
+        rec["mri_pending"] = False
+        rec["patch_removed_until"] = 0.0
+        rec["shadow"] = False
+        rec["note"] = ""
+        rec["activity"], rec["activity_until"] = "still", 0.0
+        if rec["room_idx"] >= 0:
+            rec["location"] = rec["room_idx"]
+        prof["admission"]["patch"] = None
+        prof["admission"]["patch_id"] = None
+        self.meta_dirty = True
+        self.counters["patch_detached"] = self.counters.get("patch_detached", 0) + 1
+        self.log.add("patch", f"{prof['name']} 패치 {patch.serial if patch else '-'} 제거 ({reason}) — 위치 추적 없음, 병상 고정", patient_id=pid)
+        return {"ok": True, "changed": True, "patch": patch.serial if patch else None}
+
+    def _step_wear_ratio(self) -> None:
+        """착용 비율 설정이 바뀌면(시작 직후 포함) 목표 비율에 맞춰 무작위 환자에게 붙이거나 뗀다 (한 번에 최대 300명)."""
+        ratio = self._wear_ratio()
+        if getattr(self, "_wear_applied", None) == ratio:
+            return
+        ins = [(pid, r) for pid, r in list(self.admitted.items()) if not r["outpatient"]]
+        if not ins:
+            self._wear_applied = ratio
+            return
+        target = int(round(ratio / 100.0 * len(ins)))
+        worn = [pid for pid, r in ins if r.get("worn", True)]
+        unworn = [pid for pid, r in ins if not r.get("worn", True)]
+        diff = target - len(worn)
+        budget = 300
+        if diff > 0:
+            pick = self.rng.permutation(unworn)[: min(diff, budget)] if unworn else []
+            for pid in pick:
+                self.attach_patch(int(pid), "착용 비율 조정")
+        elif diff < 0:
+            pick = self.rng.permutation(worn)[: min(-diff, budget)] if worn else []
+            for pid in pick:
+                self.detach_patch(int(pid), "착용 비율 조정")
+        if abs(diff) <= budget:
+            self._wear_applied = ratio
+            if diff:
+                st = self.wear_stats()
+                self.log.add("patch", f"패치 착용 비율 {ratio:g}% 적용 — 입원 {st['inpatients']}명 중 착용 {st['worn']}명")
+
     def patch_registry_view(self, status: str = "all", q: str = "", offset: int = 0, limit: int = 100, sort: str = "patch_id", direction: str = "desc") -> dict:
         items = list(self.patch_registry.values())
         if status in ("active", "retired"):
@@ -584,7 +704,7 @@ class World:
         P = self.st.patch.arr
         P["active"][row] = 0
         P["gw"][row] = -1
-        P["patch_id"][row] = patch.patch_id
+        P["patch_id"][row] = patch.patch_id if patch is not None else 0
         P["patient_id"][row] = prof["id"]
         v = self._variant_for(prof["rhythm"], prof["age"])
         P["variant"][row] = v
@@ -599,7 +719,7 @@ class World:
         P["posture"][row] = POSTURE_ID["supine"]
         P["lead_off"][row] = 0
         P["spo2_off"][row] = 0
-        P["battery"][row] = int(patch.battery)
+        P["battery"][row] = int(patch.battery) if patch is not None else 0
         P["rssi"][row] = -60
         P["temp_var"][row] = self._slow_var(TEMP_PROFILES, prof["temp_profile"])
         P["gluc_var"][row] = self._slow_var(GLUCOSE_PROFILES, prof["glucose_profile"])
@@ -694,19 +814,20 @@ class World:
         if prof is None or not self.free_rows or (prof.get("overseas") and not outpatient):
             return None
         row = self.free_rows.pop()
-        patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착")
+        worn = outpatient or self.rng.random() * 100.0 < self._wear_ratio()        # 입원 환자 중 일부만 패치 착용 (MCOT 는 항상)
+        patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착") if worn else None
         rec = {"id": prof["id"], "row": row, "outpatient": outpatient, "admit_time": self.sim_time, "bed_idx": -1, "room_idx": -1,
                "ward_idx": -1, "doctor": None, "nurse": None, "exams": [], "location": -1, "activity": "still", "activity_until": 0.0,
                "trip": [], "trip_step_until": 0.0, "posture": "supine", "episode_until": 0.0, "base_variant": int(self.st.patch["variant"][row]),
                "gw": -1, "mobile_gw": -1, "home_state": "home", "next_rssi": 0.0, "last_move": self.sim_time, "sleeping": False,
                "shadow": False, "note": "", "next_hop": self.sim_time + self.rng.uniform(480, 1500), "next_slow_hop": self.sim_time + self.rng.uniform(1800, 5400),
-               "gain0": 1.0}
+               "gain0": 1.0, "worn": worn}
         if outpatient:
             used = {r["mobile_gw"] for r in list(self.admitted.values()) if r["outpatient"]}
             free = [g["idx"] for g in h.gateways if g["type"] == "mobile" and g["idx"] not in used]
             if not free:
                 self.free_rows.append(row)
-                del self.patches[row]
+                self._drop_unissued(row, patch)
                 return None
             rec["mobile_gw"] = free[0]
             self.st.gw["active"][free[0]] = 1
@@ -727,7 +848,7 @@ class World:
                     break
             if bidx < 0:
                 self.free_rows.append(row)
-                del self.patches[row]
+                self._drop_unissued(row, patch)
                 return None
             bed = h.beds[bidx]
             bed["patient_id"] = prof["id"]
@@ -743,7 +864,7 @@ class World:
                              "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
                              "ward": h.wards[rec["ward_idx"]]["id"] if rec["ward_idx"] >= 0 else None,
                              "ward_name": h.wards[rec["ward_idx"]]["name"] if rec["ward_idx"] >= 0 else "원외 (MCOT)",
-                             "doctor": rec["doctor"], "nurse": rec["nurse"], "patch": patch.serial, "patch_id": patch.patch_id,
+                             "doctor": rec["doctor"], "nurse": rec["nurse"], "patch": patch.serial if patch else None, "patch_id": patch.patch_id if patch else None,
                              "exams": rec["exams"], "mode": "mcot" if outpatient else "inpatient"}
         dcfg = self.cfg.get("scenario", "devices", default={}) or {}
         prof["devices"] = assign_devices(self.rng, prof, outpatient, dcfg.get("policy", "auto"), dcfg.get("spo2_mix"))
@@ -759,8 +880,11 @@ class World:
         rec["base_variant"] = int(self.st.patch["variant"][row])      # after the variant is assigned (episode revert target)
         rec["gain0"] = float(self.st.patch["gain"][row])
         self.admitted[prof["id"]] = rec
-        self._relink(rec, force=True)
-        self.st.patch["active"][row] = 1
+        if worn:
+            self._relink(rec, force=True)
+            self.st.patch["active"][row] = 1
+        else:
+            self.counters["unworn_admissions"] = self.counters.get("unworn_admissions", 0) + 1
         self.counters["admissions"] += 1
         self.meta_dirty = True
         return rec
@@ -832,6 +956,11 @@ class World:
 
     def _relink(self, rec: dict, force: bool = False) -> None:
         """Connect the patch to the best reachable gateway with free capacity."""
+        if not rec.get("worn", True):                                      # 패치 미착용: 연결할 패치가 없다
+            if rec["gw"] >= 0:
+                self._unlink(rec)
+                self.meta_dirty = True
+            return
         h = self.hospital
         G = self.st.gw.arr
         row = rec["row"]
@@ -908,6 +1037,10 @@ class World:
             P["hr_scale"][row] = base * rec["hr_act"]
 
     def _start_trip(self, rec: dict, steps: list, note: str) -> None:
+        if not rec.get("worn", True):                 # 패치 미착용: 동선을 알 수 없다 → 이동을 만들지 않고 자기 병실에 고정
+            if rec["room_idx"] >= 0:
+                rec["location"] = rec["room_idx"]
+            return
         """steps: (room_idx or 'shadow'/'mri', duration_s, activity, art_gain[, label])"""
         steps = [tuple(st) + (self._stage_label(st),) if len(st) == 4 else tuple(st) for st in steps]
         rec["trip"] = list(steps)
@@ -1159,7 +1292,7 @@ class World:
             for k, book in self.exam_book.items():
                 if book and book[0][1] < now - 86400:
                     self.exam_book[k] = [b for b in book if b[1] >= now - 86400]
-        inpat = [rec for rec in list(self.admitted.values()) if not rec["outpatient"]]
+        inpat = [rec for rec in list(self.admitted.values()) if not rec["outpatient"] and rec.get("worn", True)]   # 미착용 환자는 동선을 모른다 → 이동 비율은 착용 환자 기준
         self.exam_load = collections.Counter(rec["exam_room"] for rec in inpat if rec.get("exam_room") and (rec["trip"] or rec["trip_step_until"] > now))
         on_exam = sum(1 for rec in inpat if rec["trip"] or rec["trip_step_until"] > now)      # every trip kind counts toward the moving share
         target = int(round(ratio * len(inpat)))
@@ -1213,6 +1346,8 @@ class World:
             self._plan_exam_trip(rec, exam)
 
     def _step_inpatient(self, rec: dict, art_cfg: dict, intensity: float) -> None:
+        if not rec.get("worn", True):                 # 패치 미착용: 위치를 모른다 → 병상에 고정, 활동·이동·검사 이동 없음
+            return
         h = self.hospital
         prof = self.by_id[rec["id"]]
         now = self.sim_time
@@ -1304,9 +1439,10 @@ class World:
         if getattr(self, "_boot_fill", False):
             elapsed = float(self.rng.uniform(0, 0.95)) * rx["days"] * 86400.0
             start -= elapsed
-            patch.activated = start
-            bd = float(self.cfg.get("scenario", "patch", "battery_days"))
-            patch.battery = max(1.0, 100.0 - 100.0 * elapsed / (bd * 86400.0))
+            if patch is not None:
+                patch.activated = start
+                bd = max(0.01, float(self.cfg.get("scenario", "patch", "battery_days")))
+                patch.battery = max(1.0, 100.0 - 100.0 * elapsed / (bd * 86400.0))
         rx.update(start=start, end=start + rx["days"] * 86400.0, extended_days=0)
         rec["rx"] = rx
         prof["admission"]["monitoring"] = self._rx_view(rx)
@@ -1382,6 +1518,8 @@ class World:
         return label
 
     def _replace_patch(self, rec: dict, reason: str) -> None:
+        if not rec.get("worn", True):                 # 미착용 환자는 교체할 패치가 없다
+            return
         row = rec["row"]
         old = self.patches.get(row)
         prof = self.by_id[rec["id"]]
@@ -1640,15 +1778,24 @@ class World:
     def _step_modulation(self) -> None:
         """Every 10 s (sim): refresh circadian + drift factors, slow amplitude drift, and rotate loop
         variants (variant hopping) so that no patient ever replays the same hour."""
-        if self.sim_time - getattr(self, "_mod_last", 0.0) < 10.0:
+        # 시간 분산 (2026-10-06): 예전엔 10 초마다 전원을 한 번에 돌려 그 초의 월드 계산이 튀었다.  환자를 10 묶음(pid % 10)으로 나눠
+        # 시뮬 1 초마다 한 묶음씩 — 환자마다 갱신 주기는 그대로 10 시뮬초, 배속이 높으면 한 스텝에 여러 묶음.
+        el = self.sim_time - getattr(self, "_mod_last", 0.0)
+        due = min(10, int(el))
+        if due <= 0:
             return
-        self._mod_last = self.sim_time
+        self._mod_last = self.sim_time if due >= 10 else self._mod_last + due
+        b0 = getattr(self, "_mod_bucket", 0)
+        buckets = {(b0 + i) % 10 for i in range(due)}
+        self._mod_bucket = (b0 + due) % 10
         now = self.sim_time
         hop = bool(self.cfg.get("scenario", "variant_hopping", default=True)) and bool(self.rhythm_variants)
         P = self.st.patch.arr
         tick = self._tick_now()
         per = self.bank.index.get("slow_per_profile", 24) if self.bank.loaded else 24
         for pid, rec in list(self.admitted.items()):
+            if pid % 10 not in buckets:
+                continue
             prof = self.by_id[pid]
             st = trend_model.state(pid, prof, now)
             row = rec["row"]
@@ -2152,8 +2299,11 @@ class World:
             sc = self.cfg.get("scenario")
             ac = sc["artifacts"]
             intensity = ac["intensity"] / 100.0 if ac["enabled"] else 0.0
-            self._sync_population()
-            self._step_adt(dt_s)
+            T = self._tstep
+            T("population", self._sync_population)
+            T("wear_ratio", self._step_wear_ratio)
+            T("adt", self._step_adt, dt_s)
+            t0 = time.perf_counter()
             for pid, rec in list(self.admitted.items()):
                 if pid not in self.admitted:
                     continue
@@ -2161,33 +2311,58 @@ class World:
                     self._step_outpatient(rec, ac, intensity)
                 else:
                     self._step_inpatient(rec, ac, intensity)
-            self._step_exam_quota(sc)
-            self._step_patches(dt_s)
+            self._tnote("patients", t0)
+            T("exam_quota", self._step_exam_quota, sc)
+            T("patches", self._step_patches, dt_s)
             if getattr(self, "truth", None):
-                self.truth.step(dt_s)                         # 정답 전용 패치: 리듬 교체·아티팩트·잡음·리드오프
-            self._step_prescriptions()
-            self._step_modulation()
-            self._step_beat_counts()                                        # 1 분마다 환자별 박동 정답 집계 (AAMI N/S/V/F/Q)
-            self._step_episodes(dt_s)
-            self._step_gateways(dt_s)
-            self.real.step(dt_s)                                           # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)
-            self.rsig.step()                                               # 실제 시그널 송출 슬롯 (파일 재생 · 부정맥 순환)
-            self.ft.step()                                                 # 현장 테스트 이벤트 만료 → 정상 복귀
-            self._step_drills()
-            self._step_script()
+                T("truthbench", self.truth.step, dt_s)                 # 정답 전용 패치: 리듬 교체·아티팩트·잡음·리드오프
+            T("prescriptions", self._step_prescriptions)
+            T("modulation", self._step_modulation)
+            T("beat_counts", self._step_beat_counts)                   # 1 분마다 환자별 박동 정답 집계 (AAMI N/S/V/F/Q)
+            T("episodes", self._step_episodes, dt_s)
+            T("gateways", self._step_gateways, dt_s)
+            T("realism", self.real.step, dt_s)                         # 망·전원·임상·라벨 (게이트웨이 단계 뒤: 여기서 정한 상태가 우선)
+            T("realsig", self.rsig.step)                               # 실제 시그널 송출 슬롯 (파일 재생 · 부정맥 순환)
+            T("fieldtest", self.ft.step)                               # 현장 테스트 이벤트 만료 → 정상 복귀
+            T("drills", self._step_drills)
+            T("script", self._step_script)
             # periodic relink (gateway recovery / capacity / rssi jitter): 1/5 of patients per second
+            t0 = time.perf_counter()
             G = self.st.gw.arr
             k = int(self.sim_time) % 5
             for pid, rec in list(self.admitted.items()):
                 if pid % 5 == k or (rec["gw"] >= 0 and G["status"][rec["gw"]] == 2) or (rec["gw"] < 0):
                     self._relink(rec)
-            self.write_meta()
-            self._step_invariants()
-            self._step_autotune(real_dt)
+            self._tnote("relink", t0)
+            T("write_meta", self.write_meta)
+            T("invariants", self._step_invariants)
+            T("autotune", self._step_autotune, real_dt)
+            t0 = time.perf_counter()
             if self.log.pending:
                 self.db.queue_events(self.log.pending)
                 self.log.pending = []
             self.db.flush()
+            self._tnote("db", t0)
+
+    # ------------------------------------------------------------------ 월드 단계별 소요 시간 (CPU 최적화 측정용, GET /api/v1/debug/step)
+    def _tstep(self, name: str, fn, *a):
+        t0 = time.perf_counter()
+        try:
+            return fn(*a)
+        finally:
+            self._tnote(name, t0)
+
+    def _tnote(self, name: str, t0: float) -> None:
+        ms = (time.perf_counter() - t0) * 1000.0
+        d = self.__dict__.setdefault("step_prof", {})
+        e = d.get(name)
+        if e is None:
+            d[name] = [ms, ms, ms, 1]                                         # ema, max, 최근 max(감쇠), 호출 수
+        else:
+            e[0] = e[0] * 0.95 + ms * 0.05
+            e[1] = max(e[1], ms)
+            e[2] = max(e[2] * 0.995, ms)
+            e[3] += 1
 
     # ------------------------------------------------------------------ 불변식 감시 (60 시뮬초마다)
     INVARIANT_EVERY_S = 60.0
@@ -2304,7 +2479,7 @@ class World:
                               "shadow": rec["shadow"] or rec["home_state"] == "shadow",
                               "gateway": gw["id"] if gw else None, "gateway_idx": rec["gw"], "rssi": int(P["rssi"]), "battery": int(P["battery"]), **self._batt_view(rec["row"]),
                               "lead_off": bool(P["lead_off"]), "spo2_off": bool(P["spo2_off"]), "flags": int(P["flags"]),
-                              "patch": patch.serial if patch else None, "patch_id": int(P["patch_id"]), "variant": int(P["variant"]),
+                              "patch": patch.serial if patch else None, "patch_id": int(P["patch_id"]), "patch_worn": bool(rec.get("worn", True)), "variant": int(P["variant"]),
                               "rhythm_now": self._variant_rhythm(int(P["variant"])), "episode": bool(rec["episode_until"]),
                               "doctor": h.staff_by_id.get(rec["doctor"]) if rec["doctor"] else None,
                               "nurse": h.staff_by_id.get(rec["nurse"]) if rec["nurse"] else None,
@@ -2378,7 +2553,7 @@ class World:
                         "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else "MCOT", "ward": prof["admission"]["ward_name"],
                         "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "activity": rec["activity"], "note": rec["note"],
                         "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]), **self._batt_view(row),
-                        "patch": self.patches[row].serial if row in self.patches else None, "row": row, "outpatient": rec["outpatient"],
+                        "patch": self.patches[row].serial if row in self.patches else None, "patch_worn": bool(rec.get("worn", True)), "row": row, "outpatient": rec["outpatient"],
                         "overseas": bool(prof.get("overseas")), "abroad": (h.gateways[rec["mobile_gw"]].get("abroad") if rec["outpatient"] and rec["mobile_gw"] >= 0 else None),
                         **self.identity_fields(prof),
                         "episode": bool(rec["episode_until"]), **self._rx_row(rec)})
@@ -2787,10 +2962,14 @@ class World:
                         return f"admitted {p['name']}"
                     return "no bed/profile"
                 ids = [k for k, r in list(self.admitted.items()) if not r["outpatient"]] or list(self.admitted.keys())
+                if what in ("lead_off", "episode", "exam", "replace_patch", "vfib"):         # 신호·패치가 있어야 보이는 이벤트: 착용 환자만
+                    ids = [k for k in ids if self.admitted[k].get("worn", True)] or [k for k, r in list(self.admitted.items()) if r.get("worn", True)]
                 if not ids:
                     return "no patients"
                 pid = target if target in self.admitted else int(self.rng.choice(ids))
                 rec = self.admitted[pid]
+                if what in ("lead_off", "exam", "replace_patch") and not rec.get("worn", True):
+                    return "patch not worn"
                 prof = self.by_id[pid]
                 if what == "lead_off":
                     self.patches[rec["row"]].lead_off_until = now + 60

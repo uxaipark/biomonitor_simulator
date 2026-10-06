@@ -263,6 +263,8 @@ def generate_bundle(rhythm: str, seed: int, ecg_fs: int = 250, ppg_fs: int = 100
     resp_i16 = np.clip(np.rint(resp_wave * 1000.0), -32000, 32000).astype(np.int16)
     r_idx = np.array([int(round(times[i] * ecg_fs)) % n_ecg for i in conducted_idx], dtype=np.int32)
     r_kind = np.array([BEAT_KIND_ID.get(kinds[i], 0) for i in conducted_idx], dtype=np.uint8)      # 정답 레코드용 박동 종류
+    _o = np.argsort(r_idx, kind="stable")                    # 루프 끝에서 반올림돼 0 으로 감긴 박동이 맨 뒤에 남지 않게 (이분 탐색은 정렬을 전제)
+    r_idx, r_kind = r_idx[_o], r_kind[_o]
     return {
         "ecg": ecg_i16, "ppg": ppg_i16, "resp_wave": resp_i16,
         "hr": hr_sec, "rr_cap": rr_cap, "rr_edr": rr_edr, "rr_spo2": rr_spo2,

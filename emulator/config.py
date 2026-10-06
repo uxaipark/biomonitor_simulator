@@ -156,6 +156,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "patch": {
             "battery_days": 15.5,          # 패치 배터리 수명
             "max_wear_days": 14,           # 최대 착용 기간: 넘으면 새 번호 패치로 교체
+            "wear_ratio": 50,              # 입원 환자 중 패치 착용 비율 (%) — 미착용 환자는 송신·위치 추적이 없어 병실에 고정 (MCOT 는 항상 착용)
             "rx_enabled": True,            # 모니터링 처방(위중도에 따라 3~14일) 끝나면 모니터링 종료·패치 반납
             "battery_drain_enabled": True,
             "lead_off_enabled": True,
@@ -365,6 +366,11 @@ class Config:
         sc["gateway"]["fault_intensity"] = int(max(0, min(100, sc["gateway"]["fault_intensity"])))
         sc["patch"]["battery_days"] = float(max(0.01, min(30, sc["patch"]["battery_days"])))
         sc["patch"]["max_wear_days"] = float(max(0.0, min(30, sc["patch"].get("max_wear_days", 14))))
+        try:
+            wr = float(sc["patch"].get("wear_ratio", 50))
+        except (TypeError, ValueError):
+            wr = 50.0
+        sc["patch"]["wear_ratio"] = float(max(0.0, min(100.0, wr if wr == wr else 50.0)))     # NaN → 기본값
 
 
 def channel_mask(enabled: dict[str, bool]) -> int:
