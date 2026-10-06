@@ -193,6 +193,8 @@ w.db.close(); w.st.close(); w.st.unlink()
 w2 = mk()
 stock2 = [sr for v in w2.stock.values() for sr in v]
 ok2 = 'BP-000777' not in w2.patch_registry and all(sr.isdigit() and len(sr) == 8 for sr in stock2)
+lots1 = {{e.get('lot') for e in w.patch_registry.values() if e.get('lot')}}
+ok2 = ok2 and w2.stock_lot_no > max(int(l.rsplit('-',1)[1]) for l in lots1)
 print(json.dumps({{'ok1': ok1, 'truth': [min(truth), max(truth)], 'ok2': ok2, 'n1': n_stock, 'n2': len(stock2)}}))
 w2.db.close(); w2.st.close(); w2.st.unlink()
 """

@@ -725,6 +725,7 @@ class World:
     def _init_stock(self) -> None:
         """재시작: DB 에 남은 재고(보관함의 미사용 패치)를 되살리고, 목표 수까지 채운다."""
         self.stock = {k: [] for k in self._stock_keys()}
+        self.stock_lot_no = max(self.stock_lot_no, self.db.max_lot_no())      # 로트 번호는 재시작해도 이어 간다 (예전엔 L…-0001 부터 다시 매겨 겹쳤다)
         rows = self.db.load_stock()
         old = [r for r in rows if not str(r["serial"]).isdigit() or len(str(r["serial"])) != 8]
         if old:                                                     # 옛 번호(BP-xxxxxx) 재고: 전송된 적이 없으니 같은 수량을 8 자리 번호로 다시 입고

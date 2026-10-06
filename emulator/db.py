@@ -223,6 +223,18 @@ class DB:
             rows = self.conn.execute("SELECT data FROM stock_requests ORDER BY created_at DESC LIMIT ?", (int(limit),)).fetchall()
         return [json.loads(r["data"]) for r in rows][::-1]
 
+    def max_lot_no(self) -> int:
+        """지금까지 쓴 로트 일련(Lyymm-NNNN 의 NNNN) 최댓값 — 재시작해도 로트 번호가 겹치지 않게."""
+        with self.lock:
+            rows = self.conn.execute("SELECT DISTINCT lot FROM patch_stock WHERE lot LIKE 'L%-%'").fetchall()
+        best = 0
+        for r in rows:
+            try:
+                best = max(best, int(str(r["lot"]).rsplit("-", 1)[1]))
+            except (ValueError, IndexError):
+                pass
+        return best
+
     def load_stock(self) -> list[dict]:
         """재시작 뒤에도 보관함에 남아 있는(아직 발급 안 된) 재고 패치."""
         with self.lock:
