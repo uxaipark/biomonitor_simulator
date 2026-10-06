@@ -289,3 +289,38 @@ w.db.close(); w.st.close(); w.st.unlink()
     assert r.returncode == 0, r.stderr[-3000:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert len(out["moved"]) >= 3 and all(a and b for a, b in out["moved"]), out
+
+
+def test_stock_adjust_to_target():
+    """재고 조정: 넘치면 유효기간 늦은 것부터 반품(삭제)해 목표 수로, 모자라면 입고.  재시작 뒤에도 그 수가 유지."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 5, 'profile_count': 500, 'bed_capacity': 80, 'active_patients': 60, 'outpatient_count': 4, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}}}})
+s = cfg.snapshot()['signals']
+mk = lambda: World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+w = mk()
+w.receive_stock(2000)
+tot = lambda x: sum(len(v) for v in x.stock.values())
+big = tot(w)
+r1 = w.adjust_stock(300)
+exp_ok = all(all((x.patch_registry[a]['expiry'] or '') <= (x.patch_registry[b]['expiry'] or '') for a, b in zip(v, v[1:])) for x in [w] for v in x.stock.values())
+r2 = w.adjust_stock(450)
+n_mem = tot(w)
+w.db.close(); w.st.close(); w.st.unlink()
+w2 = mk(); n_restart = tot(w2) + len(w2.patches)          # 재시작: 사용 중 패치 반납 → 새로 붙는 패치는 재고에서 꺼낸다
+print(json.dumps({{'big': big, 'r1': [r1['after'], r1['removed']], 'r2': [r2['after'], (r2['added'] or {{}}).get('qty')], 'n_mem': n_mem, 'n_restart': n_restart, 'exp_ok': exp_ok}}))
+w2.db.close(); w2.st.close(); w2.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["big"] > 2000 and out["r1"] == [300, out["big"] - 300] and out["r2"] == [450, 150] and out["exp_ok"], out
+    assert out["n_mem"] == 450 and out["n_restart"] == 450, out          # 재시작 뒤: 남은 재고 + 새로 붙은 패치 = 조정한 수

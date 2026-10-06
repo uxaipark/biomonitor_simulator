@@ -2711,6 +2711,16 @@ async function loadStock() {
     }
   } catch (e) { $('#stockSum').textContent = '-'; }
 }
+$('#stockAdjust').onclick = async () => {
+  const t = Math.round(Number($('#stockTarget').value));
+  if (!($('#stockTarget').value !== '' && t >= 0)) { toast('목표 재고를 넣어 주세요'); return; }
+  if (!confirm(`병원 전체 미사용 재고를 ${fmt(t)}개로 맞출까요? 넘치는 재고는 반품(삭제)됩니다.`)) return;
+  try {
+    const r = await post('/emr/patches/stock/adjust', { target: t, by: '설정 화면' });
+    toast(`재고 조정 ${fmt(r.before)} → ${fmt(r.after)}개` + (r.removed ? ` · 반품 ${fmt(r.removed)}` : '') + (r.added ? ` · 입고 ${fmt(r.added.qty)}` : ''));
+    loadRegistry();
+  } catch (e) { toast('조정 실패: ' + e.message); }
+};
 $('#stockAdd').onclick = async () => {
   const n = Math.round(Number($('#stockCount').value) || 0);
   if (n <= 0) { toast('입고 수량을 넣어 주세요'); return; }

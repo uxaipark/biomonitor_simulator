@@ -977,6 +977,53 @@ class World:
             self.counters["stock_requested_delivered"] = self.counters.get("stock_requested_delivered", 0) + r["qty"]
             self.log.add("patch", f"재고 요청 납품 입고 {r['qty']:,}개 → {r['ward_name']} (로트 {lot[0]}, 유효기간 {lot[1]}) · 재고 {total:,} [{r['request_id']}]")
 
+    def adjust_stock(self, target: int, by: str = "수동") -> dict:
+        """재고 조정: 병원 전체 미사용 재고를 target 개로 맞춘다.  보관함별 목표는 착용 환자 수 비례.  넘치는 보관함은 유효기간이
+        늦은 것부터 반품(전송된 적 없는 패치라 레지스트리·DB 에서 지운다, 이벤트에 로트별 수량을 남김), 모자라면 부족한 보관함에 입고."""
+        target = int(target)
+        if target < 0 or target > 1_000_000:
+            raise ValueError("목표 재고는 0~1,000,000 개입니다")
+        before = sum(len(v) for v in self.stock.values())
+        want = self._alloc_by_need(target)
+        removed, lots = [], collections.Counter()
+        for k, lst in self.stock.items():
+            extra = len(lst) - want.get(k, 0)
+            if extra <= 0:
+                continue
+            drop = lst[-extra:]                                       # 유효기간 순 정렬의 뒤쪽 = 늦게 만료되는 것
+            del lst[-extra:]
+            for sr in drop:
+                e = self.patch_registry.pop(sr, None)
+                lots[(e or {}).get("lot") or "-"] += 1
+            removed.extend(drop)
+        if removed:
+            self.db.delete_stock(removed)
+        now_total = sum(len(v) for v in self.stock.values())
+        added = None
+        if now_total < target:
+            have = {k: len(self.stock.get(k, [])) for k in want}
+            alloc = {k: 0 for k in want}
+            for _ in range(target - now_total):                       # 목표 대비 부족한 보관함부터
+                k = max(want, key=lambda x: want[x] - have[x] - alloc[x])
+                alloc[k] += 1
+            lot = self._new_lot()
+            for k, n in alloc.items():
+                self._deliver_stock(k, n, "재고 조정 입고", lot=lot, quiet=True)
+            added = {"qty": target - now_total, "lot": lot[0], "expiry": lot[1]}
+        after = sum(len(v) for v in self.stock.values())
+        need = sum(self.stock_need().values())
+        self.stock_alarm = None if after >= need else self.stock_alarm
+        self.counters["stock_adjusted"] = self.counters.get("stock_adjusted", 0) + 1
+        msg = f"재고 조정 ({by}): {before:,} → {after:,}개"
+        if removed:
+            msg += f" · 반품 {len(removed):,}개 (" + ", ".join(f"{l} {n}" for l, n in lots.most_common(6)) + ")"
+        if added:
+            msg += f" · 입고 {added['qty']:,}개 (로트 {added['lot']})"
+        msg += f" · 착용 환자 {need:,}명"
+        self.log.add("patch", msg)
+        return {"ok": True, "before": before, "after": after, "removed": len(removed), "removed_by_lot": dict(lots), "added": added, "required": need,
+                "by_ward": {self._stock_location(k)[1]: len(v) for k, v in self.stock.items() if v}}
+
     def stock_requests_view(self, status: str = "", limit: int = 500) -> dict:
         items = [r for r in self.stock_requests.values() if not status or r["status"] == status]
         items.sort(key=lambda r: r.get("created_at") or 0, reverse=True)
