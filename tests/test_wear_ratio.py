@@ -252,3 +252,38 @@ w.db.close(); w.st.close(); w.st.unlink()
     assert out["errs"] == ["rejected"] * 5, out                                              # 주말·지난 날짜·수량 0·형식·없는 보관함
     assert out["before_due"] == "scheduled" and out["r1"] == "delivered" and out["r2"] == "delivered" and out["r3"] == "cancelled", out
     assert out["r1_sum"] == 500 and out["r1_n"] > 1 and out["n_req"] == 3 and out["auto"] is False, out
+
+
+def test_ward_transfer_keeps_the_same_patch():
+    """병실 이동: 병상·병동이 바뀌어도 같은 patch_id·시리얼, 새 패치 발급 없음 (실제 병원은 이동 때 패치를 바꾸지 않는다)."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 5, 'profile_count': 500, 'bed_capacity': 120, 'active_patients': 60, 'outpatient_count': 2, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}}, 'scenario': {{'patch': {{'wear_ratio': 100}}}}}})
+s = cfg.snapshot()['signals']
+w = World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+moved = []
+for pid, rec in list(w.admitted.items()):
+    if rec['outpatient']:
+        continue
+    before = (w.patches[rec['row']].serial, rec['ward_idx'], rec['bed_idx'])
+    rep0 = w.counters['patch_replaced']
+    w._transfer(rec, allow_discharge=False)
+    if rec['bed_idx'] != before[2]:
+        moved.append((before[0] == w.patches[rec['row']].serial, w.counters['patch_replaced'] == rep0))
+    if len(moved) >= 5:
+        break
+print(json.dumps({{'moved': moved}}))
+w.db.close(); w.st.close(); w.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert len(out["moved"]) >= 3 and all(a and b for a, b in out["moved"]), out

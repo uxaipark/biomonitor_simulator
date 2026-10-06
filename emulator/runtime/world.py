@@ -1764,7 +1764,7 @@ class World:
             self.st.patch["spo2_off"][rec["row"]] = 0
 
     def _transfer(self, rec: dict, allow_discharge: bool = True) -> None:
-        """Move to another ward (bed change) with patch replacement, or hospital transfer (discharge)."""
+        """Move to another ward (bed change, same patch), or hospital transfer (discharge)."""
         h = self.hospital
         prof = self.by_id[rec["id"]]
         if allow_discharge and self.rng.random() < 0.25:
@@ -1782,9 +1782,10 @@ class World:
                 rec["nurse"] = str(self.rng.choice(h.wards[w]["nurse_ids"]))
                 prof["admission"].update(bed=h.beds[b]["id"], room=h.rooms[rec["room_idx"]]["id"], ward=h.wards[w]["id"], ward_name=h.wards[w]["name"], nurse=rec["nurse"])
                 self.db.update_admission_bed(rec.get("adm_id"), h.wards[w]["id"], h.wards[w]["name"], h.rooms[rec["room_idx"]]["id"], h.beds[b]["id"], rec["nurse"])
-                self._replace_patch(rec, "병실 이동")
+                # 실제 병원은 병실 이동 때 패치를 바꾸지 않는다 (2026-10-06 운영자 확인): 같은 patch_id·패킷 번호로 이어서 송신
                 self._start_trip(rec, [("shadow", self.rng.uniform(120, 400), "transfer", 0.6)], "병실 이동")
-                self.log.add("adt", f"{prof['name']} 병실 이동 {old_room} → {h.rooms[rec['room_idx']]['id']} (패치 교체)", patient_id=prof["id"])
+                patch = self.patches.get(rec["row"])
+                self.log.add("adt", f"{prof['name']} 병실 이동 {old_room} → {h.rooms[rec['room_idx']]['id']} (패치 {patch.serial if patch else '-'} 그대로)", patient_id=prof["id"])
                 self.counters["transfers"] += 1
                 return
 
