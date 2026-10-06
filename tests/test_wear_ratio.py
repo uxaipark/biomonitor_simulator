@@ -128,3 +128,38 @@ def test_truth_patch_seq_never_restarts():
     from emulator.runtime.truthbench import truth_seq_base
     a, b = truth_seq_base(1_791_000_000.0), truth_seq_base(1_791_000_060.0)
     assert b - a == 1200 and a > 10_000_000                          # 1 분 뒤 재시작해도 그 사이 최대 프레임 수(50 ms 묶음)보다 크다
+
+
+def test_manual_stock_receive_api():
+    """수동 입고: POST /api/v1/emr/patches/stock — 부족한 보관함부터 배분, 보관함 지정, request_id 멱등, 잘못된 수량·보관함 거절."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.config import Config, BASE_DIR
+from emulator.runtime.world import World, EventLog
+from emulator.signals.loops import LoopBank
+cfg = Config(BASE_DIR / 'config.json')
+cfg.update({{'general': {{'seed': 5, 'profile_count': 500, 'bed_capacity': 80, 'active_patients': 60, 'outpatient_count': 4, 'fixed_step': True,
+            'fixed_start': '2026-09-21T09:00'}}, 'transport': {{'target_ip': '', 'workers': 1}}}})
+s = cfg.snapshot()['signals']
+w = World(cfg, LoopBank(s['ecg_fs'], s['ppg_fs'], s['resp_fs'], s['accel_fs'], s['loop_seconds'], s['variants_per_rhythm'], 7), EventLog(4000))
+before = sum(len(v) for v in w.stock.values())
+r1 = w.receive_stock(100)
+k = w._stock_keys()[0]; n0 = len(w.stock[k])
+r2 = w.receive_stock(100, k)
+errs = []
+for args in ((0,), (20000,), (100, 'NOPE')):
+    try:
+        w.receive_stock(*args); errs.append('accepted')
+    except (ValueError, KeyError):
+        errs.append('rejected')
+print(json.dumps({{'before': before, 'r1': r1, 'after': sum(len(v) for v in w.stock.values()), 'ward_add': len(w.stock[k]) - n0, 'errs': errs, 'lot_differs': r1['lot'] != r2['lot']}}, default=str))
+w.db.close(); w.st.close(); w.st.unlink()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=600)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["after"] == out["before"] + 200 and out["r1"]["received"] == 100 and sum(out["r1"]["by_ward"].values()) == 100, out
+    assert out["ward_add"] == 100 and out["lot_differs"] and out["errs"] == ["rejected"] * 3, out

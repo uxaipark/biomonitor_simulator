@@ -806,18 +806,49 @@ class World:
         self.counters["stock_alarms"] = self.counters.get("stock_alarms", 0) + 1
         if not getattr(self, "_boot_fill", False):
             self.log.add("patch", f"⚠ 재고 부족 알람: 패치 착용 {total_need:,}명 대비 미사용 재고 {total:,}개 ({short:,}개 부족) → {unit}개 단위로 {order:,}개 보충 필요")
-        alloc = {k: 0 for k in need}
-        left = order
-        while left > 0:                                         # 부족분이 큰 보관함부터 하나씩 (같으면 착용 환자가 많은 곳)
-            k = max(need, key=lambda x: (need[x] - have[x] - alloc[x], need[x]))
-            alloc[k] += 1
-            left -= 1
+        alloc = self._alloc_stock(order, need, have)
         lot = self._new_lot()
         for k, n in alloc.items():
             self._deliver_stock(k, n, "자동 입고", lot=lot, quiet=True)
         if not getattr(self, "_boot_fill", False):
             spread = ", ".join(f"{self._stock_location(k)[1]} {n}" for k, n in sorted(alloc.items(), key=lambda x: -x[1]) if n)
             self.log.add("patch", f"재고 패치 자동 입고 {order:,}개 (로트 {lot[0]}, 유효기간 {lot[1]}) → {len([n for n in alloc.values() if n])}개 보관함: {spread[:300]}")
+
+    def _alloc_stock(self, order: int, need: dict | None = None, have: dict | None = None) -> dict:
+        """입고분 배분: 부족분(착용 환자 수 - 재고)이 큰 보관함부터 하나씩, 모두 채워지면 착용 환자가 많은 곳부터 고르게."""
+        need = need if need is not None else self.stock_need()
+        have = have if have is not None else {k: len(self.stock.get(k, [])) for k in need}
+        alloc = {k: 0 for k in need}
+        if not need:
+            return alloc
+        left = order
+        while left > 0:
+            k = max(need, key=lambda x: (need[x] - have.get(x, 0) - alloc[x], need[x]))
+            alloc[k] += 1
+            left -= 1
+        return alloc
+
+    def receive_stock(self, count: int, ward: str = "", by: str = "수동") -> dict:
+        """수동 입고 (설정 화면·라우터): count 개를 새 로트로.  ward 를 주면 그 보관함에, 비우면 부족한 보관함부터 나눈다."""
+        count = int(count)
+        if count <= 0 or count > 10000:
+            raise ValueError("입고 수량은 1~10,000 개입니다")
+        keys = self._stock_keys()
+        if ward and ward not in keys:
+            raise KeyError(ward)
+        alloc = {ward: count} if ward else self._alloc_stock(count)
+        lot = self._new_lot()
+        for k, n in alloc.items():
+            self._deliver_stock(k, n, "수동 입고", lot=lot, quiet=True)
+        spread = {self._stock_location(k)[1]: n for k, n in alloc.items() if n}
+        total = sum(len(v) for v in self.stock.values())
+        need = sum(self.stock_need().values())
+        if total >= need:
+            self.stock_alarm = None
+        self.counters["stock_manual"] = self.counters.get("stock_manual", 0) + count
+        self.log.add("patch", f"재고 패치 수동 입고 {count:,}개 ({by}) — 로트 {lot[0]}, 유효기간 {lot[1]} → " + ", ".join(f"{k} {v}" for k, v in sorted(spread.items(), key=lambda x: -x[1]))[:300]
+                     + f" · 재고 {total:,} / 착용 환자 {need:,}")
+        return {"ok": True, "received": count, "lot": lot[0], "expiry": lot[1], "by_ward": spread, "stock": total, "required": need}
 
     def stock_view(self, ward: str = "", q: str = "", limit: int = 100, offset: int = 0) -> dict:
         """GET /api/v1/emr/patches?status=stock — 라우터 계약: {stock, patches:[{serial, patch_id, status, lot, expiry, location, ward, received_at}]}."""

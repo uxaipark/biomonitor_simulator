@@ -2685,9 +2685,35 @@ async function loadRegistry() {
   const st = $('#regStatus').value, q = $('#regQ').value.trim();
   const so = regSort.get(); regSort.mark();
   const r = await api(`/emr/patches?status=${st}&q=${encodeURIComponent(q)}&offset=${regOff}&limit=60&sort=${so.key}&dir=${so.dir === 1 ? 'asc' : 'desc'}`);
-  $('#regCount').textContent = `사용 중 ${fmt(r.active)} · 사용 완료 ${fmt(r.retired)} · 다음 발급 번호 ${r.next_serial} · 표시 ${regOff + 1}-${Math.min(r.total, regOff + 60)} / ${fmt(r.total)}`;
+  loadStock();
+  if (st === 'stock') {                                                     // 재고: 같은 표에 보관 위치·입고·로트·유효기간
+    $('#regCount').textContent = `재고 ${fmt(r.stock)} · 필요(착용 환자) ${fmt(r.required)} · 표시 ${r.total ? regOff + 1 : 0}-${Math.min(r.total, regOff + 60)} / ${fmt(r.total)}`;
+    $('#regTable tbody').innerHTML = r.patches.map(p => `<tr><td class="mono">${p.serial}</td><td>${p.patch_id}</td><td><span class="tag">재고</span></td><td>${esc(p.location || '-')}</td><td>${p.received_at ? p.received_at.slice(5, 16) : '-'}</td><td class="mono">${esc(p.lot || '')}</td><td>${esc(p.expiry || '-')}</td><td class="sub">유효기간</td><td>-</td></tr>`).join('');
+    return;
+  }
+  $('#regCount').textContent = `사용 중 ${fmt(r.active)} · 재고 ${fmt(r.stock || 0)} · 사용 완료 ${fmt(r.retired)} · 다음 발급 번호 ${r.next_serial} · 표시 ${regOff + 1}-${Math.min(r.total, regOff + 60)} / ${fmt(r.total)}`;
   $('#regTable tbody').innerHTML = r.patches.map(p => `<tr><td class="mono">${p.serial}</td><td>${p.patch_id}</td><td>${p.status === 'active' ? '<span class="tag ok">사용 중</span>' : '<span class="tag">사용 완료</span>'}</td><td>${p.patient_name || '-'} <span class="sub">#${p.patient_id || '-'}</span></td><td>${p.issued_at ? p.issued_at.slice(5, 16) : '-'}</td><td>${esc(p.issued_reason || '')}</td><td>${p.retired_at ? p.retired_at.slice(5, 16) : '-'}</td><td>${esc(p.retired_reason || '')}</td><td>${p.battery == null ? '-' : battIcon(p.battery)}</td></tr>`).join('');
 }
+async function loadStock() {
+  try {
+    const r = await api('/emr/patches?status=stock&limit=1');
+    const short = Math.max(0, (r.required || 0) - (r.stock || 0));
+    $('#stockSum').innerHTML = `재고 <b>${fmt(r.stock)}</b>개 · 착용 환자 <b>${fmt(r.required)}</b>명` + (short ? ` · <span class="err">${fmt(short)}개 부족 (자동 입고 대기)</span>` : ' · <span class="ok">충분</span>');
+    const sel = $('#stockWard');
+    if (sel.options.length <= 1 && r.required_by_ward) {
+      for (const k of Object.keys(r.required_by_ward)) { const o = document.createElement('option'); o.value = k; o.textContent = k === 'MCOT' ? 'MCOT 센터' : k; sel.appendChild(o); }
+    }
+  } catch (e) { $('#stockSum').textContent = '-'; }
+}
+$('#stockAdd').onclick = async () => {
+  const n = Math.round(Number($('#stockCount').value) || 0);
+  if (n <= 0) { toast('입고 수량을 넣어 주세요'); return; }
+  try {
+    const r = await post('/emr/patches/stock', { count: n, ward: $('#stockWard').value, by: '설정 화면' });
+    toast(`재고 ${fmt(r.received)}개 입고 (로트 ${r.lot}, 유효기간 ${r.expiry}) · 재고 ${fmt(r.stock)} / 착용 환자 ${fmt(r.required)}`);
+    loadRegistry();
+  } catch (e) { toast('입고 실패: ' + e.message); }
+};
 const regSort = makeSortable('regTable', 'regSort', { key: 'patch_id', dir: -1 }, () => { regOff = 0; loadRegistry(); });
 $('#regStatus').onchange = $('#regQ').oninput = () => { regOff = 0; loadRegistry(); };
 $('#regPrev').onclick = () => { regOff = Math.max(0, regOff - 60); loadRegistry(); };
