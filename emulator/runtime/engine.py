@@ -19,6 +19,15 @@ from .world import World, EventLog, META_PATH
 CAPTURE_DIR = Path(META_PATH).parent / "capture"   # ground-truth tap files w<worker>.bin
 
 
+
+def _freeze_gc() -> None:
+    """월드 구성 직후 오래 사는 객체(환자 명단·병원 구조·패치 기록, 수십만 개)를 GC 검사 대상에서 뺀다.
+    파이썬의 최고 세대 GC 는 이들을 매번 훑느라 약 1분마다 100 ms 넘게 멈췄고(2026-10-07 측정 최대 124 ms), 그 정지가 그 순간 돌던
+    월드 단계(META·DB·게이트웨이)의 순간 지연으로 보였다.  freeze 된 객체는 참조 계수로는 여전히 해제된다 (순환 참조만 수거 안 됨)."""
+    import gc
+    gc.collect()
+    gc.freeze()
+
 class RWLock:
     """Readers/writer lock: API request threads read the world / shared-memory arrays under read(); a rebuild (new
     SharedState, new hospital) holds write(), so no request thread can touch an array whose memory is being unmapped.
@@ -94,6 +103,8 @@ class Engine:
 
     def _init_world(self):
         self.world = World(self.cfg, self.bank, self.log)
+        self.world.db.start_background()                     # DB 쓰기·WAL 체크포인트는 백그라운드 (월드 1초 루프가 디스크를 기다리지 않게)
+        _freeze_gc()
         self.gather = Gather(self.bank, self.world.st) if self.bank.loaded else None
         self.world_thread = threading.Thread(target=self._world_loop, daemon=True, name="world")
         self.world_thread.start()
@@ -135,6 +146,7 @@ class Engine:
                 self.world.bank = self.bank
                 self.world.build(regen_profiles=regen_profiles)
                 self.gather = Gather(self.bank, self.world.st) if self.bank.loaded else None   # swapped under the lock: no window with the old arrays
+            _freeze_gc()
             self.log.add("system", "월드 재구성 완료")
 
     # ---------------------------------------------------------------- run control

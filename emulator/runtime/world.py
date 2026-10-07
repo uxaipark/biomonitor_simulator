@@ -2596,12 +2596,14 @@ class World:
         # The file itself is written by a background thread so the world loop never waits on disk.
         cache = self._meta_cache
         bundle = cfg["transport"]["bundle_ms"]
+        en_t = tuple(en)
+        ident_t = (getattr(self, "identity_country", "KR"), cfg["transport"].get("identity_site", ""))
         changed = 0
         parts: list[str] = []
         for g in h.gateways:
             gw = g["idx"]
             patches = sorted(by_gw.get(gw, []), key=lambda x: x["patch_id"])
-            sig = hash(json.dumps([[p["patch_id"], [d["key"] for d in p["devices"]]] for p in patches] + en + [s["resp_source"], g["gw_no"], bundle, getattr(self, "identity_country", "KR"), cfg["transport"].get("identity_site", "")]))
+            sig = hash((tuple((p["patch_id"], tuple(d["key"] for d in p["devices"])) for p in patches), en_t, s["resp_source"], g["gw_no"], bundle, ident_t))   # JSON 대신 튜플 해시 (게이트웨이 2,000+개 × 2초)
             ent = cache.get(gw)
             if ent is None or ent[0] != sig:
                 room = h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else ""
@@ -2749,7 +2751,8 @@ class World:
             if self.log.pending:
                 self.db.queue_events(self.log.pending)
                 self.log.pending = []
-            self.db.flush()
+            if not self.db.background:
+                self.db.flush()
             self._tnote("db", t0)
 
     # ------------------------------------------------------------------ 월드 단계별 소요 시간 (CPU 최적화 측정용, GET /api/v1/debug/step)

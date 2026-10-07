@@ -69,6 +69,9 @@ class DB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute("PRAGMA wal_autocheckpoint=0")          # 체크포인트는 백그라운드 스레드가 따로 (커밋한 스레드가 수백 ms 멈추던 원인)
+        self._qlock = threading.Lock()                             # 쓰기 대기열 (월드 스레드가 넣고 flusher 가 꺼낸다)
+        self.background = False
         self.conn.executescript(SCHEMA)
         cols = [r[1] for r in self.conn.execute("PRAGMA table_info(runs)").fetchall()]
         if "config_json" not in cols:                                  # migration: older DBs
@@ -254,16 +257,20 @@ class DB:
         return out
 
     def add_patch_event(self, t: float, serial: str, pid: int, kind: str, detail: str) -> None:
-        self._pending_pe.append((t, serial, pid, kind, detail))   # written with the next flush() (once a second), not one transaction each
+        with self._qlock:
+            self._pending_pe.append((t, serial, pid, kind, detail))   # written with the next flush() (once a second), not one transaction each
 
     # ------------------------------------------------------------- events (batched)
     def queue_events(self, events: list[dict]) -> None:
-        self._pending.extend((e["seq"], e["t"], e["kind"], e["msg"], e.get("patient_id"), e.get("gw")) for e in events)
+        rows = [(e["seq"], e["t"], e["kind"], e["msg"], e.get("patient_id"), e.get("gw")) for e in events]
+        with self._qlock:
+            self._pending.extend(rows)
 
     # ------------------------------------------------------------- ground-truth labels (intervals, epoch ms)
     def add_label(self, kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta=None) -> None:
-        self.__dict__.setdefault("_pending_lb", []).append((kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms,
-                                                            json.dumps(meta, ensure_ascii=False) if meta else None))
+        row = (kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, json.dumps(meta, ensure_ascii=False) if meta else None)
+        with self._qlock:
+            self.__dict__.setdefault("_pending_lb", []).append(row)
 
     def labels(self, kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = 5000, offset: int = 0,
                patch_ids: list[int] | None = None) -> list[dict]:
@@ -305,20 +312,55 @@ class DB:
         return {r["kind"]: {"n": r["n"], "t0": r["t0"], "t1": r["t1"]} for r in rows}
 
     def flush(self) -> None:
-        lb = self.__dict__.get("_pending_lb")
-        if lb:
-            self._pending_lb = []
-            with self.lock:
-                self.conn.executemany("INSERT INTO labels(kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json) VALUES (?,?,?,?,?,?,?,?)", lb)
-        if self._pending_pe:
-            rows, self._pending_pe = self._pending_pe, []
-            with self.lock:
-                self.conn.executemany("INSERT INTO patch_events(t, serial, patient_id, kind, detail) VALUES (?,?,?,?,?)", rows)
-        if not self._pending:
+        with self._qlock:
+            lb, self._pending_lb = self.__dict__.get("_pending_lb") or [], []
+            pe, self._pending_pe = self._pending_pe, []
+            ev, self._pending = self._pending, []
+        if not (lb or pe or ev):
             return
-        rows, self._pending = self._pending, []
         with self.lock:
-            self.conn.executemany("INSERT OR IGNORE INTO events(seq, t, kind, msg, patient_id, gw) VALUES (?,?,?,?,?,?)", rows)
+            self.conn.execute("BEGIN")                             # 한 트랜잭션으로
+            try:
+                if lb:
+                    self.conn.executemany("INSERT INTO labels(kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json) VALUES (?,?,?,?,?,?,?,?)", lb)
+                if pe:
+                    self.conn.executemany("INSERT INTO patch_events(t, serial, patient_id, kind, detail) VALUES (?,?,?,?,?)", pe)
+                if ev:
+                    self.conn.executemany("INSERT OR IGNORE INTO events(seq, t, kind, msg, patient_id, gw) VALUES (?,?,?,?,?,?)", ev)
+                self.conn.execute("COMMIT")
+            except Exception:
+                self.conn.execute("ROLLBACK")
+                raise
+
+    def checkpoint(self) -> None:
+        """WAL 체크포인트를 별도 연결에서 (PASSIVE: 쓰는 쪽을 막지 않는다).  wal_autocheckpoint=0 이라 이걸 안 부르면 WAL 이 계속 자란다."""
+        try:
+            c = sqlite3.connect(str(self.path), timeout=1.0)
+            try:
+                c.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            finally:
+                c.close()
+        except sqlite3.Error:
+            pass
+
+    def start_background(self, every_s: float = 1.0, checkpoint_s: float = 30.0) -> None:
+        """대기열 flush·체크포인트를 백그라운드 스레드로 — 월드 1초 루프가 디스크를 기다리지 않게 (2026-10-07 순간 지연)."""
+        if self.background:
+            return
+        self.background = True
+
+        def loop():
+            last_ck = time.time()
+            while self.background:
+                time.sleep(every_s)
+                try:
+                    self.flush()
+                except Exception:
+                    pass
+                if time.time() - last_ck >= checkpoint_s:
+                    last_ck = time.time()
+                    self.checkpoint()
+        threading.Thread(target=loop, daemon=True, name="db-flusher").start()
 
     def prune(self, before: float) -> dict:
         """Retention: drop history older than `before` (retired patches, closed admissions and their exams, patch events, runs)."""
@@ -403,6 +445,7 @@ class DB:
         return {"columns": cols, "rows": rows, "truncated": len(rows) >= limit}
 
     def close(self) -> None:
+        self.background = False
         with self.lock:
             self.flush()
             self.conn.close()

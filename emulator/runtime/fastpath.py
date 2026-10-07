@@ -1346,6 +1346,9 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
     st = SharedState.attach(names)
     bank = LoopBank(**bank_args)
     bank.load()
+    import gc
+    gc.collect()
+    gc.freeze()                                   # 워커도: 은행 주석·구조를 GC 검사에서 빼 프레임 생성 중 긴 정지를 없앤다
     meta: dict = {}
     meta_mtime = 0.0
     delta_mtime = 0.0
