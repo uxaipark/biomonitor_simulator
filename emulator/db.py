@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS labels (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TE
 CREATE INDEX IF NOT EXISTS ix_labels_t ON labels(t_start_ms);
 CREATE INDEX IF NOT EXISTS ix_labels_kind ON labels(kind);
 CREATE INDEX IF NOT EXISTS ix_labels_patch ON labels(patch_id);
+CREATE INDEX IF NOT EXISTS ix_labels_end ON labels(t_end_ms);
 CREATE TABLE IF NOT EXISTS beat_counts (patch_id INTEGER, patient_id INTEGER, t_ms INTEGER, n INTEGER, s INTEGER, v INTEGER, f INTEGER, q INTEGER, rhythm TEXT);
 CREATE INDEX IF NOT EXISTS ix_beat_counts ON beat_counts(patch_id, t_ms);
 """
@@ -274,19 +275,26 @@ class DB:
 
     def labels(self, kind: str = "", patient_id: int | None = None, since_ms: int = 0, until_ms: int = 0, limit: int = 5000, offset: int = 0,
                patch_ids: list[int] | None = None) -> list[dict]:
-        q, a = "SELECT kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json FROM labels WHERE 1=1", []
+        f, fa = "", []
         if patch_ids:
-            q += f" AND patch_id IN ({','.join('?' * len(patch_ids))})"; a += list(patch_ids)
+            f += f" AND patch_id IN ({','.join('?' * len(patch_ids))})"; fa += list(patch_ids)
         if kind:
             ks = [k for k in kind.split(",") if k]
-            q += f" AND kind IN ({','.join('?' * len(ks))})"; a += ks
+            f += f" AND kind IN ({','.join('?' * len(ks))})"; fa += ks
         if patient_id is not None:
-            q += " AND patient_id = ?"; a.append(patient_id)
-        if since_ms:
-            q += " AND (t_end_ms IS NULL OR t_end_ms >= ?)"; a.append(since_ms)
+            f += " AND patient_id = ?"; fa.append(patient_id)
         if until_ms:
-            q += " AND t_start_ms <= ?"; a.append(until_ms)
-        q += " ORDER BY t_start_ms LIMIT ? OFFSET ?"; a += [max(1, int(limit)), max(0, int(offset))]
+            f += " AND t_start_ms <= ?"; fa.append(until_ms)
+        cols = "kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms, meta_json"
+        if since_ms:
+            # '(t_end_ms IS NULL OR t_end_ms >= since)' 는 색인을 못 써 SQLite 가 정렬용 t_start 색인으로 라벨 전체(60만 건)를 훑었다
+            # (라우터 1분 조회 1회 0.37 s, 그동안 DB 잠금).  끝 시각 색인으로 두 갈래를 따로 찾고 합친다 (0.5 ms).
+            q = (f"SELECT {cols} FROM (SELECT * FROM labels INDEXED BY ix_labels_end WHERE t_end_ms >= ?{f}"
+                 f" UNION ALL SELECT * FROM labels INDEXED BY ix_labels_end WHERE t_end_ms IS NULL{f}) ORDER BY t_start_ms LIMIT ? OFFSET ?")
+            a = [since_ms] + fa + fa
+        else:
+            q, a = f"SELECT {cols} FROM labels WHERE 1=1{f} ORDER BY t_start_ms LIMIT ? OFFSET ?", list(fa)
+        a += [max(1, int(limit)), max(0, int(offset))]
         with self.lock:
             rows = self.conn.execute(q, a).fetchall()
         return [{**{k: r[k] for k in r.keys() if k != "meta_json"}, "meta": json.loads(r["meta_json"]) if r["meta_json"] else None} for r in rows]
@@ -326,7 +334,9 @@ class DB:
                 if pe:
                     self.conn.executemany("INSERT INTO patch_events(t, serial, patient_id, kind, detail) VALUES (?,?,?,?,?)", pe)
                 if ev:
-                    self.conn.executemany("INSERT OR IGNORE INTO events(seq, t, kind, msg, patient_id, gw) VALUES (?,?,?,?,?,?)", ev)
+                    # seq 는 DB 가 이어서 매긴다: 메모리 EventLog 번호는 재시작마다 1 부터라, 예전엔 INSERT OR IGNORE 가 이전 실행의
+                    # 최대 번호(110만+)를 넘을 때까지 새 이벤트를 전부 버렸다 (2026-10-07 발견, 7시간 동안 0건 저장)
+                    self.conn.executemany("INSERT INTO events(t, kind, msg, patient_id, gw) VALUES (?,?,?,?,?)", [r[1:] for r in ev])
                 self.conn.execute("COMMIT")
             except Exception:
                 self.conn.execute("ROLLBACK")

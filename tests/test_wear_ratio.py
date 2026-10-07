@@ -324,3 +324,56 @@ w2.db.close(); w2.st.close(); w2.st.unlink()
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["big"] > 2000 and out["r1"] == [300, out["big"] - 300] and out["r2"] == [450, 150] and out["exp_ok"], out
     assert out["n_mem"] == 450 and out["n_restart"] == 450, out          # 재시작 뒤: 남은 재고 + 새로 붙은 패치 = 조정한 수
+
+
+def test_events_persist_across_restarts():
+    """이벤트 로그 번호가 재시작마다 1 부터여도 DB 에 빠짐없이 쌓인다 (예전엔 INSERT OR IGNORE 로 버려졌다)."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json, time
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.db import DB
+db = DB()
+db.queue_events([{{'seq': i, 't': time.time(), 'kind': 'x', 'msg': f'a{{i}}'}} for i in range(1, 6)]); db.flush(); db.close()
+db = DB()
+db.queue_events([{{'seq': i, 't': time.time(), 'kind': 'x', 'msg': f'b{{i}}'}} for i in range(1, 4)])
+db.start_background(every_s=0.1)
+time.sleep(0.5)
+n = db.query('SELECT COUNT(*) FROM events')['rows'][0][0]
+db.close()
+print(json.dumps({{'n': n}}))
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-3000:]
+    assert json.loads(r.stdout.strip().splitlines()[-1])["n"] == 8
+
+
+def test_labels_since_query_uses_end_index_and_matches():
+    """라벨 since 조회: 끝 시각 색인 두 갈래(t_end >= since, 열린 구간)로 찾아도 예전 OR 조건과 같은 결과."""
+    d = tempfile.mkdtemp()
+    code = f"""
+import os, sys, json
+os.environ['BIOSIM_DATA_DIR'] = {d!r}
+sys.path.insert(0, {ROOT!r})
+from emulator.db import DB
+db = DB()
+rows = []
+for i in range(3000):
+    rows.append(('rhythm', 'afib', i % 7, 10000000 + i % 11, i % 5, 1000 * i, (1000 * i + 5000) if i % 13 else None, None))
+for r in rows:
+    db.add_label(*r)
+db.flush()
+got = db.labels(since_ms=2_000_000, limit=50000)
+ref = [dict(r) for r in db.conn.execute("SELECT kind, value, patient_id, patch_id, gw, t_start_ms, t_end_ms FROM labels WHERE (t_end_ms IS NULL OR t_end_ms >= 2000000) ORDER BY t_start_ms").fetchall()]
+got2 = db.labels(since_ms=2_000_000, patch_ids=[10000003], kind='rhythm', until_ms=2_500_000, limit=50000)
+ref2 = [r for r in ref if r['patch_id'] == 10000003 and r['t_start_ms'] <= 2_500_000]
+plan = [tuple(x) for x in db.conn.execute("EXPLAIN QUERY PLAN SELECT * FROM labels INDEXED BY ix_labels_end WHERE t_end_ms >= 1").fetchall()]
+print(json.dumps({{'n': len(got), 'same': [(g['t_start_ms'], g['t_end_ms']) for g in got] == [(r['t_start_ms'], r['t_end_ms']) for r in ref],
+                  'same2': [g['t_start_ms'] for g in got2] == [r['t_start_ms'] for r in ref2], 'plan': str(plan)}}))
+db.close()
+"""
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-3000:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["n"] > 0 and out["same"] and out["same2"] and "ix_labels_end" in out["plan"], out
