@@ -2,7 +2,8 @@
 
 계약: biomonitor_router docs/contract/patient-admin.md 4·5·6절.
 - 모든 요청에 request_id: 처리에 성공한 요청은 결과를 DB(admin_requests)에 남기고, 같은 id 로 다시 오면 그 결과를 그대로 돌려준다.
-- 거절은 AdminError(status, 한국어 사유) → HTTP 404/409/422 + {"detail": 사유}.
+- 거절은 AdminError(status, 한국어 사유) → HTTP 409/410/422 + {"detail": 사유}.  404 는 쓰지 않는다: 라우터는 404/405/501 을
+  '아직 지원 안 함'으로 보고 30초마다 영원히 다시 보낸다 (2026-10-08).  모니터링 중이 아닌 환자번호 = 410, 없는 사람·병동·침대 = 422.
 - 처리 결과는 /emr/admissions · /emr/patches · /emr/beds · 소켓 스트림(새 패치는 NEW_PATCH, META patches[])에 바로 반영되고,
   events kind "adt" 에 request_id·action 과 함께 남는다.
 
@@ -74,11 +75,11 @@ class PatientAdmin:
         try:
             n = int(patient_no)
         except (TypeError, ValueError):
-            raise AdminError(404, f"환자번호 {patient_no} 이(가) 숫자가 아닙니다")
+            raise AdminError(422, f"환자번호 {patient_no} 이(가) 숫자가 아닙니다")
         for pid, rec in list(self.w.admitted.items()):
             if rec.get("patient_no") == n:
                 return pid, rec
-        raise AdminError(404, f"환자번호 {n} 은(는) 지금 모니터링 중인 환자가 아닙니다")
+        raise AdminError(410, f"환자번호 {n} 은(는) 지금 모니터링 중인 환자가 아닙니다 (퇴원·종료됐거나 에뮬레이터 재시작으로 환자번호가 바뀜)")
 
     def _resolve_patch(self, spec: dict | None) -> dict:
         """{patch_id?, serial?, source} → {"serial": 재고 시리얼} 또는 {"ext_id": 새 번호}.  사용 중·반납된 패치는 거절."""
@@ -134,11 +135,11 @@ class PatientAdmin:
             except (TypeError, ValueError):
                 prof = None
             if prof is None:
-                raise AdminError(404, f"EMR 에 profile_id {b['profile_id']} 인 사람이 없습니다")
+                raise AdminError(422, f"EMR 에 profile_id {b['profile_id']} 인 사람이 없습니다")
         elif b.get("mrn") and not b.get("patient"):
             prof = next((p for p in w.profiles if p.get("mrn") == b["mrn"]), None)
             if prof is None:
-                raise AdminError(404, f"EMR 에 등록번호 {b['mrn']} 인 사람이 없습니다")
+                raise AdminError(422, f"EMR 에 등록번호 {b['mrn']} 인 사람이 없습니다")
         pt = b.get("patient") or None
         if prof is None:
             if not pt:
@@ -180,12 +181,12 @@ class PatientAdmin:
                 raise AdminError(422, "입원 등록에는 placement.ward(병동)가 필요합니다")
             wd = next((x for x in h.wards if x["id"] == wid), None)
             if wd is None:
-                raise AdminError(404, f"병동 {wid} 이(가) 없습니다")
+                raise AdminError(422, f"병동 {wid} 이(가) 없습니다")
             place["ward_idx"] = wd["idx"]
             if pl.get("bed"):
                 bi = next((i for i in wd["bed_idxs"] if h.beds[i]["id"] == pl["bed"]), None)
                 if bi is None:
-                    raise AdminError(404, f"병동 {wid} 에 침대 {pl['bed']} 이(가) 없습니다")
+                    raise AdminError(422, f"병동 {wid} 에 침대 {pl['bed']} 이(가) 없습니다")
                 if h.beds[bi]["patient_id"]:
                     raise AdminError(409, f"침대 {pl['bed']} 은(는) 이미 다른 환자가 쓰고 있습니다")
                 place["bed_idx"] = bi

@@ -89,5 +89,5 @@ w.db.close(); w.st.close(); w.st.unlink()
     assert o["replace_bad"] == 409, o
     assert o["remove"] == [200, False, False, True, 0], o
     assert o["reattach"][0] == 200 and o["reattach"][1] is None and o["reattach"][2] == "55555561" and o["reattach"][3] is True and o["reattach"][4] == 1, o
-    assert o["end"] == [200, True, False, "retired"] and o["nf"] == 404, o
+    assert o["end"] == [200, True, False, "retired"] and o["nf"] == 410, o
     assert o["r2_still"] and o["inv"] == [], o
