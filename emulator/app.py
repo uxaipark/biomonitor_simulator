@@ -109,7 +109,7 @@ def discovery():
         "endpoints": {
             "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "truth_beats": "GET /api/v1/truth/beats?patch_id=&since_ms=&until_ms=&pace= (정답 R-peak 절대 시각)", "truth_score": "POST /api/v1/truth/score {detections:{patch_id:[ts_ms..]}, tolerance_ms:150} → QRS 검출 Se/PPV/F1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
-                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_stock": "GET /api/v1/emr/patches?status=stock&ward=&q=&limit= (병원 재고 미사용 패치: 로트·유효기간·보관 위치) · POST /api/v1/emr/patches/stock {count, ward, request_id} 수동 입고 · POST /api/v1/emr/patches/stock/adjust {target} 재고 조정", "stock_requests": "POST /api/v1/emr/stock/requests {request_id, ward, qty, deliver_on} · GET /api/v1/emr/stock/requests · POST /api/v1/emr/stock/requests/{id}/cancel (납품일 입고)", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
+                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_stock": "GET /api/v1/emr/patches?status=stock&ward=&q=&limit= (병원 재고 미사용 패치: 로트·유효기간·보관 위치) · POST /api/v1/emr/patches/stock {count, ward, request_id} 수동 입고 · POST /api/v1/emr/patches/stock/adjust {target} 재고 조정", "patient_admin": "POST /api/v1/emr/admissions (환자 등록) · POST /api/v1/emr/admissions/{patient_id}/patch/replace (교체) · POST /api/v1/emr/admissions/{patient_id}/patch/return (반납) — request_id 멱등, 거절 404/409/422 {detail}", "stock_requests": "POST /api/v1/emr/stock/requests {request_id, ward, qty, deliver_on} · GET /api/v1/emr/stock/requests · POST /api/v1/emr/stock/requests/{id}/cancel (납품일 입고)", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
                     "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds (x·y 중심, angle 머리 방향 도, bed_size_m 0.9 x 2.0)", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
@@ -1358,6 +1358,8 @@ def emr_admissions():
         p = w.by_id[pid]
         patch = w.patches.get(rec["row"])
         out.append({"patient_id": rec.get("patient_no"), "profile_id": pid, "mrn": p["mrn"], "name": p["name"], "patch_id": patch.patch_id if patch else None, "patch_serial": patch.serial if patch else None,
+                    "patch_state": "active" if patch else ("removed" if rec.get("removed_at") else "not_worn"),   # removed = 라우터 반납(일시 제거), not_worn = 처음부터 미착용
+                    "registered": rec.get("registered"),
                     "gateway_idx": rec["gw"], "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "gw_id_in_frame": h.gateways[rec["gw"]]["gw_no"] if rec["gw"] >= 0 else None,
                     "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None, "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
                     "ward": p["admission"]["ward"], "mode": p["admission"]["mode"], "doctor": rec["doctor"], "nurse": rec["nurse"], "admit_time": p["admission"]["time"],
@@ -1478,6 +1480,41 @@ def emr_stock_request_cancel(request_id: str, body: dict | None = None):
         except ValueError as e:
             raise HTTPException(409, str(e))
     return {k: v for k, v in r.items() if k != "created_at"}
+
+
+def _admin(action: str, body: dict, fn) -> JSONResponse:
+    from .runtime.admin import AdminError
+    w = E().world
+    with w.lock:
+        try:
+            code, out = w.admin.run(action, body or {}, fn)
+        except AdminError as e:
+            raise HTTPException(e.status, e.detail)
+    return JSONResponse(out, status_code=code)
+
+
+@app.post("/api/v1/emr/admissions")
+def emr_admission_register(body: dict):
+    """라우터 환자 등록: {request_id, by, source, profile_id? | mrn? | patient{name, sex, birth_date, phone, mrn, note},
+    placement{mode: inpatient|mcot, ward(입원 필수), bed, doctor, nurse, monitoring_days}, patch{patch_id?, serial?, source: stock|ble|manual}}
+    → 201 {patient_id, profile_id, mrn, name, patch_id, serial, ward, bed, gw_id, admit_time, message}.  거절 404/409/422 {detail}.  같은 request_id 는 같은 결과."""
+    w = E().world
+    return _admin("register", body, w.admin.register)
+
+
+@app.post("/api/v1/emr/admissions/{patient_id}/patch/replace")
+def emr_admission_patch_replace(patient_id: int, body: dict):
+    """패치 교체: {request_id, old_patch_id, old_battery, new_patch{patch_id, serial, source}, reason, reason_text} → 200 {old, new, message}."""
+    w = E().world
+    return _admin("replace", body, lambda b: w.admin.replace(patient_id, b))
+
+
+@app.post("/api/v1/emr/admissions/{patient_id}/patch/return")
+def emr_admission_patch_return(patient_id: int, body: dict):
+    """패치 반납: {request_id, patch_id, reason, reason_text, end_monitoring, condition, old_battery} → 200 {patch_id, retired_at, monitoring_ended, message}.
+    end_monitoring=true 면 모니터링 종료(퇴원 처리), false 면 일시 제거(입원 유지, patch_state "removed")."""
+    w = E().world
+    return _admin("return", body, lambda b: w.admin.ret(patient_id, b))
 
 
 @app.get("/api/v1/patch/wear")

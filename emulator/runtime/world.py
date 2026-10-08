@@ -172,6 +172,8 @@ class World:
         self.step_while_stopped = False          # True 면 전송 정지 중에도 월드가 돈다 (기본: 정지 = 시나리오도 멈춤)
         self.rhythm_variants: dict[str, list[int]] = {}
         self.db = DB()
+        from .admin import PatientAdmin
+        self.admin = PatientAdmin(self)                 # 라우터 환자 관리 (등록·교체·반납)
         self.build()
 
     # ------------------------------------------------------------------ build
@@ -277,6 +279,8 @@ class World:
             self.generate_identities([c])
         src = self._ident_sets.get(c) if c != "KR" else None
         for p in self.profiles:
+            if p.get("manual_identity"):                               # 라우터에서 직접 등록한 사람: 송출 국가가 바뀌어도 신원 유지
+                continue
             ident = (src or {}).get(p["id"]) if src is not None else None
             base = self._base_ident.get(p["id"]) or {}
             for k in intl.IDENT_FIELDS:
@@ -513,12 +517,17 @@ class World:
         self.meta_dirty = True
 
     # ------------------------------------------------------------------ helpers
-    def _new_patch(self, row: int, patient_id: int = 0, reason: str = "신규 발급", stock_key: str | None = None, serial: str | None = None) -> Patch:
+    def _new_patch(self, row: int, patient_id: int = 0, reason: str = "신규 발급", stock_key: str | None = None, serial: str | None = None,
+                   ext_id: int | None = None) -> Patch:
         """Issue a brand-new patch: serial/patch_id are monotonic and never reused (registry keeps every patch).
         stock_key 가 있으면 그 병동(또는 MCOT 센터) 보관함의 재고에서 유효기간이 빠른 것부터 꺼낸다 — 비어 있으면 긴급 입고.
         serial 을 주면 그 재고 패치를 쓴다 (라우터 환자 관리에서 고른 미사용 패치)."""
-        ent = self._take_stock(stock_key, serial) if (stock_key or serial) else None
-        if ent is not None:
+        ent = self._take_stock(stock_key, serial) if (ext_id is None and (stock_key or serial)) else None
+        if ext_id is not None:                                         # 병원 재고 밖의 패치 (BLE 스캔·수기 번호로 등록) — 그 번호 그대로
+            serial = f"{int(ext_id):08d}"
+            p = Patch(row, serial, int(ext_id))
+            ent = {"external": True}
+        elif ent is not None:
             serial = ent["serial"]
             p = Patch(row, serial, int(ent["patch_id"]))
         else:
@@ -572,7 +581,7 @@ class World:
         return {"inpatients": n, "worn": worn, "unworn": n - worn, "worn_pct": round(100.0 * worn / n, 1) if n else None,
                 "target_pct": self._wear_ratio(), "mcot": len(self.admitted) - n}
 
-    def attach_patch(self, pid: int, reason: str = "패치 착용", serial: str | None = None) -> dict:
+    def attach_patch(self, pid: int, reason: str = "패치 착용", serial: str | None = None, ext_id: int | None = None) -> dict:
         rec = self.admitted.get(pid)
         if rec is None:
             raise KeyError(pid)
@@ -582,7 +591,7 @@ class World:
         prof = self.by_id[pid]
         if serial is not None and (self.patch_registry.get(serial) or {}).get("status") != "stock":
             raise ValueError(f"패치 {serial} 은(는) 재고(미사용) 상태가 아닙니다")
-        patch = self._new_patch(row, pid, reason, stock_key=self._stock_key(rec), serial=serial)
+        patch = self._new_patch(row, pid, reason, stock_key=self._stock_key(rec), serial=serial, ext_id=ext_id)
         patch.new_until = self.sim_time + 30
         P = self.st.patch.arr
         P["patch_id"][row] = patch.patch_id
@@ -591,6 +600,7 @@ class World:
         P["flags"][row] = (int(P["flags"][row]) & ~FLAG_LEAD_OFF) | FLAG_NEW_PATCH
         P["attach_tick"][row] = self._tick_now() if self.running else 0
         rec["worn"] = True
+        rec.pop("removed_at", None)
         rec["location"] = rec["room_idx"]
         rec["activity_until"] = 0.0
         prof["admission"]["patch"] = patch.serial
@@ -670,7 +680,7 @@ class World:
         ratio = self._wear_ratio()
         if getattr(self, "_wear_applied", None) == ratio:
             return
-        ins = [(pid, r) for pid, r in list(self.admitted.items()) if not r["outpatient"]]
+        ins = [(pid, r) for pid, r in list(self.admitted.items()) if not r["outpatient"] and not r.get("registered") and not r.get("removed_at")]   # 라우터가 등록·제거한 환자는 그대로
         if not ins:
             self._wear_applied = ratio
             return
@@ -1205,8 +1215,10 @@ class World:
         return None
 
     # ------------------------------------------------------------------ admissions
-    def admit(self, prof: dict | None = None, outpatient: bool = False) -> dict | None:
+    def admit(self, prof: dict | None = None, outpatient: bool = False, place: dict | None = None) -> dict | None:
+        """place (라우터 환자 등록): {ward_idx, bed_idx, doctor, nurse, serial(재고 패치), ext_id(외부 패치 번호), rx_days} — 지정한 대로 입원·부착."""
         h = self.hospital
+        place = place or {}
         if prof is None:
             # 원외 부착의 일부는 해외 체류 외국인(general.overseas_ratio); 해외 풀이 비면 국내 환자로 대신한다
             ovr = float(self.cfg.get("general").get("overseas_ratio", 0.0) or 0.0)
@@ -1217,7 +1229,7 @@ class World:
         if prof is None or not self.free_rows or (prof.get("overseas") and not outpatient):
             return None
         row = self.free_rows.pop()
-        worn = outpatient or self.rng.random() * 100.0 < self._wear_ratio()        # 입원 환자 중 일부만 패치 착용 (MCOT 는 항상)
+        worn = outpatient or bool(place) or self.rng.random() * 100.0 < self._wear_ratio()        # 입원 환자 중 일부만 패치 착용 (MCOT·등록 환자는 항상)
         patch = None                                                                 # 병상(병동)이 정해진 뒤 그 병동 보관함에서 꺼낸다
         rec = {"id": prof["id"], "row": row, "outpatient": outpatient, "admit_time": self.sim_time, "bed_idx": -1, "room_idx": -1,
                "ward_idx": -1, "doctor": None, "nurse": None, "exams": [], "location": -1, "activity": "still", "activity_until": 0.0,
@@ -1244,11 +1256,15 @@ class World:
         else:
             widx = -1
             bidx = -1
-            for w in h.ward_for(prof["ward_specialty"], self.rng):
-                b = h.free_bed_in_ward(w)
-                if b >= 0:
-                    widx, bidx = w, b
-                    break
+            if place.get("ward_idx") is not None:                  # 지정 병동(·병상)
+                widx = int(place["ward_idx"])
+                bidx = int(place["bed_idx"]) if place.get("bed_idx") is not None else h.free_bed_in_ward(widx)
+            else:
+                for w in h.ward_for(prof["ward_specialty"], self.rng):
+                    b = h.free_bed_in_ward(w)
+                    if b >= 0:
+                        widx, bidx = w, b
+                        break
             if bidx < 0:
                 self.free_rows.append(row)
                 self._drop_unissued(row, patch)
@@ -1257,13 +1273,14 @@ class World:
             bed["patient_id"] = prof["id"]
             rec.update(bed_idx=bidx, room_idx=bed["room_idx"], ward_idx=widx, location=bed["room_idx"])
             ward = h.wards[widx]
-            rec["doctor"] = str(self.rng.choice(ward["doctor_ids"]))
-            rec["nurse"] = str(self.rng.choice(ward["nurse_ids"]))
+            rec["doctor"] = str(place.get("doctor") or self.rng.choice(ward["doctor_ids"]))
+            rec["nurse"] = str(place.get("nurse") or self.rng.choice(ward["nurse_ids"]))
             rec["exams"] = make_exam_schedule(self.rng, prof, self.sim_time, available=set(h.exam_rooms.keys()))
             self._book_exams(rec, rec["exams"])                  # no two patients get the same station at the same time
             prof["status"] = "admitted"
         if worn:
-            patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착", stock_key=self._stock_key(rec))
+            patch = self._new_patch(row, prof["id"], "입원 부착" if not outpatient else "MCOT 부착", stock_key=self._stock_key(rec),
+                                    serial=place.get("serial"), ext_id=place.get("ext_id"))
         prof["admission"] = {"time": dt.datetime.fromtimestamp(self.sim_time).isoformat(timespec="seconds"),
                              "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None,
                              "room": h.rooms[rec["room_idx"]]["id"] if rec["room_idx"] >= 0 else None,
@@ -1274,6 +1291,10 @@ class World:
         dcfg = self.cfg.get("scenario", "devices", default={}) or {}
         prof["devices"] = assign_devices(self.rng, prof, outpatient, dcfg.get("policy", "auto"), dcfg.get("spo2_mix"))
         self._prescribe(rec, prof, patch, outpatient)
+        if place.get("rx_days"):                                         # 등록 때 정한 모니터링 기간
+            rx = rec["rx"]
+            rx["days"] = int(place["rx_days"]); rx["end"] = rx["start"] + rx["days"] * 86400.0
+            prof["admission"]["monitoring"] = self._rx_view(rx)
         rec["adm_id"] = self.db.add_admission(prof["id"], prof["admission"], self.sim_time)
         rec["patient_no"] = rec["adm_id"]                                 # 환자번호: new unique number per admission (never reused)
         prof["admission"]["patient_no"] = rec["patient_no"]
@@ -1325,8 +1346,9 @@ class World:
         site = self.cfg.get("scenario", "site")
         target_in = g["active_patients"] if site in ("hospital", "mixed") else 0
         target_out = g["outpatient_count"] if site in ("mcot", "mixed") else 0
-        n_in = sum(1 for r in list(self.admitted.values()) if not r["outpatient"])
-        n_out = len(self.admitted) - n_in
+        auto = [r for r in list(self.admitted.values()) if not r.get("registered")]      # 라우터가 등록한 환자는 목표 인원 밖 (자동 퇴원 대상 아님)
+        n_in = sum(1 for r in auto if not r["outpatient"])
+        n_out = len(auto) - n_in
         budget = 100000 if initial else 300
         self._boot_fill = initial                                          # 시작 시 채우는 환자: 처방·패치 경과를 흩어 둔다
         real = getattr(self, "real", None)
@@ -1343,10 +1365,10 @@ class World:
             n_out += 1
             budget -= 1
         if n_in > target_in:
-            for pid in [k for k, r in list(self.admitted.items()) if not r["outpatient"]][: n_in - target_in]:
+            for pid in [k for k, r in list(self.admitted.items()) if not r["outpatient"] and not r.get("registered")][: n_in - target_in]:
                 self.discharge(pid, "퇴원(목표 인원 조정)")
         if n_out > target_out:
-            for pid in [k for k, r in list(self.admitted.items()) if r["outpatient"]][: n_out - target_out]:
+            for pid in [k for k, r in list(self.admitted.items()) if r["outpatient"] and not r.get("registered")][: n_out - target_out]:
                 self.discharge(pid, "MCOT 종료")
         self._boot_fill = False
 
@@ -1923,14 +1945,14 @@ class World:
         self.log.add("patch", f"시나리오: {label}")
         return label
 
-    def _replace_patch(self, rec: dict, reason: str) -> None:
+    def _replace_patch(self, rec: dict, reason: str, serial: str | None = None, ext_id: int | None = None) -> None:
         if not rec.get("worn", True):                 # 미착용 환자는 교체할 패치가 없다
             return
         row = rec["row"]
         old = self.patches.get(row)
         prof = self.by_id[rec["id"]]
         self._retire_patch(old, reason)
-        new = self._new_patch(row, prof["id"], f"교체: {reason}", stock_key=self._stock_key(rec))
+        new = self._new_patch(row, prof["id"], f"교체: {reason}", stock_key=self._stock_key(rec), serial=serial, ext_id=ext_id)
         new.replaced = (old.replaced + 1) if old else 0
         new.new_until = self.sim_time + 30
         P = self.st.patch.arr
