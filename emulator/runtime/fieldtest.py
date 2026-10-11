@@ -13,22 +13,31 @@ import time
 from .state import CTL, FLAG_MOTION
 
 # prio: high(위급) · medium(주의) · low(권고·기술).  expect 는 뷰어에서 확인할 것.
-EVENTS = {
-    "vfib":     {"label": "심실세동 (VF)", "prio": "high", "rhythm": "vfib", "expect": "위급(적색) 알람 · VF 표시 · 최고 경보음"},
-    "vt":       {"label": "심실빈맥 (VT)", "prio": "high", "rhythm": "vt", "expect": "위급(적색) 알람 · VT 표시 · HR 상승"},
-    "asystole": {"label": "무수축 (Asystole)", "prio": "high", "expect": "위급(적색) 알람 · 평탄 파형 · HR 0"},
-    "afib":     {"label": "심방세동 (AF)", "prio": "medium", "rhythm": "afib", "expect": "주의(황색) 알람 · 불규칙 RR"},
-    "svt":      {"label": "빈맥 (SVT)", "prio": "medium", "rhythm": "svt", "expect": "주의(황색) 알람 · HR 상한 초과"},
-    "brady":    {"label": "극서맥 (3도 방실차단)", "prio": "medium", "rhythm": "avb3", "expect": "주의(황색) 알람 · HR 하한 미만"},
-    "stemi":    {"label": "ST 상승", "prio": "medium", "rhythm": "stemi", "expect": "주의(황색) 알람 · ST 변화 표시"},
-    "spo2_low": {"label": "SpO2 저하 (약 85 %)", "prio": "medium", "expect": "주의(황색) 알람 · SpO2 하한 미만 (SpO2 기기 환자만)"},
-    "pvc":      {"label": "PVC 이단맥", "prio": "low", "rhythm": "pvc_bigeminy", "expect": "권고(청색) 알람 · PVC 표시"},
-    "lead_off": {"label": "리드 오프", "prio": "low", "expect": "기술 알람 · 리드 오프 표시 · 파형 레일"},
-    "low_batt": {"label": "패치 배터리 부족", "prio": "low", "expect": "기술 알람 · 배터리 부족 표시 (8 %)"},
-    "no_link":  {"label": "패치 신호 끊김 (BLE)", "prio": "low", "expect": "기술 알람 · 해당 환자 데이터 없음"},
-    "gw_down":  {"label": "게이트웨이 무응답", "prio": "low", "expect": "기술 알람 · 게이트웨이 오프라인 (환자는 인접 게이트웨이로 이동)"},
+# 기대 결과(합격 기준)는 emulator/alarms.py 기준표에서 만든다 — 에뮬레이터는 경보를 내보내지 않고, 이 이벤트의 신호를 받은 라우터·뷰어에서
+# 떠야 할 경보다.  (예전엔 여기 따로 적어 3도 차단·SpO2 85 % 가 '주의(황색)' 로 매뉴얼·중앙 감시의 '적색' 과 어긋났다.)
+from ..alarms import expected as _expected                       # noqa: E402
+
+_EV = {
+    "vfib":     ("심실세동 (VF)", {"rhythm": "vfib"}, ("rhythm", "vfib"), "VF 파형 · 최고 경보음"),
+    "vt":       ("심실빈맥 (VT)", {"rhythm": "vt"}, ("rhythm", "vt"), "HR 상승"),
+    "asystole": ("무수축 (Asystole)", {}, ("rhythm", "asystole"), "평탄 파형 · HR 0"),
+    "afib":     ("심방세동 (AF)", {"rhythm": "afib"}, ("rhythm", "afib"), "불규칙 RR"),
+    "svt":      ("빈맥 (SVT)", {"rhythm": "svt"}, ("rhythm", "svt"), "HR 상한 초과"),
+    "brady":    ("극서맥 (3도 방실차단)", {"rhythm": "avb3"}, ("rhythm", "avb3"), "HR 하한 미만"),
+    "stemi":    ("ST 상승", {"rhythm": "stemi"}, ("rhythm", "stemi"), "ST 변화 표시"),
+    "spo2_low": ("SpO2 저하 (약 85 %)", {}, ("limit", "spo2:85"), "SpO2 기기 환자만"),
+    "pvc":      ("PVC 이단맥", {"rhythm": "pvc_bigeminy"}, ("rhythm", "pvc_bigeminy"), "PVC 표시"),
+    "lead_off": ("리드 오프", {}, ("technical", "lead_off"), "파형 레일"),
+    "low_batt": ("패치 배터리 부족", {}, ("technical", "battery_low"), "배터리 '부족' 표시"),
+    "no_link":  ("패치 신호 끊김 (BLE)", {}, ("technical", "no_signal"), "해당 환자 데이터 없음"),
+    "gw_down":  ("게이트웨이 무응답", {}, ("technical", "gw_down"), "환자는 인접 게이트웨이로 이동"),
 }
-PRIO_KO = {"high": "위급", "medium": "주의", "low": "권고·기술"}
+EVENTS = {}
+for _k, (_label, _extra, (_kind, _key), _detail) in _EV.items():
+    _x = _expected(_kind, _key)
+    EVENTS[_k] = {"label": _label, "prio": _x["prio"], "technical": _x["technical"], "alarm_code": _x["code"],
+                  "expect": f"{_x['text']} · {_detail}", **_extra}
+PRIO_KO = {"high": "위급", "medium": "주의", "low": "권고"}
 RHYTHM_EVS = {k for k, v in EVENTS.items() if v.get("rhythm")} | {"asystole"}     # 리듬을 바꾸는 이벤트
 GW_REASON = "수동 · 현장 테스트"          # "수동" 접두어: 장애 시나리오를 꺼도 유지
 SIM_PAD_S = 3.0                            # 시뮬 시각 타이머 여유 (벽시계 초): 테스트가 먼저 끝나 스스로 풀게

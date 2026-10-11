@@ -111,6 +111,7 @@ const battIcon = (pct, charging = false) => {
 };
 let pmOpen = false;   // keep the pacemaker details toggle state across the 5 s card refresh
 document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('pmd')) pmOpen = e.target.open; }, true);
+let patSelId = null;   // 목록 선택 환자: 10초마다 다시 그려도 강조 유지 (예전엔 풀려 주입 대상이 헷갈렸다)
 let curRt = null, curPaced = '', CFG = null, META = null, STATS = null, curRow = -1, curPid = null, ws = null, floors = [], lastEvSeq = 0, evAll = [];
 
 // ---------------------------------------------------------------- tabs
@@ -437,7 +438,7 @@ function fillForm() {
   }
   $('#g_active').max = SV.general.bed_capacity;
   const fk = $('#fz_kinds'); if (fk) fk.value = ((SV.transport.fuzz || {}).kinds || []).join(',');
-  renderChips(); renderPresets(); syncDropdowns(); mixNote(); scnMark(); wearHint();
+  renderChips(); renderPresets(); syncDropdowns(); mixNote(); scnMark(); wearHint(); try { tTargetDirty(); } catch (e) { }
 }
 $('#fz_kinds').addEventListener('change', () => { const kinds = $('#fz_kinds').value.split(',').map(x => x.trim()).filter(Boolean); scnEdit(['transport', 'fuzz', 'kinds'], kinds); });
 $('#capClear').onclick = async () => { const r = await post('/capture', { clear: true }); toast('캡처 파일 삭제'); renderCapture(r); };
@@ -472,9 +473,37 @@ for (const [id, p] of Object.entries(B)) {
       return;
     }
     if (getPath(CFG, p) === v) return;                 // unchanged (e.g. re-selecting the same dropdown item)
+    if (id === 't_ip' || id === 't_port') { tTargetDirty(); return; }   // 송출 대상: 바로 반영하지 않고 [대상 변경 적용] + 확인 (오타 한 글자로 엉뚱한 곳에 송출하던 경로)
     queue(p, v);
   });
 }
+const T_FORBID = { 8080: '키오스크 화면 서버', 5445: '에뮬레이터 자신', 7300: '라우터 상태 API' };
+function tTargetVals() { return { ip: ($('#t_ip').value || '').trim(), port: Number($('#t_port').value) }; }
+function tTargetDirty() {
+  const { ip, port } = tTargetVals(), cur = CFG ? CFG.transport : {};
+  const changed = ip !== (cur.target_ip || '') || port !== cur.target_port;
+  const bad = T_FORBID[port] ? `포트 ${port} 는 ${T_FORBID[port]} 포트라 쓸 수 없습니다` : (port < 1 || port > 65535 || !Number.isFinite(port)) ? '포트는 1~65535' : '';
+  $('#tApply').disabled = !changed || !!bad;
+  $('#tStat').textContent = bad || (changed ? `미적용: ${cur.target_ip || '(없음)'}:${cur.target_port} → ${ip || '(없음 = 송출 중단)'}:${port}` : `지금 대상 ${cur.target_ip || '(없음, 생성만)'}:${cur.target_port}`);
+  $('#tStat').className = bad ? 'err' : changed ? 'warn' : 'sub';
+}
+$('#t_ip').addEventListener('input', tTargetDirty); $('#t_port').addEventListener('input', tTargetDirty);
+$('#tProbe').onclick = async () => {
+  const { ip, port } = tTargetVals(); if (!ip) { toast('IP 를 넣으세요'); return; }
+  $('#tStat').textContent = `${ip}:${port} 접속 시험 중…`;
+  try { const r = await post('/transport/probe', { ip, port }); $('#tStat').textContent = r.ok ? `${ip}:${port} 접속 성공 (${r.ms} ms)` : `${ip}:${port} 접속 실패: ${r.error}`; $('#tStat').className = r.ok ? 'ok' : 'err'; }
+  catch (e) { $('#tStat').textContent = '시험 불가: ' + e.message; $('#tStat').className = 'err'; }
+};
+$('#tApply').onclick = async () => {
+  const { ip, port } = tTargetVals(), cur = CFG.transport;
+  const stop = !ip;
+  const ok = await askConfirm(stop ? '송출 중단' : '송출 대상 변경', `${cur.target_ip || '(없음)'}:${cur.target_port}  →  ${ip || '(없음)'}:${port}\n` +
+    (stop ? 'IP 를 비우면 라우터로 보내지 않고 신호 생성만 합니다 (송출 중단).' : '워커가 모든 게이트웨이 소켓을 새 대상으로 다시 연결합니다. 잘못된 주소면 송출이 끊깁니다.') + '\n계속할까요?', stop ? '송출 중단' : '대상 변경', true);
+  if (!ok) { $('#t_ip').value = cur.target_ip || ''; $('#t_port').value = cur.target_port; tTargetDirty(); return; }
+  try { const r = await patch({ transport: { target_ip: ip, target_port: port } }); CFG = r.config; toast(`송출 대상: ${ip || '(없음, 생성만)'}:${port}`); }
+  catch (e) { toast('대상 변경 실패: ' + e.message); }
+  tTargetDirty();
+};
 const PRESETS = { activePresets: { list: [20, 100, 200, 500, 1000, 2000, 3000, 5000], key: 'active_patients', input: 'g_active', cap: () => (SV || CFG).general.bed_capacity, capMsg: '병상 수' },
                   outPresets: { list: [10, 50, 100, 200], key: 'outpatient_count', input: 'g_out', cap: () => 500, capMsg: '최대' } };
 function renderPresets() {                                         // 버튼은 한 번만 만들고 상태만 갱신 (5초 갱신마다 새로 만들면 누르는 중인 클릭이 사라진다)
@@ -547,9 +576,21 @@ $('#btnReset').onclick = async () => {                          // 전체 옵션
 };
 $('#btnAtStart').onclick = async () => { const r = await post('/control/autotune', { action: 'start', step: Number($('#at_step').value), window_s: Number($('#at_win').value) }); toast(r.result); };
 $('#btnAtStop').onclick = async () => { const r = await post('/control/autotune', { action: 'stop' }); toast(r.result); };
+// 되돌릴 수 없거나 범위가 넓은 이벤트: 실행 전에 대상·영향을 보여 주고 확인 (IEC 62366 사용 오류 방지)
+const TRIG_RISK = { discharge: '퇴원 처리합니다. 패치가 반납되고 전원이 꺼집니다 (되돌릴 수 없음).', code_blue: '코드블루(심정지)를 시작합니다. 대응·결과까지 진행됩니다.',
+  deteriorate: '임상 악화를 시작합니다. 활력징후가 단계적으로 나빠집니다.', replace_patch: '패치를 새 번호로 교체합니다. 옛 패치는 반납됩니다.',
+  surge: '병상 5 % 규모의 환자 유입을 60분 동안 일으킵니다.', gateway_replace: '게이트웨이 한 대를 고장 처리하고 30초 뒤 새 장비로 교체합니다.',
+  switch_fault: '층 스위치 장애: 그 층 게이트웨이 전체의 업링크가 끊깁니다.', ap_fault: '무선 AP 장애: 연결된 게이트웨이가 끊깁니다.',
+  power_outage: '건물 정전: 그 건물 게이트웨이 전체가 꺼집니다.', storm: '연결 폭주: 모든 게이트웨이가 20초 동안 동시에 재접속합니다.' };
 $$('button[data-trig]').forEach(b => b.onclick = async () => {
   const inSig = b.closest('[data-tab="sig"]');
   let extra = {}; try { extra = b.dataset.params ? JSON.parse(b.dataset.params) : {}; } catch (e) { }
+  const risk = TRIG_RISK[b.dataset.trig];
+  if (inSig && !curPid) { toast('먼저 환자를 고르세요'); return; }
+  if (risk) {
+    const who = inSig ? `대상: ${($('#injWho') || {}).textContent || '-'}` : (['code_blue', 'deteriorate', 'discharge', 'replace_patch'].includes(b.dataset.trig) ? '대상: 무작위 재원 환자 1명' : '대상: 무작위');
+    if (!await askConfirm(b.textContent.trim().replace(/\s+/g, ' '), `${who}\n${risk}\n계속할까요?`, '실행', true)) return;
+  }
   const r = await post('/control/trigger', { what: b.dataset.trig, target: inSig ? curPid : null, ...extra }); toast(r.result);
   if (inSig) setTimeout(loadPatCard, 300);
 });
@@ -622,7 +663,9 @@ function drawSpark(cv, data, color) {
   g.stroke(); g.fillStyle = TH().muted; g.font = '11px sans-serif'; g.fillText(fmt(mx, 0), 4, 12);
 }
 // 송출 상태: 연결 기준은 전체 게이트웨이가 아니라 활성 게이트웨이(대기 중인 MCOT 모바일 GW 제외)
+let TX_RUNNING = null;                                           // 송출 중인지 (현장 테스트가 정지 중 주입을 막는 데 쓴다)
 function renderTxHealth(s, L, T) {
+  TX_RUNNING = !!s.running; try { ftTarget(); } catch (e) { }
   const act = s.gw_active || s.gateways || 0, con = T.connected || 0;
   const loss = (T.drop_noconn || 0) + (T.drop_backlog || 0) + (T.drop_saf || 0);
   const tgt = s.target && s.target.ip ? `${s.target.ip}:${s.target.port}` : '';
@@ -741,25 +784,27 @@ function renderShell(s, L, T, load) {
   const errPkt = (T.drop_emul || 0) + (T.drop_backlog || 0) + (T.send_err || 0);
   const rxc = $('#dkRx');
   if (rxc) {
-    const bad = anSum > 0 || (rx && rx.lost_packets);
-    $('.dk-v b', rxc).textContent = rx ? cnum(anSum) : '-';
-    $('.dk-v span', rxc).textContent = rx ? '이상' : '라우터 보고 없음';
-    $$('.dk-f', rxc)[0].innerHTML = rx ? `유실 ${cnum(rx.lost_packets)} · NACK ${cnum(rx.nack_tx)} · 복구 ${cnum(rx.recovered)}` : '';
+    // 색은 최근 5분 증가분으로만 판정한다: 누적 합계(재시작 전까지 계속 커짐)로 판정하면 카드가 늘 적색이라 아무도 보지 않게 된다
     const inc = ctrDelta();
-    $$('.dk-f', rxc)[1].innerHTML = rx ? (inc.total ? `최근 ${inc.mins}분 +${cnum(inc.total)}${inc.top ? ` (${esc(inc.top)} 증가)` : ''}` : `최근 ${inc.mins || 5}분 증가 없음`) + ` · 송신 오류 pkt ${cnum(errPkt)}` : '';
-    rxc.className = 'dk ' + (bad ? 'bad' : '');
+    $('.dk-v b', rxc).textContent = rx ? cnum(inc.total) : '-';
+    $('.dk-v span', rxc).textContent = rx ? `최근 ${inc.mins || 5}분 이상` : '라우터 보고 없음';
+    $$('.dk-f', rxc)[0].innerHTML = rx ? (inc.total ? `${inc.top ? `${esc(inc.top)} 증가가 가장 큼 · ` : ''}` : '증가 없음 · ') + `누적 ${cnum(anSum)} (유실 ${cnum(rx.lost_packets)} · NACK ${cnum(rx.nack_tx)} · 복구 ${cnum(rx.recovered)})` : '';
+    $$('.dk-f', rxc)[1].innerHTML = rx ? `송신 오류 pkt ${cnum(errPkt)}` : '';
+    rxc.className = 'dk ' + (!rx ? '' : inc.total ? 'warnc' : '');
   }
   // ---- 파이프라인
   const emrName = ($('#pillEmr') && $('#pillEmr').textContent || '').replace(/^EMR\s*/, '') || '에뮬레이터';
   const node = (kicker, name, meta, stat, kind) => `<div class="pn ${kind}"><div class="pn-h"><i></i><span>${kicker}</span><b>${stat}</b></div><div class="pn-n">${esc(name)}</div><div class="pn-m">${meta}</div></div>`;
   const arrow = '<svg class="pa" width="36" height="16" viewBox="0 0 36 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 8h26M24 3l6 5-6 5"/></svg>';
   const rxStale = d && (d.rx_age_s ?? 999) > 20;
+  const recentAn = rx ? ctrDelta().total : 0;                      // 수신 노드도 최근 5분 증가분으로 (누적값이면 늘 적색)
   const pipe = $('#dPipe');
   if (pipe) pipe.innerHTML = [
     node('송신', '에뮬레이터', `패치 ${fmt(L.active_patches)} · 워커 ${fmt(load, 0)}%`, s.running ? '정상' : '정지', s.running ? (load > 70 ? 'warn' : 'ok') : 'idle'),
     node('중계', `게이트웨이 ${fmt(s.gateways)}`, `장애 ${fmt(L.gw_down)} · 저하 ${fmt(L.gw_degraded)} · 끊김 ${fmt(L.gw_uplink_lost)}`, L.gw_down ? `장애 ${fmt(L.gw_down)}` : (L.gw_degraded ? '저하' : '정상'), L.gw_down ? 'err' : L.gw_degraded ? 'warn' : 'ok'),
-    node('수신', rx ? (rx.name || 'router').toUpperCase() : '라우터', `${tgt || '-'} · ${rx ? cnum(rx.records) + ' 레코드' : '보고 없음'}`, st === 'err' ? '미연결' : !rx ? '보고 없음' : rxStale ? `${d.rx_age_s}s 전` : anSum ? `이상 ${cnum(anSum)}` : '정상', st === 'err' ? 'err' : !rx || rxStale ? 'warn' : anSum ? 'err' : 'ok'),
-    node('연동', `EMR ${emrName}`, emrName === '에뮬레이터' ? '에뮬레이터 자체 EMR' : '연동 병원 EMR', '정상', 'ok'),
+    node('수신', rx ? (rx.name || 'router').toUpperCase() : '라우터', `${tgt || '-'} · ${rx ? cnum(rx.records) + ' 레코드' : '보고 없음'}`, st === 'err' ? '미연결' : !rx ? '보고 없음' : rxStale ? `${d.rx_age_s}s 전` : recentAn ? `최근 이상 +${cnum(recentAn)}` : '정상', st === 'err' ? 'err' : !rx || rxStale ? 'warn' : recentAn ? 'warn' : 'ok'),
+    node('연동', `EMR ${emrName}`, emrName === '에뮬레이터' ? '에뮬레이터 자체 EMR' : `연동 병원 EMR${EMR_HEALTH && EMR_HEALTH.detail ? ' · ' + esc(EMR_HEALTH.detail) : ''}`,
+      EMR_HEALTH ? EMR_HEALTH.label : '상태 확인 중', EMR_HEALTH ? EMR_HEALTH.kind : 'idle'),   // 예전엔 '정상' 고정 — 장애 주입·중단이 보이지 않았다
   ].join(arrow);
   // ---- 규모
   const scale = $('#dScale');
@@ -771,6 +816,19 @@ function renderShell(s, L, T, load) {
   }
   renderCounters();
 }
+let EMR_HEALTH = null;                                           // 대시보드 EMR 노드: 연동 병원의 실제 상태 (중단·장애 주입) — 30초마다
+async function emrHealth() {
+  try {
+    const L = await api('/emrsim/link');
+    if (!L.linked) { EMR_HEALTH = { label: '자체 EMR', kind: 'ok', detail: '' }; return; }
+    const cat = await api('/emrsim'); const s = (cat.sites || []).find(x => x.id === L.site); const f = s && s.stats ? s.stats.faults || {} : null;
+    if (!f) EMR_HEALTH = { label: '상태 미확인', kind: 'idle', detail: '' };
+    else if (f.down) EMR_HEALTH = { label: '중단', kind: 'err', detail: '서버 다운 주입 중' };
+    else if ((f.error_rate || 0) > 0 || (f.latency_ms || 0) > 0) EMR_HEALTH = { label: '장애 주입', kind: 'warn', detail: `오류 ${Math.round((f.error_rate || 0) * 100)}% · 지연 ${f.latency_ms || 0} ms` };
+    else EMR_HEALTH = { label: '정상', kind: 'ok', detail: `오류 응답 ${cnum(s.stats.errors || 0)}` };
+  } catch (e) { EMR_HEALTH = { label: '상태 미확인', kind: 'idle', detail: '' }; }
+}
+emrHealth(); setInterval(emrHealth, 30000);
 function ctrDelta() {                                                // 약 5분 전 스냅숏 대비 증가분
   if (ctrHist.length < 2) return { total: 0, mins: 0, by: {} };
   const now = ctrHist[ctrHist.length - 1], t0 = now.t - 300;
@@ -1008,7 +1066,10 @@ function connectWs() {
     if (d.accel) feedWave(waves.wAcc, d.accel, 0.001);
     const n = d.num || {};
     // 심박 0 의 뜻을 구분한다: 전극 분리(LEAD OFF) / 심정지(코드블루·심실세동) / 그 외 측정 불가
-    $('#nHr').textContent = n.hr || '--'; $('#vHr').textContent = n.hr ? n.hr + ' bpm' : (curRt && curRt.lead_off) ? 'LEAD OFF' : (curRt && curRt.clinical && curRt.clinical.kind === 'code_blue') ? '심정지 (VF)' : '--';
+    // HR 0 은 실제 0 (무수축·심정지): '--' 는 측정 불가(리드 오프·값 없음)에만 쓴다.  에뮬레이터는 경보를 내지 않으므로 색은 바꾸지 않는다.
+    const hrKnown = n.hr != null && !(curRt && curRt.lead_off);
+    $('#nHr').textContent = hrKnown ? String(n.hr) : '--';
+    $('#vHr').textContent = (curRt && curRt.lead_off) ? 'LEAD OFF' : hrKnown ? n.hr + ' bpm' : '--';
     $('#ecgLbl').textContent = 'ECG (mV)' + curPaced;
     $('#nSpo2').textContent = n.spo2 || '--'; $('#vSpo2').textContent = n.spo2 ? n.spo2 + ' %' : '--';
     $('#nResp').textContent = n.resp || '--'; $('#vResp').textContent = n.resp ? n.resp + ' /min' : '--';
@@ -1045,13 +1106,20 @@ async function selectRow(row, fromDetail = false) {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ row })); else connectWs();
   Object.values(waves).forEach(resetWave);
   loadPatCard(); if (trendOpen) loadTrend();
-  const w = $('#sigWho'); if (w) w.textContent = p ? `${p.name} · ${p.bed || (p.outpatient ? '원외' : '')}` : '';
+  const w = $('#sigWho'); if (w) w.textContent = p ? `${p.name} · 환자번호 #${p.patient_no ?? '-'} · ${p.bed || (p.outpatient ? '원외' : '')}` : '';
+  const iw = $('#injWho'); if (iw) iw.textContent = p ? `${p.name} · 환자번호 #${p.patient_no ?? '-'} · ${p.bed || (p.outpatient ? '원외' : '')}` : '환자를 고르세요';
   if (!fromDetail && curPid) showPatientDetail(curPid);
 }
 async function loadPatCard() {
   if (!curPid) return;
   try {
     const p = await api('/emr/patients/' + curPid); const r = p.runtime || {}; const a = p.admission || {}; curRt = r;
+    {                                                             // 파형 머리: 이중 식별(이름·환자번호·병상) + 지금 신호의 리듬·주입 상태 (경보가 아니라 사실 표시)
+      const rl = META && META.rhythms[r.rhythm_now] ? META.rhythms[r.rhythm_now].label : (r.rhythm_now || '');
+      const who = `${p.name} · 환자번호 #${r.patient_no ?? '-'} · ${r.bed || (a.mode === 'mcot' ? '원외' : '-')}`;
+      const w = $('#sigWho'); if (w) w.textContent = `${who}${rl ? ` · 신호 리듬 ${rl}` : ''}${r.episode ? ' (에피소드 중)' : ''}${r.clinical ? ` · ${r.clinical.label}` : ''}${r.patch_worn === false ? ' · 패치 미착용' : ''}`;
+      const iw = $('#injWho'); if (iw) iw.textContent = who;
+    }
     applySwitches(r);
     const chs = new Set(r.channels || []); if (r.channels) { $('#boxPpg').style.display = chs.has('ppg') ? '' : 'none'; $('#boxResp').style.display = chs.has('resp_wave') ? '' : 'none'; $('#boxAcc').style.display = chs.has('accel') ? '' : 'none'; }
     $('#patInfo').innerHTML = `<div class="patbody"><div class="patient"><img src="/api/v1/emr/patients/${p.id}/avatar.svg" alt=""><div class="info"><b>${p.name}</b> <span class="sub">${p.sex === 'M' ? '남' : '여'} ${p.age}세 · ${p.nationality_label} · ${p.weight_kg}kg</span>
@@ -1071,8 +1139,8 @@ async function loadPatCard() {
       ${r.settling_remaining > 0 ? `<tr><td>전극 상태</td><td><span class="tag warn">부착 후 안정화 중 · ${Math.ceil(r.settling_remaining)}초</span></td></tr>` : ''}
       <tr><td>입원 병실</td><td><b>${r.home_where || ''}</b> · ${a.ward_name || '-'} · ${r.home_room ? `병실 ${r.home_room}` : '-'} · 침상 ${r.bed || a.bed || '-'}</td></tr>
       <tr><td>현재 위치</td><td>${r.trip ? `<b>${r.location_where || ''} ${esc(r.location_name || '')}</b> <span class="sub">${r.location || ''}</span> · ${esc(r.trip.stage)} <span class="tag warn">이동 중</span>` : `${r.location_where || ''} 입원 병실 내 <span class="sub">${r.location || ''}</span>`} ${r.shadow ? '<span class="tag err">음영</span>' : ''}</td></tr>
-      <tr><td>게이트웨이</td><td>${r.gateway || '<span class="tag err">연결 없음</span>'} · RSSI ${r.rssi} dBm</td></tr>
-      <tr><td>패치</td><td>${r.patch} (id ${r.patch_id}) · ${battIcon(r.battery, !!(r.flags & 0x20))} ${r.lead_off ? '<span class="tag err">LEAD OFF</span>' : '<span class="tag ok">부착</span>'} ${r.spo2_off ? '<span class="tag warn">SpO2 센서 분리</span>' : ''}</td></tr>
+      ${r.patch_worn === false ? `<tr><td>패치</td><td><span class="tag">패치 미착용</span> <span class="sub">신호·위치 정보 없음 (병상 고정)</span></td></tr>` : `<tr><td>게이트웨이</td><td>${r.gateway || '<span class="tag err">연결 없음</span>'}${r.rssi != null ? ` · RSSI ${r.rssi} dBm` : ''}</td></tr>
+      <tr><td>패치</td><td>${esc(r.patch || '-')} (id ${r.patch_id}) · ${r.battery != null ? battIcon(r.battery, !!(r.flags & 0x20)) : ''} ${r.lead_off ? '<span class="tag err">LEAD OFF</span>' : '<span class="tag ok">부착</span>'} ${r.spo2_off ? '<span class="tag warn">SpO2 센서 분리</span>' : ''}</td></tr>`}
       <tr><td>담당</td><td>${r.doctor ? r.doctor.name + ' ' + r.doctor.title : '-'} / ${r.nurse ? r.nurse.name + ' 간호사' : '-'}</td></tr>
       <tr><td>체온/혈당/호흡 프로필</td><td>${p.temp_profile} / ${p.glucose_profile} / ${p.resp_kind}</td></tr>
       <tr><td>검사 일정</td><td>${(a.exams || []).map(e => `${e.time.slice(5, 16)} ${e.type}${e.done ? ' ✓' : ''}`).join('<br>') || '-'}</td></tr></table></div>`;
@@ -1087,6 +1155,7 @@ function attnOf(p) {
   const why = [];
   let a = 0;
   if (p.status === 'pool' || p.status === 'discharged') return { _attn: 0, _why: '' };
+  if (p.patch_worn === false) return { _attn: 0, _why: '', _unworn: true };     // 패치 미착용: 신호·배터리·연결 정보가 없다 → 주의 판정 대상 아님 (예전엔 '배터리 0%' 로 읽혀 위급이 됐다)
   if (ATTN_RED.test(p.rhythm_label || '')) { a = 2; why.push(p.rhythm_label); }
   if (p.lead_off) { a = 2; why.push('리드 오프'); }
   if (p.battery_level === '꺼짐') { a = 2; why.push('패치 배터리 소진'); }
@@ -1113,21 +1182,21 @@ async function loadPatients(force = false) {
       bed: p.bed || (p.admission ? p.admission.bed : '') || '', gateway: p.gateway || '', activity: p.activity || p.status || '', battery: p.battery ?? -1, rssi: p.rssi ?? -999, patch_id: (p.patch_id ?? (p.admission ? p.admission.patch_id : 0)) || 0, patient_no: p.patient_no ?? (p.admission ? p.admission.patient_no : null) ?? -1, rx_days: p.rx_days ?? 0, rx_left_h: p.rx_left_h ?? 1e9, patch_wear_days: p.patch_wear_days ?? -1, ward: p.ward || (p.admission ? p.admission.ward_name : '') || '', specialty: p.specialty || p.ward_specialty || '' })) };
   }
   patCache.items.forEach(p => { if (p._attn === undefined) Object.assign(p, attnOf(p)); });
-  const segN = { all: patCache.items.length, attn: 0, inpatient: 0, mcot: 0 };
-  patCache.items.forEach(p => { if (p._attn > 0) segN.attn++; if (p.outpatient) segN.mcot++; else segN.inpatient++; });
+  const segN = { all: patCache.items.length, attn: 0, inpatient: 0, mcot: 0, unworn: 0 };
+  patCache.items.forEach(p => { if (p._attn > 0) segN.attn++; if (p.outpatient) segN.mcot++; else segN.inpatient++; if (p._unworn) segN.unworn++; });
   $$('#patSeg button').forEach(b => { b.classList.toggle('on', b.dataset.seg === patSeg); b.setAttribute('aria-pressed', String(b.dataset.seg === patSeg)); $('b', b).textContent = fmt(segN[b.dataset.seg]); });
   let items = patCache.items.slice();
-  if (patSeg === 'attn') items = items.filter(p => p._attn > 0); else if (patSeg === 'inpatient') items = items.filter(p => !p.outpatient); else if (patSeg === 'mcot') items = items.filter(p => p.outpatient);
+  if (patSeg === 'attn') items = items.filter(p => p._attn > 0); else if (patSeg === 'inpatient') items = items.filter(p => !p.outpatient); else if (patSeg === 'mcot') items = items.filter(p => p.outpatient); else if (patSeg === 'unworn') items = items.filter(p => p._unworn);
   const k = patSort.key, d = patSort.dir, byAttn = $('#patAttnSort') && $('#patAttnSort').checked;
   items.sort((a, b) => { if (byAttn && a._attn !== b._attn) return b._attn - a._attn; const x = a[k], y = b[k]; if (x === y) return a.id - b.id; if (typeof x === 'number' && typeof y === 'number') return (x - y) * d; return String(x).localeCompare(String(y), 'ko') * d; });
   const pages = Math.max(1, Math.ceil(items.length / PAGE)); patPage = Math.min(patPage, pages - 1);
   $('#patCount').textContent = `총 ${fmt(items.length)}명 · ${patPage * PAGE + 1}-${Math.min(items.length, (patPage + 1) * PAGE)}`;
   $$('#patHead button').forEach(b => { b.classList.toggle('on', b.dataset.sort === k); b.classList.toggle('desc', b.dataset.sort === k && d < 0); });
-  $('#patBody').innerHTML = items.slice(patPage * PAGE, (patPage + 1) * PAGE).map(p => `<div class="prow${p._attn >= 2 ? ' attn-err' : p._attn ? ' attn-warn' : ''}" data-id="${p.id}" data-row="${p.row ?? -1}"${p._why ? ` title="주의: ${esc(p._why)}"` : ''}>
+  $('#patBody').innerHTML = items.slice(patPage * PAGE, (patPage + 1) * PAGE).map(p => `<div class="prow${p._attn >= 2 ? ' attn-err' : p._attn ? ' attn-warn' : ''}${p._unworn ? ' unworn' : ''}${p.id === patSelId ? ' sel' : ''}" data-id="${p.id}" data-row="${p.row ?? -1}"${p._why ? ` title="주의: ${esc(p._why)}"` : ''}>
     <div class="who"><img src="/api/v1/emr/patients/${p.id}/avatar.svg" loading="lazy" alt=""><div><div class="l1">${esc(p.name)} <span class="sub">${p.sex}/${p.age}</span></div><div class="l2">환자번호 #${p.patient_no ?? '-'} · 프로필 #${p.id} · ${esc(p.mrn || '')}</div></div></div>
     <div><div class="l1">${esc(p.disease)}${p.pacemaker ? ` <span class="tag warn">⚡${(p.pacemaker_type || (p.pacemaker_info && p.pacemaker_info.type)) === 'icd' ? 'ICD' : (p.pacemaker_mode || (p.pacemaker_info && p.pacemaker_info.mode) || 'PM')}</span>` : ''}</div><div class="l2">${esc(p.rhythm_label)}</div></div>
     <div><div class="l1">${esc(p.bed || '-')}${p.overseas ? ` <span class="tag warn" title="${esc(abroadTitle(p.abroad))}">해외 · ${esc((p.abroad && p.abroad.country_label) || '')}</span>` : ''}${p.ward ? ` <span class="sub">${esc(p.ward)}</span>` : ''}</div><div class="l2">${esc(p.specialty || '')}${p.specialty ? ' · ' : ''}${esc(p.gateway || (p.status === 'admitted' || p.status === 'outpatient' ? '연결 없음' : p.status || '-'))}</div></div>
-    <div><div class="l1">${p.patch ? `${esc(p.patch)} <span class="sub">#${p.patch_id}</span>` : '-'}</div><div class="l2">${(p.devices || []).filter(x => x !== 'ecg_patch').map(x => DEV && DEV.devices[x] ? DEV.devices[x].short : x).join(' · ') || (p.devices ? 'ECG만' : '-')}</div></div>
+    <div><div class="l1">${p.patch ? `${esc(p.patch)} <span class="sub">#${p.patch_id}</span>` : p._unworn ? '<span class="tag">패치 미착용</span>' : '-'}</div><div class="l2">${(p.devices || []).filter(x => x !== 'ecg_patch').map(x => DEV && DEV.devices[x] ? DEV.devices[x].short : x).join(' · ') || (p.devices ? 'ECG만' : '-')}</div></div>
     <div><div class="l1">${esc(p.activity || '-')}${p.note ? ` <span class="sub">${esc(p.note)}</span>` : ''}</div><div class="l2">${p.battery_level ? `<span class="tag ${p.battery_level === '충분' ? 'ok' : 'err'}" title="패치 연료계 (실제 ${p.battery_true_pct ?? '-'}% · 남은 ${p.battery_remain_h ?? '-'}h${p.battery_swap_in_h != null ? ` · 교체 예정 ${p.battery_swap_in_h}h 뒤` : ''})">배터리 ${p.battery_level}</span>` : (p.battery >= 0 ? battIcon(p.battery) : '-')} · RSSI ${p.rssi > -999 ? p.rssi : '-'}</div></div>
     <div title="${p.rx_days ? `모니터링 처방 ${esc(p.rx_tier)} ${p.rx_days}일${p.rx_extended ? ` (연장 ${p.rx_extended}일 포함)` : ''} · 위중도 ${p.rx_acuity} · 남은 ${fmtLeftH(p.rx_left_h)} · 패치 착용 ${p.patch_wear_days}일` : ''}">${p.rx_days ? `<div class="l1"><b>${p.rx_days}일</b> <span class="sub">${esc(p.rx_tier)}${p.rx_extended ? ' +연장' : ''}</span></div><div class="l2">D+${p.rx_day} · 남은 ${fmtLeftH(p.rx_left_h)}${p.patch_wear_days != null ? ` · 착용 ${p.patch_wear_days}일` : ''}</div>` : '<div class="l1">-</div>'}</div>
   </div>`).join('') || '<div class="dd-empty">환자 없음</div>';
@@ -1155,6 +1224,7 @@ $('#patHead').addEventListener('click', e => { const b = e.target.closest('butto
 setInterval(() => { if ($('[data-tab="pat"]').classList.contains('on')) loadPatients(true); }, 10000);
 $('#patBody').addEventListener('click', e => { const tr = e.target.closest('.prow[data-id]'); if (tr) showPatientDetail(Number(tr.dataset.id)); });
 async function showPatientDetail(id) {                          // detail card for one patient (table row click, plan marker, moving list)
+  patSelId = id;
   $$('.prow', $('#patBody')).forEach(x => x.classList.toggle('sel', Number(x.dataset.id) === id));
   const p = await api('/emr/patients/' + id); const r = p.runtime; const a = p.admission;
   const X = $('#patExtra'); if (!X) return;
@@ -1859,13 +1929,15 @@ $('#layoutFile').addEventListener('change', async e => {
   e.target.value = '';
 });
 // in-app confirm dialog (Promise<boolean>); Esc / 취소 = false
-function askConfirm(title, msg, yesLabel = '실행') {
+function askConfirm(title, msg, yesLabel = '실행', danger = false) {
+  // danger: 되돌릴 수 없거나 범위가 큰 동작 — 실행 버튼은 빨강, 기본 포커스는 [취소], Enter 로는 실행되지 않는다
   return new Promise(res => {
     const dlg = $('#confirmDlg'); $('#confirmTitle').textContent = title; $('#confirmMsg').textContent = msg; $('#confirmYes').textContent = yesLabel; dlg.hidden = false;
+    $('#confirmYes').classList.toggle('danger', !!danger); $('#confirmYes').classList.toggle('primary', !danger);
     const done = (v) => { dlg.hidden = true; $('#confirmYes').onclick = $('#confirmNo').onclick = null; document.removeEventListener('keydown', onKey); res(v); };
-    const onKey = (e) => { if (e.key === 'Escape') done(false); if (e.key === 'Enter') done(true); };
+    const onKey = (e) => { if (e.key === 'Escape') done(false); if (e.key === 'Enter' && !danger) done(true); };
     $('#confirmYes').onclick = () => done(true); $('#confirmNo').onclick = () => done(false); dlg.onclick = (e) => { if (e.target === dlg) done(false); };
-    document.addEventListener('keydown', onKey); $('#confirmYes').focus();
+    document.addEventListener('keydown', onKey); (danger ? $('#confirmNo') : $('#confirmYes')).focus();
   });
 }
 $('#btnLayoutReset').onclick = async () => {
@@ -1892,7 +1964,9 @@ async function loadGateways() {
   const list = r.gateways.filter(g => f === 'all' || (f === 'down' && g.status >= 2) || (f === 'degraded' && g.status === 1) || (f === 'busy' && g.n_conn > 0) || (f === 'mobile' && g.type === 'mobile')).sort(cmp).slice(0, 400);
   $('#gwTable tbody').innerHTML = list.map(g => `<tr data-gwrow="${g.idx}"><td><span class="gwlink" data-gwopen="${g.idx}" title="중앙 모니터 열기">${g.id} <span class="sub">#${g.gw_no}</span></span></td><td>${g.type}</td><td>${g.building} ${g.floor}F ${g.room}</td><td><span class="tag ${['ok', 'warn', 'err', 'warn'][g.status]}">${['정상', '저하', '장애', '업링크 단절'][g.status]}</span> ${g.reason || ''}</td><td>${g.n_conn}/${g.capacity}</td><td>${g.cpu}%</td><td>${g.mem}%</td><td>${g.net}%</td><td>${g.wan_rssi}</td><td>${(g.loss * 100).toFixed(0)}%</td><td>${g.latency_ms.toFixed(0)}ms</td><td>${fmt(g.pkts)}</td><td>${g.connected ? '<span class="tag ok">on</span>' : '-'}</td><td><button class="small" data-gw="${g.idx}">장애</button> <button class="small" data-gwrep="${g.idx}">교체</button></td></tr>`).join('');
 }
-$('#gwTable').addEventListener('click', async e => { const o = e.target.closest('[data-gwopen]'); if (o) { openGatewayMonitor(Number(o.dataset.gwopen)); return; } const b = e.target.closest('button[data-gw]'), c = e.target.closest('button[data-gwrep]'); if (b) { const r = await post('/control/trigger', { what: 'gateway_fault', target: Number(b.dataset.gw) }); toast(r.result); } else if (c) { const r = await post('/control/trigger', { what: 'gateway_replace', target: Number(c.dataset.gwrep) }); toast(r.result); } });
+$('#gwTable').addEventListener('click', async e => { const o = e.target.closest('[data-gwopen]'); if (o) { openGatewayMonitor(Number(o.dataset.gwopen)); return; } const b = e.target.closest('button[data-gw]'), c = e.target.closest('button[data-gwrep]'); const gwName = (el) => { const tr = el.closest('tr'); return tr ? (tr.cells[0] || {}).textContent.trim() : '게이트웨이'; };
+  if (b) { if (!await askConfirm('게이트웨이 장애', `${gwName(b)} 를 90초 동안 장애 상태로 만듭니다.\n연결된 환자는 인접 게이트웨이로 옮기거나 끊깁니다.\n계속할까요?`, '장애 주입', true)) return; const r = await post('/control/trigger', { what: 'gateway_fault', target: Number(b.dataset.gw) }); toast(r.result); }
+  else if (c) { if (!await askConfirm('게이트웨이 교체', `${gwName(c)} 를 고장 처리하고 30초 뒤 새 장비(새 번호)로 교체합니다.\n계속할까요?`, '교체', true)) return; const r = await post('/control/trigger', { what: 'gateway_replace', target: Number(c.dataset.gwrep) }); toast(r.result); } });
 // ---- map search (patients by name, gateways by number/id) with highlight on the plan
 let mapHighlight = null;
 // 검색 대상 목록(환자·게이트웨이)은 잠깐 캐시해 두고 글자마다 다시 받지 않는다
@@ -1999,7 +2073,20 @@ const BAT_LOW = 15;
 const CS_TH = { waveBg: '#000', gridMinor: 'rgba(0,0,0,0)', gridMajor: 'rgba(243,242,242,.10)', ecg: CS_C.hr, ppg: CS_C.spo2, resp: CS_C.rr, warn: '#ff9783', err: '#ff563c', gl: CS_C.gl, ax: ['#ff9783', '#3ddc84', '#38c8f0'], paceLine: ['#ffe34d', '#ffffff', '#ff9783'] };   // pacer pulses: A yellow, V white, LV salmon
 const VM_TH = { light: { waveBg: '#f3f2f2', gridMinor: 'rgba(0,0,0,0)', gridMajor: 'rgba(32,30,29,.16)', ecg: '#201e1d', ppg: '#7d7979', resp: '#7d7979', warn: '#dd2b0f', err: '#ec3013', gl: '#7d7979', ax: ['#ec3013', '#605d5d', '#9b9797'], paceLine: ['#dd2b0f', '#ec3013', '#ff9783'] },
   night: { waveBg: '#141313', gridMinor: 'rgba(0,0,0,0)', gridMajor: 'rgba(243,242,242,.18)', ecg: '#f3f2f2', ppg: '#9b9797', resp: '#9b9797', warn: '#ff9783', err: '#ff563c', gl: '#9b9797', ax: ['#ff9783', '#bab6b6', '#9b9797'], paceLine: ['#ffe34d', '#ff9783', '#ffc4b8'] } };
-const RH_ALARM = { vfib: ['red', 'VFIB'], vt: ['red', 'VTACH'], asystole: ['red', 'ASYSTOLE'], avb3: ['red', 'AV BLOCK III'], nsvt: ['yellow', 'NSVT'], paced_malfunction: ['yellow', 'PACER FAIL'], svt: ['yellow', 'SVT'], afib: ['yellow', 'AFIB'], aflutter: ['yellow', 'AFL'], avb2: ['yellow', 'AV BLOCK II'] };
+// 기대 경보 기준표 (emulator/alarms.py, GET /api/v1/alarms) — 에뮬레이터는 경보를 내보내지 않는다. 이 화면은 라우터·뷰어에서 떠야 할 경보를 미리 보여 주는 참고용이다.
+// 아래 기본값은 서버 표와 같고, 시작할 때 서버 표로 덮어쓴다 (한 곳에서만 고치면 현장 테스트·매뉴얼·이 화면이 같이 바뀐다).
+const RH_ALARM = { vfib: ['red', 'VFIB'], vt: ['red', 'VTACH'], asystole: ['red', 'ASYSTOLE'], avb3: ['red', 'AV BLOCK III'], nsvt: ['yellow', 'NSVT'], paced_malfunction: ['yellow', 'PACER FAIL'], svt: ['yellow', 'SVT'], afib: ['yellow', 'AFIB'], aflutter: ['yellow', 'AFL'], avb2: ['yellow', 'AV BLOCK II'], stemi: ['yellow', 'ST ELEV'], pvc_bigeminy: ['cyan', 'PVC BIGEMINY'] };
+const ALIM_HIGH = { hr: [40, 150], spo2: [88, null], nibp_sys: [80, 190] };
+const TECH_ALARM = { no_signal: ['yellow', 'NO SIGNAL'], lead_off: ['yellow', 'ECG LEAD OFF'], gw_down: ['yellow', 'GATEWAY DOWN'], battery_low: ['cyan', 'BATTERY LOW'] };
+api('/alarms').then(t => {
+  Object.keys(RH_ALARM).forEach(k => delete RH_ALARM[k]);
+  Object.entries(t.rhythms).forEach(([k, v]) => { RH_ALARM[k] = [v.color, v.code]; });
+  Object.entries(t.technical).forEach(([k, v]) => { TECH_ALARM[k] = [v.color, v.code]; });
+  const L = t.limits; const med = (k, i, d) => (L[k] && L[k].medium && L[k].medium[i] != null) ? L[k].medium[i] : d;
+  LIMITS.hr = [med('hr', 0, 50), med('hr', 1, 120)]; LIMITS.spo2 = [med('spo2', 0, 90), 100]; LIMITS.rr = [med('rr', 0, 8), med('rr', 1, 30)];
+  LIMITS.nibp = [med('nibp_sys', 0, 90), med('nibp_sys', 1, 160)]; LIMITS.temp = [35.5, med('temp', 1, 38.5)]; LIMITS.gl = [med('glucose', 0, 70), med('glucose', 1, 250)];
+  ['hr', 'spo2', 'nibp_sys'].forEach(k => { if (L[k] && L[k].high) ALIM_HIGH[k] = L[k].high; });
+}).catch(() => { });
 const mon = { open: false, idx: -1, gw: null, ws: null, states: {}, pats: [], rows: [], last: {}, timer: null, clock: null, lastMsg: 0, silenced: false, preset: null, page: 0, grid: { c: 1, r: 1 } };
 // n-up presets (cols × rows); 'auto' picks the grid whose tile aspect is closest to the mockup tile (≈1.55 : 1) for the current window
 const CS_PRESETS = [{ id: 'auto', label: 'Auto' }, { id: '2x1', c: 2, r: 1 }, { id: '2x2', c: 2, r: 2 }, { id: '2x3', c: 2, r: 3 }, { id: '3x3', c: 3, r: 3 }, { id: '3x4', c: 3, r: 4 }, { id: '4x5', c: 4, r: 5 }, { id: '4x6', c: 4, r: 6 }, { id: '6x8', c: 6, r: 8 },
@@ -2053,18 +2140,18 @@ const batIcon = (pct) => { const lvl = Math.max(0, Math.min(100, pct || 0)), col
 function rhAlarm(p) { const rk = (p.rhythm || '').toLowerCase(); if (RH_ALARM[rk]) return RH_ALARM[rk]; const e = Object.entries(RH_ALARM).find(([k]) => rk.startsWith(k)); return e ? e[1] : null; }
 function monAlarm(p, n) {
   // priority like a central station: red (life-threatening) before yellow (limit / technical), first match wins
-  if (p.shadow) return ['red', 'NO SIGNAL'];
+  if (p.shadow) return TECH_ALARM.no_signal;
   const ra = rhAlarm(p);
   if (ra && ra[0] === 'red') return ra;
   if (n) {
-    if (n.spo2 && n.spo2 < 88) return ['red', `SpO₂ LOW ${n.spo2}`];
-    if (n.hr && n.hr > 150) return ['red', `HR HIGH ${n.hr}`];
-    if (n.hr && n.hr < 40) return ['red', `HR LOW ${n.hr}`];
+    if (n.spo2 && n.spo2 < ALIM_HIGH.spo2[0]) return ['red', `SpO₂ LOW ${n.spo2}`];
+    if (n.hr && n.hr > ALIM_HIGH.hr[1]) return ['red', `HR HIGH ${n.hr}`];
+    if (n.hr && n.hr < ALIM_HIGH.hr[0]) return ['red', `HR LOW ${n.hr}`];
   }
   const bp = p.nibp;
-  if (bp && (bp.sys >= 190 || bp.sys < 80)) return ['red', `NIBP ${bp.sys >= 190 ? 'HIGH' : 'LOW'} ${bp.sys}/${bp.dia}`];
-  if (p.lead_off) return ['yellow', 'ECG LEAD OFF'];
-  if (ra) return ra;
+  if (bp && (bp.sys > ALIM_HIGH.nibp_sys[1] || bp.sys < ALIM_HIGH.nibp_sys[0])) return ['red', `NIBP ${bp.sys > ALIM_HIGH.nibp_sys[1] ? 'HIGH' : 'LOW'} ${bp.sys}/${bp.dia}`];
+  if (p.lead_off) return TECH_ALARM.lead_off;
+  if (ra && ra[0] === 'yellow') return ra;
   if (n) {
     if (n.spo2 && n.spo2 < LIMITS.spo2[0]) return ['yellow', `SpO₂ LOW ${n.spo2}`];
     if (n.hr && n.hr > LIMITS.hr[1]) return ['yellow', `HR HIGH ${n.hr}`];
@@ -2075,7 +2162,8 @@ function monAlarm(p, n) {
     if (n.temp && n.temp >= LIMITS.temp[1]) return ['yellow', `TEMP HIGH ${n.temp.toFixed(1)}`];
     if (n.glucose && (n.glucose < LIMITS.gl[0] || n.glucose > LIMITS.gl[1])) return ['yellow', `GLU ${n.glucose.toFixed(0)}`];
   }
-  if (p.battery !== undefined && p.battery <= BAT_LOW) return ['yellow', `BATTERY LOW ${p.battery}%`];
+  if (ra) return ra;                                                           // 낮은 우선순위 리듬 (청록)
+  if (p.battery_level === '부족' || p.battery_level === '꺼짐' || (!p.battery_level && p.battery != null && p.battery >= 0 && p.battery <= BAT_LOW)) return [TECH_ALARM.battery_low[0], TECH_ALARM.battery_low[1]];
   return ['', 'NORMAL'];
 }
 const decHtml = (v, cls) => { const t = String(v); const i = t.indexOf('.'); return i < 0 ? esc(t) : `${esc(t.slice(0, i))}<span class="${cls}">${esc(t.slice(i))}</span>`; };   // fraction digits smaller than the integer part
@@ -3210,9 +3298,9 @@ async function loadScnPresets(keepPos = true) {
   };
 })();
 // ---------------- 현장 테스트: 게이트웨이를 골라 이벤트를 보내고 그 게이트웨이를 보는 뷰어에 뜨는지 확인
-const FT = { gws: [], gw: null, pats: [], pid: null, dur: 60, st: null, timer: null };
+const FT = { gws: [], gw: null, pats: [], pid: null, lost: null, dur: 60, st: null, timer: null };
 try { const g = localStorage.getItem('ft:gw'); if (g !== null) FT.gw = Number(g); FT.dur = Number(localStorage.getItem('ft:dur')) || 60; } catch (e) { }
-const FT_PRIO = { high: ['위급', 'ft-high'], medium: ['주의', 'ft-med'], low: ['권고 · 기술', 'ft-low'] };
+const FT_PRIO = { high: ['위급', 'ft-high'], medium: ['주의', 'ft-med'], low: ['권고', 'ft-low'] };   // 우선순위는 emulator/alarms.py 기대 경보 기준표
 const GW_ST = ['정상', '성능 저하', '무응답', '업링크 끊김'];
 async function ftLoadGws() {
   try { FT.gws = (await api('/emr/gateways')).gateways; } catch (e) { return; }
@@ -3232,27 +3320,54 @@ function ftGwInfo() {
 async function ftLoadPats() {
   if (FT.gw === null) { setHtml($('#ftPats'), ''); return; }
   try { FT.pats = (await api(`/emr/gateways/${FT.gw}/patients`)).patients || []; } catch (e) { FT.pats = []; }
-  if (FT.pid !== null && !FT.pats.some(p => p.id === FT.pid)) FT.pid = null;
-  setHtml($('#ftPats'), `<button class="ft-pat" data-pid="">전체 <span class="sub">${FT.pats.length}명</span></button>` +
+  // 고른 환자가 이 게이트웨이를 떠나도(이동·핸드오버) 대상을 말없이 '전체'로 바꾸지 않는다 — 대상 이탈로 표시하고 주입을 막는다
+  // (예전엔 다음 이벤트가 그 게이트웨이의 환자 전체에게 갔다)
+  const lostP = FT.pid !== null && !FT.pats.some(p => p.id === FT.pid);
+  if (lostP && !FT.lost) FT.lost = { id: FT.pid, name: (FT.lastPat && FT.lastPat.id === FT.pid) ? FT.lastPat.name : `환자 #${FT.pid}` };
+  if (!lostP) FT.lost = null;
+  setHtml($('#ftPats'), (FT.lost ? `<button class="ft-pat lost on" data-pid="${FT.lost.id}" disabled>${esc(FT.lost.name)} <span class="tag err">게이트웨이 이탈</span></button>` : '') +
+    `<button class="ft-pat" data-pid="">전체 <span class="sub">${FT.pats.length}명</span></button>` +
     FT.pats.map(p => `<button class="ft-pat" data-pid="${p.id}" title="${esc(p.disease)} · ${esc(p.rhythm_label || '')}">` +
       `<b>${esc(p.bed)}</b> ${esc(p.name)} <span class="sub">${esc(p.rhythm_label || '')}</span></button>`).join(''));
   const on = FT.pid === null ? '' : String(FT.pid);
   $$('#ftPats .ft-pat').forEach(b => b.classList.toggle('on', b.dataset.pid === on));
+  const cur = FT.pats.find(p => p.id === FT.pid); if (cur) FT.lastPat = cur;
+  ftTarget();
+}
+function ftTarget() {                                             // 이벤트 버튼 위 고정 표시: 지금 누르면 무엇이 누구에게 가는지
+  const el = $('#ftTarget'); if (!el) return;
+  const g = FT.gws.find(x => x.idx === FT.gw), p = FT.pats.find(x => x.id === FT.pid);
+  const dur = FT.dur >= 60 ? `${FT.dur / 60}분` : `${FT.dur}초`;
+  let msg, bad = false;
+  if (TX_RUNNING === false) { msg = '송출이 정지돼 있습니다 — 이벤트를 보내도 뷰어에 아무것도 나오지 않습니다. 먼저 송출을 시작하세요.'; bad = true; }
+  else if (FT.gw === null || !g) { msg = '게이트웨이를 고르세요'; bad = true; }
+  else if (FT.lost) { msg = `${FT.lost.name} 님이 ${g.id} 를 떠났습니다 — 대상 환자를 다시 고르세요 (지금은 보낼 수 없음)`; bad = true; }
+  else msg = `대상: ${g.id} · ${p ? `${p.name} (${p.bed || '-'}) 1명` : `환자 전체 ${FT.pats.length}명`} · 유지 ${dur}`;
+  el.textContent = msg; el.classList.toggle('bad', bad);
+  $$('#ftEvents .ft-ev').forEach(b => { b.disabled = bad; });
 }
 $('#ftPats').addEventListener('click', e => {                     // 위임: 목록을 새로 그려도 다시 묶을 필요 없음
   const b = e.target.closest('.ft-pat'); if (!b) return;
-  FT.pid = b.dataset.pid === '' ? null : Number(b.dataset.pid); $$('#ftPats .ft-pat').forEach(x => x.classList.toggle('on', x === b));
+  FT.pid = b.dataset.pid === '' ? null : Number(b.dataset.pid); FT.lost = null; $$('#ftPats .ft-pat').forEach(x => x.classList.toggle('on', x === b));
+  const cur = FT.pats.find(p => p.id === FT.pid); if (cur) FT.lastPat = cur; ftLoadPats();
 });
 function ftRenderEvents() {
   if (!FT.st) return;
   const by = { high: [], medium: [], low: [] };
   FT.st.events.forEach(e => by[e.prio].push(e));
   $('#ftEvents').innerHTML = Object.entries(by).map(([k, evs]) => `<div class="ft-group ${FT_PRIO[k][1]}"><div class="ft-glabel">${FT_PRIO[k][0]}</div><div class="ft-evs">` +
-    evs.map(e => `<button class="ft-ev" data-ev="${e.id}" title="뷰어에서 확인: ${esc(e.expect)}"><b>${esc(e.label)}</b><span>${esc(e.expect)}</span></button>`).join('') + `</div></div>`).join('');
+    evs.map(e => `<button class="ft-ev" data-ev="${e.id}" title="뷰어에서 확인: ${esc(e.expect)}"><b>${esc(e.label)}${e.technical ? ' <span class="tag">기술</span>' : ''}</b><span>${esc(e.expect)}</span></button>`).join('') + `</div></div>`).join('');
   $$('#ftEvents .ft-ev').forEach(b => b.onclick = () => ftSend(b.dataset.ev, b));
+  ftTarget();
 }
 async function ftSend(ev, btn) {
   if (FT.gw === null) { toast('게이트웨이를 고르세요'); return; }
+  if (FT.lost) { toast('대상 환자가 게이트웨이를 떠났습니다 — 다시 고르세요'); return; }
+  const evd = (FT.st && FT.st.events || []).find(e => e.id === ev) || {};
+  if (FT.pid === null && FT.pats.length > 1 && evd.prio === 'high') {          // 전체 + 위급: 여러 명에게 동시에 위급 이벤트
+    const g = FT.gws.find(x => x.idx === FT.gw);
+    if (!await askConfirm(`${evd.label || ev} · 전체 대상`, `${g ? g.id : '게이트웨이'} 의 환자 ${FT.pats.length}명 모두에게 동시에 보냅니다.\n한 명만 시험하려면 [취소] 후 환자를 고르세요.`, `${FT.pats.length}명에게 보내기`, true)) return;
+  }
   btn.disabled = true;
   try {
     const r = await post('/fieldtest', { gw: FT.gw, event: ev, patient_id: FT.pid, duration: FT.dur });
@@ -3276,10 +3391,10 @@ async function ftLoad() {
   const run = document.querySelector('#runTxt'); $('#ftTx').textContent = run ? `· ${run.textContent}` : '';
 }
 $('#ftActive tbody').addEventListener('click', async e => { const b = e.target.closest('[data-ftc]'); if (!b) return; await post('/fieldtest/clear', { id: Number(b.dataset.ftc) }); ftLoad(); });   // 위임
-$('#ftGw').addEventListener('change', () => { const v = $('#ftGw').value; FT.gw = v === '' ? null : Number(v); FT.pid = null; try { if (FT.gw !== null) localStorage.setItem('ft:gw', FT.gw); } catch (e) { } ftGwInfo(); ftLoadPats(); });
+$('#ftGw').addEventListener('change', () => { const v = $('#ftGw').value; FT.gw = v === '' ? null : Number(v); FT.pid = null; FT.lost = null; try { if (FT.gw !== null) localStorage.setItem('ft:gw', FT.gw); } catch (e) { } ftGwInfo(); ftLoadPats(); });
 $('#ftOnlyPat').onchange = ftLoadGws;
 $('#ftGwRefresh').onclick = ftLoadGws;
-$$('#ftDur button').forEach(b => { b.classList.toggle('on', Number(b.dataset.s) === FT.dur); b.onclick = () => { FT.dur = Number(b.dataset.s); try { localStorage.setItem('ft:dur', FT.dur); } catch (e) { } $$('#ftDur button').forEach(x => x.classList.toggle('on', x === b)); }; });
+$$('#ftDur button').forEach(b => { b.classList.toggle('on', Number(b.dataset.s) === FT.dur); b.onclick = () => { FT.dur = Number(b.dataset.s); setTimeout(ftTarget, 0); try { localStorage.setItem('ft:dur', FT.dur); } catch (e) { } $$('#ftDur button').forEach(x => x.classList.toggle('on', x === b)); }; });
 $('#ftClearAll').onclick = async () => { const r = await post('/fieldtest/clear', {}); toast(`정상 복귀 ${r.cleared}건`); ftLoad(); };
 setInterval(() => { if (document.querySelector('section[data-tab="test"].on')) { ftLoad(); if (!FT.gws.length) ftLoadGws(); } }, 1000);
 setInterval(() => { if (document.querySelector('section[data-tab="test"].on')) ftLoadGws(); }, 10000);

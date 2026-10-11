@@ -126,7 +126,7 @@
           </div>
         </div>
       </div>
-      <div class="card"><h3>이 환자에게 이벤트 주입</h3>
+      <div class="card"><h3>이벤트 주입 대상 <b id="injWho" class="inj-who">환자를 고르세요</b></h3>
         <div class="switches">
           <label class="sw" data-trig="lead_off" data-off="lead_off_off"><input type="checkbox"><span class="track"></span><span class="txt">리드 오프 <small>60초</small></span><span class="rem"></span></label>
           <label class="sw" data-trig="episode" data-off="episode_off"><input type="checkbox"><span class="track"></span><span class="txt">부정맥 에피소드 <small>180초</small></span><span class="rem"></span></label>
@@ -151,7 +151,7 @@
   <div>
     <div class="card">
       <h3>환자 목록 <span class="right" id="patCount"></span></h3>
-      <div class="patseg" id="patSeg" role="group" aria-label="환자 구분"><button data-seg="all" class="on">전체 <b></b></button><button data-seg="attn">주의 <b></b></button><button data-seg="inpatient">입원 <b></b></button><button data-seg="mcot">MCOT <b></b></button>
+      <div class="patseg" id="patSeg" role="group" aria-label="환자 구분"><button data-seg="all" class="on">전체 <b></b></button><button data-seg="attn">주의 <b></b></button><button data-seg="inpatient">입원 <b></b></button><button data-seg="mcot">MCOT <b></b></button><button data-seg="unworn" title="패치를 붙이지 않은 입원 환자: 신호·위치 정보가 없어 경보 대상이 아닙니다">미착용 <b></b></button>
         <label class="chk sm attnsort"><input type="checkbox" id="patAttnSort" checked> 주의 필요 순 정렬</label></div>
       <div class="row">
         <div class="field"><span>상태</span><select id="patStatus"><option value="admitted">입원/MCOT (모니터링 중)</option><option value="inpatient">입원만</option><option value="mcot">MCOT만 (원외)</option><option value="overseas">해외 체류 MCOT만</option><option value="pool">대기 프로필</option><option value="discharged">퇴원</option><option value="all">전체 (1만명)</option></select></div>
@@ -405,6 +405,7 @@
     </div></div>
     <div class="card tx-target" data-apply="now"><h3><button class="fold" data-fold="txb-1" aria-expanded="true">▾</button>송신 대상 (라우터)</h3><div class="scnb" id="txb-1">
       <div class="row"><div class="field" style="flex:2"><span>서버 IP (비우면 생성만 수행)</span><input type="text" id="t_ip" placeholder="예: 192.168.0.10"></div><div class="field"><span>포트</span><input type="number" id="t_port" min="1" max="65535"></div></div>
+      <div class="row tight" style="align-items:center"><button class="small" id="tProbe" title="이 주소로 TCP 접속만 해 봅니다 (데이터는 보내지 않음)">연결 시험</button><button class="small primary" id="tApply" disabled>대상 변경 적용</button><span class="sub" id="tStat">송출 대상은 [대상 변경 적용]을 눌러야 바뀝니다 · 8080·5445·7300 은 쓸 수 없습니다</span></div>
       <div class="row"><div class="field"><span>번들 주기 (ms)</span><input type="number" id="t_bundle" min="50" max="2000" step="50"></div></div>
       <div class="row"><div class="field"><span>META 전송 주기 (프레임)</span><input type="number" id="t_meta" min="1" max="1000"></div><div class="field"><span>GW 상태 주기 (프레임)</span><input type="number" id="t_gws" min="1" max="1000"></div></div>
       <div class="row"><div class="field"><span>워커 프로세스 (0=자동)</span><input type="number" id="t_workers" min="0" max="16"></div><div class="field"><span>송신 백로그 한도 (bytes)</span><input type="number" id="t_backlog" min="4096" step="4096"></div></div>
@@ -516,6 +517,7 @@
       </div>
       <div class="ft-pane">
         <h4 class="ft-ph">2. 이벤트 보내기 <span class="sub">누르면 바로 전송 · 시간이 지나면 정상 복귀</span></h4>
+        <div id="ftTarget" class="ft-target" role="status" aria-live="polite"></div>
         <div id="ftEvents"></div>
       </div>
       <div class="ft-pane">
@@ -625,7 +627,7 @@
         <div class="gitem" id="g201-2"><h4>특정 환자에게 이벤트 주입 (모니터링 탭)</h4>
           <ol class="gsteps"><li>스위치 켜기 = 리드오프 60초 · 부정맥 180초 · 심실세동 120초 · MRI 이동(단계·남은 시간 표시).</li><li>시간이 끝나면 자동으로 풀리고, 끄면 즉시 취소됩니다.</li><li>패치 교체·퇴원 버튼도 같은 카드에 있습니다. MRI 후에는 패치 번호가 바뀝니다.</li></ol></div>
         <div class="gitem" id="g201-3"><h4>중앙 모니터 알람 읽기</h4>
-          <ol class="gsteps"><li><b class="red">적색</b>: VFib · VT · 무수축 · 3도 차단 · SpO₂&lt;88 · HR&gt;150/&lt;40 · NIBP≥190/&lt;80 · 신호 없음.</li><li><b class="yel">황색</b>: AFib 등 리듬 · 리드오프 · 한계 이탈(HR 50–120, RR 8–30, SpO₂≥90, NIBP 90–160, 체온 &lt;38.3) · 배터리 ≤15 %.</li><li>12-up 이상은 수치가 2열 매트릭스로, 48 초과는 숫자 전용 보드로 바뀝니다.</li></ol></div>
+          <ol class="gsteps"><li>에뮬레이터는 경보를 내보내지 않습니다. 이 화면의 색은 라우터·뷰어에서 떠야 할 <b>기대 경보</b>(기준표 <code>GET /api/v1/alarms</code>, 현장 테스트 합격 기준과 같음)입니다.</li><li><b class="red">적색(위급)</b>: VFib · VT · 무수축 · 3도 차단 · SpO₂&lt;88 · HR&gt;150/&lt;40 · NIBP&gt;190/&lt;80.</li><li><b class="yel">황색(주의)</b>: AFib · SVT · NSVT · ST 상승 등 리듬 · 한계 이탈(HR 50–120, RR 8–30, SpO₂≥90, NIBP 90–160, 체온 ≤38.5) · 기술 경보(리드오프 · 신호 없음 · 게이트웨이 무응답).</li><li><b>청록(권고)</b>: PVC 이단맥 · 기술 경보(패치 배터리 부족).</li><li>12-up 이상은 수치가 2열 매트릭스로, 48 초과는 숫자 전용 보드로 바뀝니다.</li></ol></div>
         <div class="gitem" id="g201-4"><h4>데이터 탭 <button class="small" data-goto="data">탭 열기</button></h4>
           <figure><img src="/static/guide/data.jpg" alt="패치 레지스트리, SQLite(기본 접힘), 루프 은행, 메디컬 월드 생성"><figcaption>패치 레지스트리, SQLite(기본 접힘), 루프 은행, 메디컬 월드 생성</figcaption></figure>
           <ol class="gsteps"><li><i>메디컬 월드 생성</i>(시드·프로필·템플릿)은 [에뮬레이터 설정 › 메디컬 월드 생성]에서 바꾼 뒤 [재구성].</li><li><i>패치 레지스트리</i>: 발급된 모든 패치 이력, 열 정렬.</li><li><i>SQLite DB</i>: 읽기 전용 SQL. 예 <code>SELECT ward, COUNT(*) FROM admissions WHERE discharged_at IS NULL GROUP BY ward</code></li></ol></div>

@@ -167,7 +167,33 @@ def _changed_paths(old: dict, new: dict, prefix=()):
             yield prefix + (k,)
 
 
+TARGET_PORT_FORBIDDEN = {8080: "키오스크 화면 서버", 5445: "에뮬레이터 자신", 7300: "라우터 상태 API"}
+
+
+def _check_target(patch: dict) -> None:
+    """송출 대상 검사: 금지 포트·잘못된 주소는 422 (예전엔 그대로 받아 엉뚱한 곳으로 송출했다)."""
+    t = (patch or {}).get("transport") or {}
+    if "target_port" in t:
+        try:
+            port = int(t["target_port"])
+        except (TypeError, ValueError):
+            raise HTTPException(422, "포트가 숫자가 아닙니다")
+        if port in TARGET_PORT_FORBIDDEN:
+            raise HTTPException(422, f"포트 {port} 는 {TARGET_PORT_FORBIDDEN[port]} 가 쓰는 포트라 송출 대상으로 쓸 수 없습니다")
+        if not 1 <= port <= 65535:
+            raise HTTPException(422, "포트는 1~65535 입니다")
+    if "target_ip" in t and t["target_ip"]:
+        ip = str(t["target_ip"]).strip()
+        import ipaddress, re as _re
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            if not _re.fullmatch(r"[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*", ip):
+                raise HTTPException(422, f"'{ip}' 은(는) IP 주소나 호스트 이름 형식이 아닙니다")
+
+
 def _apply_config(patch: dict, source: str) -> dict:
+    _check_target(patch)
     e = E()
     old = cfg.snapshot()
     new = cfg.update(patch, source=source)
@@ -1515,6 +1541,27 @@ def emr_admission_patch_return(patient_id: int, body: dict):
     end_monitoring=true 면 모니터링 종료(퇴원 처리), false 면 일시 제거(입원 유지, patch_state "removed")."""
     w = E().world
     return _admin("return", body, lambda b: w.admin.ret(patient_id, b))
+
+
+@app.post("/api/v1/transport/probe")
+def transport_probe(body: dict):
+    """송출 대상 연결 시험: {ip, port} 로 TCP 접속만 해 본다 (데이터는 보내지 않음) → {ok, ms, error}."""
+    import socket
+    _check_target({"transport": {"target_ip": body.get("ip"), "target_port": body.get("port")}})
+    t0 = time.time()
+    try:
+        with socket.create_connection((str(body.get("ip")), int(body.get("port"))), timeout=1.5):
+            pass
+        return {"ok": True, "ms": round((time.time() - t0) * 1000, 1)}
+    except OSError as ex:
+        return {"ok": False, "ms": round((time.time() - t0) * 1000, 1), "error": str(ex)}
+
+
+@app.get("/api/v1/alarms")
+def alarms_table():
+    """기대 경보 기준표: 에뮬레이터는 경보를 내보내지 않는다. 이 신호를 받은 라우터·뷰어에서 떠야 할 경보(우선순위·색·코드)의 시험 기준."""
+    from .alarms import table
+    return table()
 
 
 @app.get("/api/v1/patch/wear")

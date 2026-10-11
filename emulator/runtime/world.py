@@ -2910,7 +2910,7 @@ class World:
                               "home_room_name": h.rooms[rec["room_idx"]]["name"] if rec["room_idx"] >= 0 else None,
                               "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else None,
                               "shadow": rec["shadow"] or rec["home_state"] == "shadow",
-                              "gateway": gw["id"] if gw else None, "gateway_idx": rec["gw"], "rssi": int(P["rssi"]), "battery": int(P["battery"]), **self._batt_view(rec["row"]),
+                              "gateway": gw["id"] if gw else None, "gateway_idx": rec["gw"], "rssi": int(P["rssi"]) if rec["gw"] >= 0 else None, "battery": int(P["battery"]) if patch else None, **self._batt_view(rec["row"]),
                               "lead_off": bool(P["lead_off"]), "spo2_off": bool(P["spo2_off"]), "flags": int(P["flags"]),
                               "patch": patch.serial if patch else None, "patch_id": int(P["patch_id"]), "patch_worn": bool(rec.get("worn", True)), "variant": int(P["variant"]),
                               "rhythm_now": self._variant_rhythm(int(P["variant"])), "episode": bool(rec["episode_until"]),
@@ -2985,7 +2985,8 @@ class World:
                         "pacemaker_type": prof["pacemaker_info"]["type"] if prof.get("pacemaker_info") else None,
                         "bed": h.beds[rec["bed_idx"]]["id"] if rec["bed_idx"] >= 0 else "MCOT", "ward": prof["admission"]["ward_name"],
                         "gateway": h.gateways[rec["gw"]]["id"] if rec["gw"] >= 0 else None, "activity": rec["activity"], "note": rec["note"],
-                        "battery": int(P["battery"][row]), "rssi": int(P["rssi"][row]), "lead_off": bool(P["lead_off"][row]), **self._batt_view(row),
+                        "battery": int(P["battery"][row]) if row in self.patches else None, "rssi": int(P["rssi"][row]) if rec["gw"] >= 0 else None,   # 패치 없음·미연결이면 값 없음 (예전엔 행에 남은 0 %·-60 dBm 이 보였다)
+                        "lead_off": bool(P["lead_off"][row]), **self._batt_view(row),
                         "patch": self.patches[row].serial if row in self.patches else None, "patch_worn": bool(rec.get("worn", True)), "row": row, "outpatient": rec["outpatient"],
                         "overseas": bool(prof.get("overseas")), "abroad": (h.gateways[rec["mobile_gw"]].get("abroad") if rec["outpatient"] and rec["mobile_gw"] >= 0 else None),
                         **self.identity_fields(prof),
