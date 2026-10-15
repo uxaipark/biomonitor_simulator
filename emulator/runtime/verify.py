@@ -10,7 +10,8 @@ from __future__ import annotations
 import struct
 from collections import Counter, defaultdict
 
-from .protocol import HEADER, GWSTAT, CRC, MAGIC, VERSION, F_META, F_GWSTAT, F_KEEPALIVE, F_CTRL, frame_crc_ok
+from .protocol import HEADER, GWSTAT, CRC, MAGIC, VERSION, VERSION_V4, F_META, F_GWSTAT, F_KEEPALIVE, F_CTRL, F_RESEND, frame_crc_ok, rec_head, seq_mask
+VERSIONS = (VERSION, VERSION_V4)
 from ..config import CHANNELS
 
 ITEM = {1: 2, 2: 1, 3: 2, 4: 1, 5: 4}
@@ -19,13 +20,15 @@ MAX_PAYLOAD = 16 * 1024 * 1024
 KNOWN_CH = set(CHANNELS.keys())
 
 
-def decode_records(payload: memoryview, off: int, n_rec: int):
-    """Yields (patch_id, patient_id, seq, flags, battery, rssi, {ch: (dtype, n, bytes)}); raises ValueError on malformed data."""
+def decode_records(payload: memoryview, off: int, n_rec: int, ver: int = VERSION):
+    """Yields (patch_id, patient_id, seq, flags, battery, rssi, {ch: (dtype, n, bytes)}); raises ValueError on malformed data.
+    ver 4: 레코드 헤더의 seq 가 u16 (14 바이트), ver 3: u32 (16 바이트)."""
+    rh = rec_head(ver)
     for _ in range(n_rec):
-        if off + 16 > len(payload):
+        if off + rh.size > len(payload):
             raise ValueError("record header beyond payload")
-        patch_id, patient_id, seq, flags, batt, rssi, n_ch = struct.unpack_from("<IIIBBbB", payload, off)
-        off += 16
+        patch_id, patient_id, seq, flags, batt, rssi, n_ch = rh.unpack_from(payload, off)
+        off += rh.size
         chans = {}
         for _ in range(n_ch):
             if off + 4 > len(payload):
@@ -78,10 +81,10 @@ class StreamChecker:
             if len(self.buf) < HEADER.size:
                 return
             magic, ver, flags, gw_id, seq, ts_ms, n_rec, plen = HEADER.unpack_from(self.buf, 0)
-            if magic != MAGIC or ver != VERSION or plen > MAX_PAYLOAD:
+            if magic != MAGIC or ver not in VERSIONS or plen > MAX_PAYLOAD:
                 if magic != MAGIC:
                     self.counts["bad_magic"] += 1
-                elif ver != VERSION:
+                elif ver not in VERSIONS:
                     self.counts["bad_version"] += 1
                     self.per_gw[gw_id]["bad_version"] += 1
                 else:
@@ -106,7 +109,8 @@ class StreamChecker:
             if flags & F_CTRL:
                 self.counts["ctrl"] += 1                      # control frames only travel router -> gateway; harmless if seen
                 continue
-            self._frame(flags, gw_id, seq, ts_ms, n_rec, payload)
+            self.cur_ver = ver                                # 콜백(라우터 저장소)이 레코드 seq 폭(v3 u32 / v4 u16)을 알 수 있게
+            self._frame(flags, gw_id, seq, ts_ms, n_rec, payload, ver)
 
     def close(self) -> None:
         """EOF: a leftover that starts like a frame header (or any partial header) is a truncated frame."""
@@ -126,7 +130,7 @@ class StreamChecker:
                 self.counts["garbage_bytes"] += len(self.buf)
                 self.buf.clear()
                 return
-            if j + 2 < len(self.buf) and self.buf[j + 2] == VERSION:
+            if j + 2 < len(self.buf) and self.buf[j + 2] in VERSIONS:
                 self.counts["garbage_bytes"] += j
                 del self.buf[:j]
                 return
@@ -135,7 +139,7 @@ class StreamChecker:
         self.buf.clear()
 
     # -- frame validation
-    def _frame(self, flags, gw_id, seq, ts_ms, n_rec, payload) -> None:
+    def _frame(self, flags, gw_id, seq, ts_ms, n_rec, payload, ver: int = VERSION) -> None:
         g = self.per_gw[gw_id]
         self.frames += 1
         g["frames"] += 1
@@ -156,7 +160,7 @@ class StreamChecker:
                 g["meta"] += 1
             if flags & F_KEEPALIVE and n_rec != 0:
                 raise ValueError("keepalive with records")
-            recs = list(decode_records(payload, off, n_rec))
+            recs = list(decode_records(payload, off, n_rec, ver))
         except ValueError as ex:
             kind = str(ex).split(":")[0]
             key = kind if kind in ("unknown_channel", "bad_dtype") else "bad_record"
@@ -187,10 +191,12 @@ class StreamChecker:
                 g["seq_reorder"] += 1
         else:
             self.last_seq[gw_id] = seq
-        if ts_ms < self.last_ts.get(gw_id, 0):
+        resend = bool(flags & F_RESEND)                       # v4 패치 재전송 프레임: ts_ms 는 원래(과거) 시각이라 시간 역행이 아니다
+        if ts_ms < self.last_ts.get(gw_id, 0) and not resend:
             self.counts["ts_backwards"] += 1
             g["ts_backwards"] += 1
-        self.last_ts[gw_id] = max(ts_ms, self.last_ts.get(gw_id, 0))
+        if not resend:
+            self.last_ts[gw_id] = max(ts_ms, self.last_ts.get(gw_id, 0))
         s.add(seq)
         if len(s) > 4096:
             s.clear()
@@ -198,22 +204,27 @@ class StreamChecker:
         # lost somewhere between patch and router (BLE dropout, gateway drop, SAF eviction); the gateway frame seq above only
         # covers gateway -> router.  Pace records repeat the data record's seq, so a repeat inside one frame is not a dup.
         seen_now = set()
+        mask = seq_mask(ver)
+        half = (mask >> 1) + 1
         for patch_id, _pid, pseq, *_ in recs:
             if patch_id in seen_now:
                 continue
             seen_now.add(patch_id)
             pp = self.per_patch[patch_id]
             pp["records"] += 1
+            if resend:                                         # 재전송분: 빠졌던 번호를 채우는 것 — 순서·공백 판정에 넣지 않는다
+                self.counts["patch_resend"] += 1; pp["resend"] += 1
+                continue
             last = self.patch_seq.get(patch_id)
             if last is not None:
-                d = (pseq - last) & 0xFFFFFFFF
+                d = (pseq - last) & mask
                 if d == 0:
                     self.counts["patch_seq_dup"] += 1; pp["dup"] += 1
-                elif d > 0x80000000 and pseq <= PATCH_SEQ_RESTART_MAX and ((last - pseq) & 0xFFFFFFFF) >= PATCH_SEQ_RESTART_MIN_BACK:
+                elif d >= half and pseq <= PATCH_SEQ_RESTART_MAX and ((last - pseq) & mask) >= PATCH_SEQ_RESTART_MIN_BACK:
                     # 패치 번호가 처음(0 근처)으로 돌아감 = 오류.  패치는 배터리가 다할 때까지 꺼지지 않으므로 재부팅·재시작은 정상 동작이 아니다
                     # (새 패치는 새 patch_id 로 온다).  장애로 보고 이후 번호는 새 기준으로 이어서 센다.
                     self.counts["patch_seq_restart"] += 1; pp["restart"] += 1
-                elif d > 0x80000000:
+                elif d >= half:
                     self.counts["patch_seq_reorder"] += 1; pp["reorder"] += 1
                     continue
                 elif d > 1:
@@ -225,5 +236,5 @@ class StreamChecker:
 
     def summary(self) -> dict:
         keys = ["bad_magic", "bad_version", "bad_len", "oversize", "truncated", "resync", "garbage_bytes", "seq_gap", "seq_dup", "seq_reorder", "ts_backwards",
-                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "patch_seq_restart", "bad_crc", "resend_ok", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
+                "patch_seq_gap", "patch_seq_missing", "patch_seq_dup", "patch_seq_reorder", "patch_seq_restart", "patch_resend", "bad_crc", "resend_ok", "unknown_channel", "bad_dtype", "bad_record", "trailing_bytes"]
         return {"frames": self.frames, "gateways": len(self.per_gw), **{k: int(self.counts.get(k, 0)) for k in keys}}

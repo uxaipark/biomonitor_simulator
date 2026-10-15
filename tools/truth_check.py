@@ -46,7 +46,7 @@ def frames(path: str):
             (ml,) = struct.unpack_from("<I", payload, p)
             p += 4 + ml
         try:
-            recs = list(decode_records(payload, p, n_rec))
+            recs = list(decode_records(payload, p, n_rec, ver))          # v4: 레코드 seq u16
         except ValueError:
             continue
         yield gw_id, seq, ts_ms, recs

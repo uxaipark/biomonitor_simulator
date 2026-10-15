@@ -23,10 +23,10 @@ from ..signals.accel import POSTURES
 from ..signals.loops import LoopBank
 from .protocol import (record_dtype, fill_constants, pace_record, truth_record, truth_block, RHYTHM_CODE_ID, TRUTH_HEAD, TRUTH_VER, T_LEAD_OFF, T_ARTIFACT, T_NOISE, T_PACED, T_SWITCH, T_SETTLING, T_NO_BEATS,
                        frame, gwstat_block, meta_block, F_META, F_GWSTAT, F_KEEPALIVE, HEADER,
-                       CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl)
+                       CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl, CTRL_PATCH_NACK, parse_patch_nack, F_RESEND, VERSION_V4, seq_mask)
 from collections import deque
 from .realsig import MAP_PATH as RS_MAP_PATH
-from .state import SharedState, CTL, TRUTH_RING, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
+from .state import SharedState, CTL, GAP_K, TRUTH_RING, FLAG_NEW_PATCH, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
 
 POSTURE_G = np.array([POSTURES[k] for k in ("supine", "left_lateral", "right_lateral", "sitting", "standing", "prone")], dtype=np.float32) * 1000.0
 POSTURE_NAMES = ["supine", "left_lateral", "right_lateral", "sitting", "standing", "prone"]
@@ -38,9 +38,10 @@ DETACH_S = 3.0       # violent artefact right after detachment (real seconds)
 class Gather:
     """Vectorised sample gathering for a set of patch rows at a tick."""
 
-    def __init__(self, bank: LoopBank, st: SharedState):
+    def __init__(self, bank: LoopBank, st: SharedState, shared: bool = False):
         self.bank = bank
         self.st = st
+        self.shared = shared            # 워커: ECG 위치를 공유 메모리(P.pos …)에 두고 끊긴 구간을 기록한다 · 메인(미리보기): 프로세스 안에서만
         self.seconds = bank.seconds
         self.n_ecg = bank.ecg.shape[1]
         self.n_ppg = bank.ppg.shape[1]
@@ -92,10 +93,18 @@ class Gather:
         e = self.rs_map[row]
         return ((tick - e[3]) * spt) % e[0].shape[0]
 
+    def tick_off(self) -> int:
+        """워커 tick → 절대 tick(벽시계 ms // bundle_ms) 오프셋.  모든 워커·월드가 같은 번호를 쓴다."""
+        c = self.st.ctl
+        b = float(c[CTL["bundle_ms"]]) or 200.0
+        return int(round(float(c[CTL["epoch_ns"]]) / 1e6 / b))
+
     def advance(self, rows: np.ndarray, tick: int, spt: int, fs: int) -> np.ndarray:
         """Set tick start positions for `rows` and advance them by one bundle (idempotent per tick)."""
         if rows.size == 0:
             return np.zeros(0, dtype=np.float64)
+        if self.shared:
+            return self._advance_shared(rows, tick, spt, fs)
         P = self.st.patch.arr
         off = P["offset_ms"][rows].astype(np.int64)
         fresh = (self.pos_off[rows] != off)
@@ -112,6 +121,50 @@ class Gather:
             self.tick_start[r] = self.pos[r]
             self.pos[r] = (self.pos[r] + spt * rate) % self.n_ecg
             self.last_tick[r] = tick
+        return self.tick_start[rows]
+
+    def _advance_shared(self, rows: np.ndarray, tick: int, spt: int, fs: int) -> np.ndarray:
+        """공유 ECG 위치 (2026-10-15).  P.pos = 다음 tick 의 시작 위치, P.pos_start = P.pos_tabs tick 의 시작 위치.
+        - 워커가 바뀌어도(다른 워커의 게이트웨이로 이동) 같은 위치에서 이어진다.
+        - 송출하지 않은 tick 이 있으면(음영·연결 끊김·게이트웨이 장애·정지) 그만큼 위치를 앞으로 옮겨 시간축을 유지하고,
+          그 구간 [a, b) 의 양 끝 위치·변형·이득을 끊김 기록(gp_*)에 남긴다 → 패치 재전송이 양 끝에 정확히 맞물린 파형을 만든다."""
+        P = self.st.patch.arr
+        n = self.n_ecg
+        tabs = tick + self.tick_off()
+        off = P["offset_ms"][rows].astype(np.int64)
+        init = (P["pos_tabs"][rows] <= 0) | (P["pos_off"][rows] != off) | (P["pos_tabs"][rows] > tabs)
+        if init.any():
+            r = rows[init]
+            P["pos"][r] = ((off[init] * fs) // 1000 + tabs * spt) % n
+            P["pos_tabs"][r] = tabs - 1
+            P["pos_off"][r] = off[init]
+            P["ls_var"][r] = P["variant"][r]; P["ls_gain"][r] = P["gain"][r]; P["ls_art"][r] = P["art_gain"][r]; P["ls_noise"][r] = P["noise"][r]
+        todo = P["pos_tabs"][rows] != tabs
+        if todo.any():
+            r = rows[todo]
+            rate = P["hr_scale"][r].astype(np.float64)
+            rate = np.where(rate <= 0.1, 1.0, rate)
+            gap = tabs - P["pos_tabs"][r] - 1
+            g = gap > 0
+            if g.any():
+                rg, gg, rt = r[g], gap[g], rate[g]
+                k = (P["gp_head"][rg].astype(np.int64)) % GAP_K
+                apos = P["pos"][rg]
+                bpos = (apos + gg * spt * rt) % n
+                P["gp_a"][rg, k] = P["pos_tabs"][rg] + 1; P["gp_b"][rg, k] = tabs
+                P["gp_apos"][rg, k] = apos; P["gp_bpos"][rg, k] = bpos
+                P["gp_avar"][rg, k] = P["ls_var"][rg]; P["gp_bvar"][rg, k] = P["variant"][rg]
+                P["gp_ag"][rg, k] = P["ls_gain"][rg]; P["gp_bg"][rg, k] = P["gain"][rg]
+                P["gp_aa"][rg, k] = P["ls_art"][rg]; P["gp_ba"][rg, k] = P["art_gain"][rg]
+                P["gp_an"][rg, k] = P["ls_noise"][rg]; P["gp_bn"][rg, k] = P["noise"][rg]
+                P["gp_head"][rg] = (P["gp_head"][rg].astype(np.int64) + 1) % 256
+                P["pos"][rg] = bpos
+            st0 = P["pos"][r]
+            P["pos_start"][r] = st0
+            P["pos"][r] = (st0 + spt * rate) % n
+            P["pos_tabs"][r] = tabs
+            P["ls_var"][r] = P["variant"][r]; P["ls_gain"][r] = P["gain"][r]; P["ls_art"][r] = P["art_gain"][r]; P["ls_noise"][r] = P["noise"][r]
+        self.tick_start[rows] = P["pos_start"][rows]
         return self.tick_start[rows]
 
     def _wave(self, arr2d, n_loop: int, fs: int, rows: np.ndarray, offset_ms: np.ndarray, tick: int, spt: int, bundle_ms: int) -> np.ndarray:
@@ -562,9 +615,10 @@ class Gather:
 class FrameBuilder:
     """Builds per-gateway frames for a subset of gateway rows."""
 
-    def __init__(self, bank: LoopBank, st: SharedState, gw_rows: np.ndarray, meta_provider=None, worker_id: int = 0):
+    def __init__(self, bank: LoopBank, st: SharedState, gw_rows: np.ndarray, meta_provider=None, worker_id: int = 0, shared_pos: bool = False):
         self.st = st
-        self.g = Gather(bank, st)
+        self.g = Gather(bank, st, shared=shared_pos)
+        self.pn_queue: list[dict] = []                  # 패치 재전송 요청 (라우터 → 게이트웨이 → 패치), tick 마다 조금씩 처리
         self.worker_id = int(worker_id)
         self._tr_w = 0                                   # 정답 박동 링버퍼 쓰기 카운터 (wstat.truth_w 에 미러)
         self.gw_rows = np.asarray(gw_rows, dtype=np.int64)
@@ -625,8 +679,15 @@ class FrameBuilder:
         numeric_sel = ((tick + active) % ticks_per_sec == 0) if active.size else np.zeros(0, dtype=bool)
         num_bits = sum(1 << ch for ch in (CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE))
         nums = self.g.numerics(active[numeric_sel], tick, bundle_ms) if (chan_mask & num_bits and numeric_sel.any()) else None
+        ver = VERSION_V4 if int(c[CTL["proto"]]) >= 4 else VERSION
         if active.size:
-            P["seq"][active] += 1                                    # one packet per patch per frame; SAF replays keep their original numbers
+            # 패킷 번호 = seq0 + (절대 tick - tabs0): 200 ms 칸마다 1 (끊긴 동안에도 시간과 함께 올라간다 → 번호로 원래 시각을 안다).
+            # v4 는 하위 16 비트만 보낸다.  SAF 재생분은 저장할 때의 번호 그대로.
+            tabs = tick + self.g.tick_off()
+            unset = P["tabs0"][active] == 0
+            if unset.any():
+                P["tabs0"][active[unset]] = tabs
+            P["seq"][active] = ((P["seq0"][active].astype(np.int64) + (tabs - P["tabs0"][active])) & 0xFFFFFFFF).astype(np.uint32)
         pa = P[active]
         flags = pa["flags"].astype(np.uint8)
         # ---- structured record arrays per (effective mask, with numerics)
@@ -644,12 +705,12 @@ class FrameBuilder:
                 n = int(sel.sum())
                 if n == 0:
                     continue
-                dt = record_dtype(m, with_num, bundle_ms, fs["ecg"], fs["ppg"], fs["resp"], fs["accel"])
+                dt = record_dtype(m, with_num, bundle_ms, fs["ecg"], fs["ppg"], fs["resp"], fs["accel"], ver)
                 rec = np.zeros(n, dtype=dt)
                 fill_constants(rec, m, with_num, bundle_ms, fs)
                 rec["patch_id"] = pa["patch_id"][sel]
                 rec["patient_id"] = pa["patient_id"][sel]
-                rec["seq"] = pa["seq"][sel]
+                rec["seq"] = pa["seq"][sel] & seq_mask(ver)
                 rec["flags"] = flags[sel]
                 rec["battery"] = pa["battery"][sel]
                 rec["rssi"] = pa["rssi"][sel]
@@ -685,7 +746,7 @@ class FrameBuilder:
                     pr = P[r]
                     enc = (marks.astype(np.uint16) & 0x3FFF) | (types.astype(np.uint16) << 14)     # bits 0-13 offset, 14-15 type
                     pace_by_gw.setdefault(int(pr["gw"]), []).append(
-                        pace_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), enc))
+                        pace_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), enc, ver))
             # 정답 전용 벤치마크 패치: 프레임마다 TRUTH 레코드(채널 11)를 ECG 레코드 뒤에 같은 seq 로 붙인다
             truth_rows = active[(pa["truth"] > 0) & ((eff & (1 << CH_TRUTH)) > 0) & ((eff & (1 << CH_ECG)) > 0)]
             ring = self.st.truthlog.arr
@@ -700,7 +761,7 @@ class FrameBuilder:
                 for k in range(trows.size):
                     pr = prs[k]
                     pace_by_gw.setdefault(int(pr["gw"]), []).append(
-                        truth_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), tb["blobs"][k]))
+                        truth_record(int(pr["patch_id"]), int(pr["patient_id"]), int(pr["seq"]), int(pr["flags"]), int(pr["battery"]), int(pr["rssi"]), tb["blobs"][k], ver))
                 br, bo, bk = tb["beats"]
                 if all_rows.size and br.size:                                      # 일반 환자: AAMI 등급별 박동 카운터
                     sel = br >= truth_rows.size
@@ -780,15 +841,179 @@ class FrameBuilder:
                 out[gw] = self._wrap(gw, tick, ts_ms, 0, b"", meta_every, gwstat_every, G, keepalive=True)
         return out
 
-    def _wrap(self, gw: int, tick: int, ts_ms: int, n_rec: int, payload: bytes, meta_every: int, gwstat_every: int, G, keepalive=False) -> bytes:
-        flags = F_KEEPALIVE if keepalive else 0
+    # ---------------------------------------------------------------- 패치 재전송 (2026-10-15)
+    # 라우터가 '패치 X 의 패킷 a..b' 를 요청하면(게이트웨이 소켓의 CTRL kind 2, 또는 REST), 그 패치가 지금 붙어 있는 게이트웨이를 맡은
+    # 워커가 그 번호들의 프레임을 다시 만들어 그 게이트웨이로 보낸다.  번호 → 원래 절대 tick 은 번호 정의(seq0 + tabs - tabs0)를 거꾸로 푼다.
+    # 파형은 끊김 기록(gp_*)의 양 끝 위치 사이를 고르게 나눠 만들므로, 끼워 넣은 프레임의 처음과 끝이 앞뒤 정상 프레임과 표본 단위로 이어진다.
+    def queue_patch_nack(self, gw: int, patch_id: int, seq_from: int, seq_to: int, src: str = "ctrl") -> bool:
+        S = self.st.stat.arr
+        S["pn_req"][gw] += 1
+        P = self.st.patch.arr
+        hit = np.flatnonzero((P["patch_id"] == patch_id) & (P["active"] > 0))
+        if hit.size == 0 or int(P["gw"][hit[0]]) != gw:
+            S["pn_fail"][gw] += 1                               # 그 패치가 이 게이트웨이에 없다 (다른 곳으로 옮겼거나 음영 중)
+            return False
+        wide = int(self.st.ctl[CTL["proto"]]) < 4 and (seq_from > 0xFFFF or seq_to > 0xFFFF)
+        cnt = ((seq_to - seq_from) & (0xFFFFFFFF if wide else 0xFFFF)) + 1
+        self.pn_queue.append({"gw": gw, "row": int(hit[0]), "pid": int(patch_id), "next": int(seq_from), "left": int(min(cnt, 65535)), "wide": wide})
+        return True
+
+    def _seq_to_tabs(self, row: int, seq: int, wide: bool, tabs_now: int) -> int | None:
+        P = self.st.patch.arr
+        seq0, tabs0 = int(P["seq0"][row]), int(P["tabs0"][row])
+        if tabs0 == 0:
+            return None
+        if wide:
+            t = tabs0 + ((seq - seq0) & 0xFFFFFFFF)
+        else:
+            cur = (seq0 + (tabs_now - tabs0)) & 0xFFFF
+            t = tabs_now - ((cur - seq) & 0xFFFF)            # 가장 최근의 그 번호 (16 비트 창 = 약 3.6 시간)
+        if t < tabs0 or t >= tabs_now:
+            return None
+        return t
+
+    def build_resend(self, row: int, tabs: int, gw: int, ts_ms: int) -> bytes | None:
+        """row 패치의 절대 tick `tabs` 프레임을 다시 만든다 (F_RESEND, 원래 ts_ms·seq).  공유 행은 건드리지 않고 1 행짜리 사본에서 만든다."""
+        st, g = self.st, self.g
+        c = st.ctl
+        P = st.patch.arr
+        bundle_ms = int(c[CTL["bundle_ms"]])
+        fs = {"ecg": int(c[CTL["ecg_fs"]]), "ppg": int(c[CTL["ppg_fs"]]), "resp": int(c[CTL["resp_fs"]]), "accel": int(c[CTL["accel_fs"]])}
+        spt = fs["ecg"] * bundle_ms // 1000
+        n = g.n_ecg
+        off = g.tick_off()
+        t_rel = tabs - off
+        sc = np.zeros(1, dtype=P.dtype)
+        sc[0] = P[row]
+        r0 = sc[0]
+        if tabs > int(r0["pos_tabs"]):
+            return None
+        hit = [k for k in range(GAP_K) if int(r0["gp_a"][k]) <= tabs < int(r0["gp_b"][k])]
+        if hit:                                                     # 송출하지 못했던 구간: 양 끝 사이를 고르게 (끝점이 앞뒤 프레임과 맞물림)
+            k = hit[0]
+            a, b = int(r0["gp_a"][k]), int(r0["gp_b"][k])
+            G_ = b - a
+            fr = (tabs - a) / G_
+            delta = (float(r0["gp_bpos"][k]) - float(r0["gp_apos"][k])) % n
+            start = (float(r0["gp_apos"][k]) + delta * fr) % n
+            rate = delta / (G_ * spt)
+            av, bv = int(r0["gp_avar"][k]), int(r0["gp_bvar"][k])
+            mid = a + G_ // 2
+            lerp = lambda x, y: float(x) + (float(y) - float(x)) * fr
+            sc["gain"] = lerp(r0["gp_ag"][k], r0["gp_bg"][k]); sc["art_gain"] = lerp(r0["gp_aa"][k], r0["gp_ba"][k]); sc["noise"] = lerp(r0["gp_an"][k], r0["gp_bn"][k])
+            if av >= 0 and av != bv:                                # 끊긴 사이에 리듬이 바뀌었다: 가운데에서 크로스페이드로 넘어간다
+                sc["variant"] = av if tabs < mid else bv
+                sc["variant_prev"] = av if tabs >= mid else -1
+                sc["switch_tick"] = mid - off
+            else:
+                sc["variant"] = bv if bv >= 0 else int(r0["variant"]); sc["variant_prev"] = -1
+        else:                                                       # 실제로 보냈던 tick (전송 중 유실): 지금 위치에서 같은 속도로 거슬러 계산
+            rate = float(r0["hr_scale"]) if float(r0["hr_scale"]) > 0.1 else 1.0
+            start = (float(r0["pos_start"]) - (int(r0["pos_tabs"]) - tabs) * spt * rate) % n
+        sc["pos"] = start; sc["pos_tabs"] = tabs - 1; sc["pos_off"] = r0["offset_ms"]; sc["hr_scale"] = rate
+        sc["attach_tick"] = 0; sc["detach_tick"] = 0; sc["lead_off"] = 0
+        sc["flags"] = int(r0["flags"]) & ~(FLAG_LEAD_OFF | FLAG_NEW_PATCH)
+        sc["seq"] = (int(r0["seq0"]) + (tabs - int(r0["tabs0"]))) & 0xFFFFFFFF
+        sc["gw"] = gw
+        ver = VERSION_V4 if int(c[CTL["proto"]]) >= 4 else VERSION
+        chan_mask = int(c[CTL["chan_mask"]])
+        pm = int(r0["chan_mask"])
+        m = chan_mask if pm == 0 else (pm & chan_mask)
+        rows = np.array([0])
+        saved = (st.patch.arr, g.rs_keys, g._rs_poll, g.tick_start[0])
+        st.patch.arr = sc
+        g.rs_keys = np.zeros(0, dtype=np.int64); g._rs_poll = lambda: None
+        try:
+            wave = {}
+            cft = int(c[CTL["crossfade_ticks"]])
+            if m & (1 << CH_ECG):
+                wave[CH_ECG] = g.ecg(rows, t_rel, spt, bundle_ms, fs["ecg"], cft)
+            if m & (1 << CH_PPG):
+                wave[CH_PPG] = g.ppg(rows, t_rel, fs["ppg"] * bundle_ms // 1000, bundle_ms, fs["ppg"])
+            if m & (1 << CH_RESP_WAVE):
+                wave[CH_RESP_WAVE] = g.resp_wave(rows, t_rel, fs["resp"] * bundle_ms // 1000, bundle_ms, fs["resp"])
+            if m & (1 << CH_ACCEL):
+                wave[CH_ACCEL] = g.accel(rows, t_rel, fs["accel"] * bundle_ms // 1000, bundle_ms, fs["accel"])
+            tps = max(1, 1000 // bundle_ms)
+            num_bits = sum(1 << ch for ch in (CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE))
+            with_num = bool(m & num_bits) and (t_rel + row) % tps == 0
+            nums = g.numerics(rows, t_rel, bundle_ms) if with_num else None
+            dt = record_dtype(m, with_num, bundle_ms, fs["ecg"], fs["ppg"], fs["resp"], fs["accel"], ver)
+            rec = np.zeros(1, dtype=dt)
+            fill_constants(rec, m, with_num, bundle_ms, fs)
+            for k_ in ("patch_id", "patient_id", "flags", "battery", "rssi"):
+                rec[k_] = sc[k_]
+            rec["seq"] = int(sc["seq"][0]) & seq_mask(ver)
+            for ch, arr in wave.items():
+                rec[f"c{ch}"] = arr
+            if nums is not None:
+                for ch, arr in nums.items():
+                    if m & (1 << ch):
+                        rec[f"c{ch}"] = arr[:1]
+            parts, n_rec = [rec.tobytes()], 1
+            p0 = sc[0]
+            args = (int(p0["patch_id"]), int(p0["patient_id"]), int(p0["seq"]), int(p0["flags"]), int(p0["battery"]), int(p0["rssi"]))
+            if int(p0["paced"]) > 0 and (m & (1 << CH_ECG)) and (m & (1 << CH_PACE)):
+                marks, types = g.pace_marks(0, t_rel, spt, fs["ecg"])
+                if marks.size:
+                    enc = (marks.astype(np.uint16) & 0x3FFF) | (types.astype(np.uint16) << 14)
+                    parts.append(pace_record(*args, enc, ver)); n_rec += 1
+            if (m & (1 << CH_ECG)) and (chan_mask & (1 << CH_TRUTH)) and (int(p0["truth"]) > 0 or int(c[CTL["truth_all"]])):
+                tb = g.truth_batch(rows, t_rel, spt, fs["ecg"], bundle_ms)
+                parts.append(truth_record(*args, tb["blobs"][0], ver)); n_rec += 1
+        finally:
+            st.patch.arr, g.rs_keys, g._rs_poll = saved[0], saved[1], saved[2]
+            g.tick_start[0] = saved[3]
+        G = st.gw.arr
+        return self._wrap(gw, t_rel, ts_ms, n_rec, b"".join(parts), 1, 1, G, extra_flags=F_RESEND, plain=True)
+
+    def pump_patch_nacks(self, tick: int, epoch_s: float, sender, now: float) -> int:
+        """대기 중인 패치 재전송 요청을 tick 마다 최대 pn_per_tick 프레임씩 처리한다 (3 시간 = 54,000 프레임도 몇 분이면 끝난다)."""
+        if not self.pn_queue:
+            return 0
+        st = self.st
+        P = st.patch.arr
+        S = st.stat.arr
+        budget = int(st.ctl[CTL["pn_per_tick"]]) or 100
+        bundle_ms = int(st.ctl[CTL["bundle_ms"]]) or 200
+        tabs_now = tick + self.g.tick_off()
+        max_backlog = int(st.ctl[CTL["max_backlog"]])
+        sent = 0
+        while self.pn_queue and sent < budget:
+            q = self.pn_queue[0]
+            row, gw = q["row"], q["gw"]
+            if int(P["patch_id"][row]) != q["pid"] or int(P["gw"][row]) != gw or P["active"][row] == 0:
+                S["pn_fail"][gw] += 1                           # 처리 도중 패치가 게이트웨이를 떠났다: 남은 번호는 다음 요청으로
+                self.pn_queue.pop(0)
+                continue
+            while q["left"] > 0 and sent < budget:
+                seq = q["next"]
+                q["next"] = (seq + 1) & (0xFFFFFFFF if q["wide"] else 0xFFFF)
+                q["left"] -= 1
+                t = self._seq_to_tabs(row, seq, q["wide"], tabs_now)
+                if t is None:
+                    continue
+                ts_ms = int((epoch_s + (t - self.g.tick_off()) * bundle_ms / 1000.0) * 1000)
+                fr = self.build_resend(row, t, gw, ts_ms)
+                if fr is None:
+                    continue
+                sender.send_resend(gw, fr, now, max_backlog)
+                S["pn_sent"][gw] += 1
+                sent += 1
+            if q["left"] <= 0:
+                self.pn_queue.pop(0)
+        return sent
+
+    def _wrap(self, gw: int, tick: int, ts_ms: int, n_rec: int, payload: bytes, meta_every: int, gwstat_every: int, G, keepalive=False,
+              extra_flags: int = 0, plain: bool = False) -> bytes:
+        flags = (F_KEEPALIVE if keepalive else 0) | extra_flags
         pre = b""
-        if (tick + gw) % gwstat_every == 0:
+        if not plain and (tick + gw) % gwstat_every == 0:
             flags |= F_GWSTAT
             stv = int(G["status"][gw])
             pre += gwstat_block(int(G["cpu"][gw]), int(G["mem"][gw]), int(G["net"][gw]), int(G["wan_rssi"][gw]), int(G["n_conn"][gw]),
                                 0 if stv == 3 else stv, int(G["uptime_s"][gw]), int(G["temp_c"][gw]))   # 3(업링크 단절)은 게이트웨이 자체는 정상: 프로토콜 값 0..2 유지
-        if self.force_meta[gw] or (tick + gw * 7) % meta_every == 0:
+        if not plain and (self.force_meta[gw] or (tick + gw * 7) % meta_every == 0):
             mb = self._meta(gw, tick)
             if mb is not None:
                 flags |= F_META
@@ -799,7 +1024,8 @@ class FrameBuilder:
         if fr > 0 and (self._fuzz_mask >> 8) & 1 and self.rng.random() < fr / 1000.0:
             self.seq[gw] = (self.seq[gw] + int(self.rng.integers(2, 11))) & 0xFFFFFFFF      # fuzz 'seq_gap': skip a few sequence numbers
             self.st.stat["fuzz"][gw] += 1
-        return frame(int(G["gw_id"][gw]), int(self.seq[gw]), ts_ms, n_rec, pre + payload, flags)
+        return frame(int(G["gw_id"][gw]), int(self.seq[gw]), ts_ms, n_rec, pre + payload, flags,
+                     VERSION_V4 if int(self.st.ctl[CTL["proto"]]) >= 4 else VERSION)
 
     def _meta(self, gw: int, tick: int) -> bytes | None:
         if self.meta_provider is None:
@@ -1000,7 +1226,8 @@ class Sender:
         magic, ver, flags, gw_id, seq, ts_ms, n_rec, plen = HEADER.unpack(data[:HEADER.size])
         if flags & F_KEEPALIVE:
             return data
-        bogus = struct.pack("<IIIBBbB", 0xFFFFFFF0, 0, 0, 0, 100, -40, 1) + struct.pack("<BBH", 250, 9, 4) + b"\xde\xad\xbe\xef\x00\x01\x02\x03"
+        bogus = (struct.pack("<IIHBBbB", 0xFFFFFFF0, 0, 0, 0, 100, -40, 1) if ver >= VERSION_V4 else struct.pack("<IIIBBbB", 0xFFFFFFF0, 0, 0, 0, 100, -40, 1)) \
+            + struct.pack("<BBH", 250, 9, 4) + b"\xde\xad\xbe\xef\x00\x01\x02\x03"
         self.st.stat["fuzz"][gw] += 1
         return HEADER.pack(magic, ver, flags, gw_id, seq, ts_ms, n_rec + 1, plen + len(bogus)) + data[HEADER.size:] + bogus
 
@@ -1196,7 +1423,7 @@ class Sender:
         S = self.st.stat.arr
         while len(buf) >= HEADER.size:
             magic, ver, flags, gw_id, seq, ts_ms, n_rec, plen = HEADER.unpack_from(buf, 0)
-            if magic != MAGIC or ver != VERSION or plen > 65536:
+            if magic != MAGIC or ver not in (VERSION, VERSION_V4) or plen > 65536:
                 S["bad_ctrl"][gws] += 1
                 del buf[:1]
                 continue
@@ -1212,6 +1439,20 @@ class Sender:
                 c = parse_ctrl(body[HEADER.size:])
                 if c and c[0] == CTRL_NACK:
                     self._resend(int(gw_id), int(c[1]), int(c[2]), now, max_backlog)
+                elif c and c[0] == CTRL_PATCH_NACK:                   # 패치 재전송 요청: 게이트웨이가 받아 그 패치에 전달
+                    pn = parse_patch_nack(body[HEADER.size:])
+                    row = self._row_of_gw_id(int(gw_id))
+                    if pn and row >= 0 and self.fb is not None:
+                        self.fb.queue_patch_nack(row, pn[0], pn[1], pn[2])
+
+    def send_resend(self, gw: int, data: bytes, now: float, max_backlog: int) -> None:
+        """패치 재전송 프레임을 그 게이트웨이 소켓으로 (연결이 없으면 저장 후 전송 버퍼로).  손실 모의·퍼징은 적용하지 않는다."""
+        S = self.st.stat.arr
+        S["pkts"][gw] += 1
+        S["bytes"][gw] += len(data)
+        if (not self.target[0]) or self.st.ctl[CTL["generate_only"]] > 0:
+            return
+        self._enqueue(gw, data, now, max_backlog, resend=True)
 
     def _row_of_gw_id(self, gw_id: int) -> int:
         """Control frames name the gateway by its on-wire id (GW_ID), not by its row: map it back (ids change on a replace)."""
@@ -1417,7 +1658,10 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
             pass
 
     gw_rows = np.asarray(gw_rows, dtype=np.int64)
-    fb = FrameBuilder(bank, st, gw_rows, meta_provider, worker_id=worker_id)
+    fb = FrameBuilder(bank, st, gw_rows, meta_provider, worker_id=worker_id, shared_pos=True)
+    pn_path = os.path.join(os.path.dirname(meta_path), "patch_nack.json") if meta_path else ""
+    pn_seen: set = set()
+    pn_mtime = 0.0
     sender = Sender(st, gw_rows, worker_id, fb, names.get("capture_dir"))
     W = st.wstat.arr
     W["alive"][worker_id] = 1
@@ -1457,6 +1701,25 @@ def worker_main(worker_id: int, names: dict, gw_rows: list[int], bank_args: dict
             frames = fb.build(tick, int(now * 1000))
             t1 = time.perf_counter()
             sender.send_frames(frames, now)
+            # REST 로 들어온 패치 재전송 요청 (라우터가 게이트웨이 소켓 CTRL 대신 쓸 수 있는 시험 경로): 파일을 읽어 내 게이트웨이 것만
+            if pn_path and now - pn_mtime > 0.5:
+                try:
+                    m_ = os.path.getmtime(pn_path)
+                    if m_ != pn_mtime:
+                        pn_mtime = m_
+                        with open(pn_path, "r", encoding="utf-8") as f:
+                            reqs = json.load(f).get("requests", [])
+                        P_ = st.patch.arr
+                        for rq in reqs:
+                            if rq.get("id") in pn_seen:
+                                continue
+                            hit = np.flatnonzero((P_["patch_id"] == int(rq["patch_id"])) & (P_["active"] > 0))
+                            if hit.size and P_["gw"][hit[0]] >= 0 and fb.in_set[int(P_["gw"][hit[0]])]:
+                                pn_seen.add(rq.get("id"))
+                                fb.queue_patch_nack(int(P_["gw"][hit[0]]), int(rq["patch_id"]), int(rq["seq_from"]), int(rq["seq_to"]), "rest")
+                except (OSError, ValueError):
+                    pn_mtime = now
+            fb.pump_patch_nacks(tick, epoch, sender, now)
             t2 = time.perf_counter()
             bt = 0.9 * bt + 0.1 * (t1 - t0) * 1e6
             sdt = 0.9 * sdt + 0.1 * (t2 - t1) * 1e6

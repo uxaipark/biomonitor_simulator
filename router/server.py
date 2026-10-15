@@ -50,6 +50,7 @@ class RouterServer:
         addr = writer.get_extra_info("peername")
         conn = {"id": cid, "addr": f"{addr[0]}:{addr[1]}" if addr else "?", "gws": set(), "frames": 0, "bytes": 0, "opened": time.time(), "writer": writer}
         chk = StreamChecker(lambda *a, _c=conn: self._on_frame(_c, *a))
+        conn["chk"] = chk
         chk.on_corrupt = lambda gw_id, seq, _c=conn: self._nack(_c, gw_id, seq, seq, "crc")
         conn["checker"] = chk
         self.conns[cid] = conn
@@ -127,8 +128,10 @@ class RouterServer:
                 self.totals["meta"] += 1
             except Exception:
                 self.totals["anom_meta_json"] += 1
+        ver = getattr(conn.get("chk"), "cur_ver", 3)
+        resend = bool(flags & 0x10)                        # v4 F_RESEND: 패치 재전송분 (원래 ts_ms·seq) — 유실 집계에 넣지 않는다
         for patch_id, patient_id, pseq, fl, batt, rssi, chans in recs:
-            self.store.write(patch_id, ts_ms, gw_id, patient_id, pseq, fl, batt, rssi, chans)
+            self.store.write(patch_id, ts_ms, gw_id, patient_id, pseq, fl, batt, rssi, chans, resend=resend, seq_mask=0xFFFF if ver >= 4 else 0xFFFFFFFF)
         row["records"] += len(recs)
         self.totals["records"] += len(recs)
 

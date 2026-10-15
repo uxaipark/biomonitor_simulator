@@ -32,11 +32,15 @@ strict = False
 checkers = []
 
 
-def decode_records(buf: memoryview, n_rec: int):
+REC_HEAD = {3: struct.Struct("<IIIBBbB"), 4: struct.Struct("<IIHBBbB")}    # v4: 레코드 패킷 번호 u16
+
+
+def decode_records(buf: memoryview, n_rec: int, ver: int = 3):
     off = 0
+    rh = REC_HEAD[4 if ver >= 4 else 3]
     for _ in range(n_rec):
-        patch_id, patient_id, pseq, flags, batt, rssi, n_ch = struct.unpack_from("<IIIBBbB", buf, off)
-        off += 16
+        patch_id, patient_id, pseq, flags, batt, rssi, n_ch = rh.unpack_from(buf, off)
+        off += rh.size
         chans = {}
         for _ in range(n_ch):
             ch, dt, n = struct.unpack_from("<BBH", buf, off)
@@ -127,7 +131,9 @@ async def handle(reader, writer):
                 stats["meta"] += 1
             if flags & 0x04:
                 stats["keepalive"] += 1
-            for patch_id, patient_id, pseq, fl, batt, rssi, chans in decode_records(payload[off:], n_rec):
+            if flags & 0x10:
+                stats["patch_resend_frames"] += 1                 # v4 패치 재전송분 (원래 ts_ms·seq)
+            for patch_id, patient_id, pseq, fl, batt, rssi, chans in decode_records(payload[off:], n_rec, ver):
                 patches_seen.add(patch_id)
                 stats["records"] += 1
                 if fl & 0x01:

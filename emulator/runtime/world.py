@@ -140,7 +140,6 @@ class World:
         self.patch_registry: dict[str, dict] = {}  # serial -> lifecycle record (never deleted)
         self.stock: dict[str, list[str]] = {}       # 재고 보관 위치(병동 id 또는 "MCOT") -> 미사용 패치 serial (유효기간 빠른 순)
         self.stock_lot_no = 0
-        self._seq_tick: dict[int, int] = {}          # 연결이 끊긴 패치: 마지막으로 패킷 번호를 올린 tick (끊긴 동안에도 패치는 켜져 있어 번호가 계속 간다)
         self.stock_alarm: dict | None = None        # 마지막 재고 부족 알람 (자동 입고로 해소되면 None)
         self.stock_requests: dict[str, dict] = {}   # 라우터 재고 요청 (납품일 지정): request_id -> 기록
         self.free_rows: list[int] = []
@@ -502,6 +501,8 @@ class World:
         c[CTL["connect_budget"]] = 3 if t.get("storm_smoothing", True) else 100000
         c[CTL["tap"]] = 1 if t.get("capture", {}).get("enabled") else 0
         c[CTL["truth_all"]] = 1 if (t.get("truth") or {}).get("all_patients", True) else 0
+        c[CTL["proto"]] = 4 if int(t.get("protocol_version", 3) or 3) >= 4 else 3
+        c[CTL["pn_per_tick"]] = int(t.get("patch_resend_per_tick", 100) or 100)
         self.st.set_target(t["target_ip"])
         P = self.st.patch.arr
         rs = RESP_SOURCES.index(s["resp_source"])
@@ -538,8 +539,10 @@ class World:
         p.activated = self.sim_time
         p.patient_id = patient_id
         self.patches[row] = p
-        self.st.patch["seq"][row] = 0                  # 새 기기: 자기 패킷 번호는 처음부터 (같은 patch_id 로 0 이 다시 나오는 일은 없다 — 패치는 소진 전에 꺼지지 않는다)
-        self._seq_tick[row] = -1
+        # 새 기기: 패킷 번호는 0 부터, 이후 200 ms 칸마다 1 (번호 = seq0 + 절대 tick - tabs0 — 워커가 계산, 끊긴 동안에도 시간과 함께 간다)
+        Pa = self.st.patch
+        Pa["seq"][row] = 0; Pa["seq0"][row] = 0; Pa["tabs0"][row] = self.tabs_now()
+        Pa["gp_a"][row] = 0; Pa["gp_b"][row] = 0; Pa["gp_head"][row] = 0     # 이전 패치의 끊김 기록은 새 패치와 무관
         self.patch_registry[serial] = {**(ent or {}), "serial": serial, "patch_id": p.patch_id, "patient_id": patient_id,
                                        "patient_name": self.by_id[patient_id]["name"] if patient_id in self.by_id else None,
                                        "status": "active", "issued_at": self.sim_time, "issued_reason": reason,
@@ -653,27 +656,69 @@ class World:
         self.log.add("patch", f"{prof['name']} 패치 {patch.serial if patch else '-'} 제거 ({reason}) — 위치 추적 없음, 병상 고정", patient_id=pid)
         return {"ok": True, "changed": True, "patch": patch.serial if patch else None}
 
-    def _step_offline_seq(self) -> None:
-        """BLE 연결이 끊긴(음영·게이트웨이 장애·전파 방해) 패치도 켜져 있으므로 프레임마다 자기 패킷 번호를 올린다.
-        그래야 다시 붙었을 때 라우터가 끊긴 구간을 seq 공백(유실)으로 본다 — 예전에는 번호가 멈춰 패치가 꺼졌다 켜진 것처럼 이어졌다.
-        소진으로 꺼진 패치(batt_dead)와 미착용 환자는 제외.  연결된 패치는 워커가 올린다."""
-        if not self.running:
-            self._seq_tick = {}
-            return
-        now = self._tick_now()
+    # ------------------------------------------------------------------ 패치 재전송 (2026-10-15)
+    def _patch_row(self, patch_id: int) -> int:
         P = self.st.patch.arr
-        live = set()
-        for rec in list(self.admitted.values()):
-            if rec["gw"] >= 0 or not rec.get("worn", True) or rec.get("batt_dead"):
+        hit = np.flatnonzero((P["patch_id"] == int(patch_id)) & (P["active"] > 0))
+        return int(hit[0]) if hit.size else -1
+
+    def patch_gaps(self, patch_id: int) -> dict:
+        """그 패치가 송출하지 못한 최근 구간(끊김 기록)을 패킷 번호로: 라우터·시험자가 재전송 요청 범위를 정할 때."""
+        row = self._patch_row(patch_id)
+        if row < 0:
+            raise KeyError(patch_id)
+        P = self.st.patch.arr
+        p = P[row]
+        b_ms = int(self.cfg.get("transport", "bundle_ms") or 200)
+        v4 = int(self.cfg.get("transport", "protocol_version") or 3) >= 4
+        mask = 0xFFFF if v4 else 0xFFFFFFFF
+        seq_at = lambda t: (int(p["seq0"]) + (int(t) - int(p["tabs0"]))) & mask
+        iso = lambda t: dt.datetime.fromtimestamp(int(t) * b_ms / 1000.0).isoformat(timespec="milliseconds")
+        out = []
+        for k in range(len(p["gp_a"])):
+            a, b = int(p["gp_a"][k]), int(p["gp_b"][k])
+            if b <= a or a < int(p["tabs0"]):
                 continue
-            row = rec["row"]
-            live.add(row)
-            last = self._seq_tick.get(row, -1)
-            if last >= 0 and now > last:
-                P["seq"][row] = (int(P["seq"][row]) + (now - last)) & 0xFFFFFFFF
-            self._seq_tick[row] = now
-        for row in [r for r in self._seq_tick if r not in live]:
-            del self._seq_tick[row]
+            out.append({"seq_from": seq_at(a), "seq_to": seq_at(b - 1), "packets": b - a, "from": iso(a), "to": iso(b - 1),
+                        "minutes": round((b - a) * b_ms / 60000.0, 1)})
+        out.sort(key=lambda g: g["from"], reverse=True)
+        gw = int(p["gw"])
+        return {"patch_id": int(patch_id), "seq_now": seq_at(int(p["pos_tabs"])) if int(p["pos_tabs"]) > 0 else None, "seq_bits": 16 if v4 else 32,
+                "gateway": self.hospital.gateways[gw]["id"] if gw >= 0 else None, "linked": gw >= 0, "gaps": out}
+
+    def request_patch_resend(self, patch_id: int, seq_from: int, seq_to: int) -> dict:
+        """REST 재전송 요청: 패치가 지금 붙은 게이트웨이를 맡은 워커가 그 번호들의 프레임을 다시 만들어 그 게이트웨이로 보낸다."""
+        row = self._patch_row(patch_id)
+        if row < 0:
+            raise KeyError(patch_id)
+        gw = int(self.st.patch["gw"][row])
+        if gw < 0:
+            raise ValueError("패치가 지금 어느 게이트웨이에도 연결돼 있지 않습니다 (음영·연결 끊김) — 연결된 뒤에 요청하세요")
+        v4 = int(self.cfg.get("transport", "protocol_version") or 3) >= 4
+        mask = 0xFFFF if v4 else 0xFFFFFFFF
+        n = ((int(seq_to) - int(seq_from)) & mask) + 1
+        if n > 65535:
+            raise ValueError("한 번에 최대 65,535 패킷까지 요청할 수 있습니다")
+        path = RUNTIME_DIR / "patch_nack.json"
+        try:
+            reqs = json.loads(path.read_text("utf-8")).get("requests", [])
+        except (OSError, ValueError):
+            reqs = []
+        self._pn_id = getattr(self, "_pn_id", 0) + 1
+        rid = f"{int(time.time() * 1000)}-{self._pn_id}"
+        reqs = (reqs + [{"id": rid, "patch_id": int(patch_id), "seq_from": int(seq_from) & mask, "seq_to": int(seq_to) & mask, "t": time.time()}])[-200:]
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"requests": reqs}), "utf-8")
+        os.replace(tmp, path)
+        rate = 5 * int(self.cfg.get("transport", "patch_resend_per_tick") or 100)
+        self.log.add("patch", f"패치 {patch_id:08d} 재전송 요청: 번호 {int(seq_from) & mask}~{int(seq_to) & mask} ({n:,}개) → {self.hospital.gateways[gw]['id']} 경유")
+        return {"queued": True, "id": rid, "patch_id": int(patch_id), "seq_from": int(seq_from) & mask, "seq_to": int(seq_to) & mask, "packets": n,
+                "gateway": self.hospital.gateways[gw]["id"], "eta_s": round(n / max(1, rate), 1)}
+
+    def tabs_now(self) -> int:
+        """절대 tick = 벽시계 ms // bundle_ms (워커의 tick + tick_off 와 같은 번호)."""
+        b = int(self.cfg.get("transport", "bundle_ms") or 200)
+        return int(time.time() * 1000) // b
 
     def _step_wear_ratio(self) -> None:
         """착용 비율 설정이 바뀌면(시작 직후 포함) 목표 비율에 맞춰 무작위 환자에게 붙이거나 뗀다 (한 번에 최대 300명)."""
@@ -2765,7 +2810,6 @@ class World:
                 if pid % 5 == k or (rec["gw"] >= 0 and G["status"][rec["gw"]] == 2) or (rec["gw"] < 0):
                     self._relink(rec)
             self._tnote("relink", t0)
-            T("seq_offline", self._step_offline_seq)
             T("write_meta", self.write_meta)
             T("invariants", self._step_invariants)
             T("autotune", self._step_autotune, real_dt)

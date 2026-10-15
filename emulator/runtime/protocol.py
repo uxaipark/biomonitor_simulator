@@ -29,8 +29,22 @@ F_META = 0x01
 F_GWSTAT = 0x02
 F_KEEPALIVE = 0x04
 F_CTRL = 0x08                    # control frame (router -> gateway): payload = <B kind><I from><I to>; kind 1 = NACK (resend frames from..to)
+F_RESEND = 0x10                  # v4: 이 프레임의 레코드는 패치 재전송분 — ts_ms 는 원래 시각(과거), 레코드 seq 는 원래 패킷 번호
 CTRL_NACK = 1
+CTRL_PATCH_NACK = 2              # v4: 패치 재전송 요청 = <B kind=2><I patch_id><H seq_from><H seq_to> (양 끝 포함, 16 비트 감김 허용)
 CTRL = struct.Struct("<BII")
+CTRL_PN = struct.Struct("<BIHH")  # CTRL 과 같은 9 바이트
+VERSION_V4 = 4                   # v4 = v3 + 레코드 패킷 번호 2 바이트(u16) + 패치 재전송(CTRL kind 2, F_RESEND)
+REC_HEAD = {3: struct.Struct("<IIIBBbB"), 4: struct.Struct("<IIHBBbB")}   # patch_id patient_id seq flags battery rssi n_ch
+SEQ_MASK = {3: 0xFFFFFFFF, 4: 0xFFFF}
+
+
+def rec_head(ver: int) -> struct.Struct:
+    return REC_HEAD[4] if ver >= 4 else REC_HEAD[3]
+
+
+def seq_mask(ver: int) -> int:
+    return SEQ_MASK[4] if ver >= 4 else SEQ_MASK[3]
 CRC = struct.Struct("<I")         # frame trailer: CRC-32 (zlib) over header + payload
 HEADER = struct.Struct("<HBBIIQHI")       # 26 bytes
 GWSTAT = struct.Struct("<BBBbBBIB")       # cpu mem net wan_rssi n_conn status uptime temp_c  = 12 bytes
@@ -46,10 +60,10 @@ def samples_per_frame(ch: int, bundle_ms: int, fs: dict) -> int:
 
 
 @lru_cache(maxsize=64)
-def record_dtype(chan_mask: int, with_numerics: bool, bundle_ms: int, ecg_fs: int, ppg_fs: int, resp_fs: int, accel_fs: int) -> np.dtype:
-    """Packed structured dtype for one patch record of a given channel set."""
+def record_dtype(chan_mask: int, with_numerics: bool, bundle_ms: int, ecg_fs: int, ppg_fs: int, resp_fs: int, accel_fs: int, ver: int = 3) -> np.dtype:
+    """Packed structured dtype for one patch record of a given channel set (v4: seq u16)."""
     fs = {"ecg": ecg_fs, "ppg": ppg_fs, "resp": resp_fs, "accel": accel_fs}
-    fields: list = [("patch_id", "<u4"), ("patient_id", "<u4"), ("seq", "<u4"), ("flags", "u1"), ("battery", "u1"), ("rssi", "i1"), ("n_ch", "u1")]
+    fields: list = [("patch_id", "<u4"), ("patient_id", "<u4"), ("seq", "<u2" if ver >= 4 else "<u4"), ("flags", "u1"), ("battery", "u1"), ("rssi", "i1"), ("n_ch", "u1")]
     for ch in WAVE_CH:
         if chan_mask & (1 << ch):
             n = samples_per_frame(ch, bundle_ms, fs)
@@ -123,20 +137,20 @@ def parse_truth(b: bytes) -> dict:
             "pace": [{"offset": o, "chamber": c} for o, c in pace]}
 
 
-def truth_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, blob: bytes) -> bytes:
+def truth_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, blob: bytes, ver: int = 3) -> bytes:
     """정답 레코드: 같은 프레임의 ECG 레코드와 같은 seq 를 가진 별도 레코드 (n_ch=1, 채널 11)."""
-    head = struct.pack("<IIIBBbB", patch_id, patient_id, seq, flags, battery, rssi, 1)
+    head = rec_head(ver).pack(patch_id, patient_id, seq & seq_mask(ver), flags, battery, rssi, 1)
     return head + struct.pack("<BBH", CH_TRUTH, DTYPE_CODE["uint8"], len(blob)) + blob
 
 
-def pace_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, marks: np.ndarray) -> bytes:
+def pace_record(patch_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, marks: np.ndarray, ver: int = 3) -> bytes:
     """Standalone record carrying only pacemaker spike marks (sample offsets within the frame); same seq as the data record."""
-    head = struct.pack("<IIIBBbB", patch_id, patient_id, seq, flags, battery, rssi, 1)
+    head = rec_head(ver).pack(patch_id, patient_id, seq & seq_mask(ver), flags, battery, rssi, 1)
     return head + struct.pack("<BBH", CH_PACE, DTYPE_CODE["uint16"], len(marks)) + marks.astype("<u2").tobytes()
 
 
-def frame(gw_id: int, seq: int, ts_ms: int, n_rec: int, payload: bytes, flags: int) -> bytes:
-    body = HEADER.pack(MAGIC, VERSION, flags, gw_id, seq, ts_ms, n_rec, len(payload)) + payload
+def frame(gw_id: int, seq: int, ts_ms: int, n_rec: int, payload: bytes, flags: int, ver: int = VERSION) -> bytes:
+    body = HEADER.pack(MAGIC, ver, flags, gw_id, seq, ts_ms, n_rec, len(payload)) + payload
     return body + CRC.pack(zlib.crc32(body) & 0xFFFFFFFF)
 
 
@@ -150,9 +164,23 @@ def ctrl_frame(gw_id: int, kind: int, seq_from: int, seq_to: int, ts_ms: int = 0
 
 
 def parse_ctrl(payload: bytes) -> tuple[int, int, int] | None:
+    """kind 1 (NACK) → (1, seq_from, seq_to).  kind 2 (PATCH_NACK) → (2, patch_id, (seq_from << 16) | seq_to) — parse_patch_nack 로 푸는 편이 낫다."""
     if len(payload) < CTRL.size:
         return None
     return CTRL.unpack_from(payload, 0)
+
+
+def patch_nack_frame(gw_id: int, patch_id: int, seq_from: int, seq_to: int, ts_ms: int = 0) -> bytes:
+    """v4 router -> gateway: 패치 patch_id 의 패킷 seq_from..seq_to(u16, 포함) 를 다시 보내 달라.  게이트웨이는 그 패치에 전달하고,
+    패치가 그 게이트웨이에 붙어 있으면 다시 만든 프레임(F_RESEND, 원래 ts_ms·seq)이 같은 소켓으로 온다."""
+    return frame(gw_id, 0, ts_ms, 0, CTRL_PN.pack(CTRL_PATCH_NACK, patch_id & 0xFFFFFFFF, seq_from & 0xFFFF, seq_to & 0xFFFF), F_CTRL, VERSION_V4)
+
+
+def parse_patch_nack(payload: bytes) -> tuple[int, int, int] | None:
+    if len(payload) < CTRL_PN.size or payload[0] != CTRL_PATCH_NACK:
+        return None
+    _, pid, a, b = CTRL_PN.unpack_from(payload, 0)
+    return pid, a, b
 
 
 def gwstat_block(cpu: int, mem: int, net: int, wan_rssi: int, n_conn: int, status: int, uptime: int, temp_c: int) -> bytes:
@@ -194,7 +222,14 @@ def describe(bundle_ms: int, fs: dict, meta_every: int, gwstat_every: int) -> di
                          "(0 atrial, 1 ventricular/RV, 2 LV for CRT). Emulates hardware pace detection: bipolar/leadless spikes are tiny in the "
                          "waveform and detection may miss some (see META patches[].pacemaker.detect_pct). Sent as a separate record (n_ch=1) only when spikes occurred.")
         chans.append(d)
-    return {"version": VERSION, 
+    return {"version": VERSION, "version_v4": {
+        "enable": "transport.protocol_version = 4 (기본 3).  헤더 ver = 4, 나머지 프레이밍·CRC 는 v3 와 같다.",
+        "record_header": "patch_id u32 | patient_id u32 | seq u16 | flags u8 | battery u8 | rssi i8 | n_ch u8  (14 바이트; v3 은 seq u32 · 16 바이트)",
+        "patch_seq": "패치 패킷 번호 = 패치가 켜진 뒤 bundle(200 ms) 칸 수 (16 비트에서 감김 = 약 3.6 시간).  송출하지 못한 동안(음영·연결 끊김)에도 시간과 함께 올라가므로 공백 = 유실 구간",
+        "patch_nack": "라우터 → 게이트웨이 소켓 CTRL(flags 0x08) payload <B kind=2><I patch_id><H seq_from><H seq_to> (양 끝 포함, 감김 허용).  패치가 그 게이트웨이에 붙어 있으면 그 번호들의 프레임을 다시 만들어 같은 소켓으로 보낸다",
+        "resend_frame": "flags 0x10 F_RESEND: 레코드가 재전송분 — ts_ms 는 원래(과거) 시각, 레코드 seq 는 원래 번호.  한 프레임 = 한 패치의 한 칸.  파형은 앞뒤 정상 프레임과 표본 단위로 이어진다",
+        "rest": "GET /api/v1/patches/{patch_id}/gaps · POST /api/v1/patches/{patch_id}/resend {seq_from, seq_to} · GET /api/v1/patches/resend/stats"},
+        
         "transport": {"type": "tcp", "byte_order": "little", "framing": "length-prefixed frames, back-to-back on the stream",
                       "socket_modes": {"per_gateway": "one TCP connection per gateway (default, realistic)",
                                        "shared": "all gateways multiplexed on one TCP connection per worker process"},

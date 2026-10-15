@@ -102,7 +102,8 @@ class PatchStore:
         self._load_index()
 
     # ---- ingest (called from the network thread; cheap: append to a per-patch buffer)
-    def write(self, patch_id: int, ts_ms: int, gw_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, chans: dict) -> None:
+    def write(self, patch_id: int, ts_ms: int, gw_id: int, patient_id: int, seq: int, flags: int, battery: int, rssi: int, chans: dict,
+              resend: bool = False, seq_mask: int = 0xFFFFFFFF) -> None:
         entry = encode_entry(ts_ms, gw_id, patient_id, seq, flags, battery, rssi, chans)
         with self.lock:
             self.pending[patch_id] += entry
@@ -115,12 +116,18 @@ class PatchStore:
             ix["patient_id"] = patient_id
             ix["gw_id"] = gw_id
             last = ix.get("last_seq")
-            d = (seq - last) & 0xFFFFFFFF if last is not None else 1
-            if last is not None and 1 < d < 0x80000000:          # per-patch loss accounting from the patch's own packet counter
+            half = (seq_mask >> 1) + 1                             # v4: 패킷 번호 u16 (65,536 에서 감김), v3: u32
+            if resend:                                             # 재전송분: 빠진 자리를 채운 것 — 유실을 줄이고 순서 기준은 그대로
+                ix["recovered"] = ix.get("recovered", 0) + 1
+                ix["lost"] = max(0, ix.get("lost", 0) - 1)
+                d = 0
+            else:
+                d = (seq - last) & seq_mask if last is not None else 1
+            if not resend and last is not None and 1 < d < half:   # per-patch loss accounting from the patch's own packet counter
                 ix["lost"] = ix.get("lost", 0) + d - 1
-            if 0 < d < 0x80000000:                                 # 역행(재정렬·재전송·중복)은 last_seq 를 되돌리지 않는다 — 되돌리면 다음 정상 seq 에서 유실이 이중 집계됐다
+            if 0 < d < half:                                 # 역행(재정렬·재전송·중복)은 last_seq 를 되돌리지 않는다 — 되돌리면 다음 정상 seq 에서 유실이 이중 집계됐다
                 ix["last_seq"] = seq
-            elif last is not None and d >= 0x80000000 and seq <= PATCH_SEQ_RESTART_MAX and ((last - seq) & 0xFFFFFFFF) >= PATCH_SEQ_RESTART_MIN_BACK:
+            elif not resend and last is not None and d >= half and seq <= PATCH_SEQ_RESTART_MAX and ((last - seq) & seq_mask) >= PATCH_SEQ_RESTART_MIN_BACK:
                 ix["restarts"] = ix.get("restarts", 0) + 1              # 패치 번호가 0 근처로 돌아감 = 장애 (패치는 소진 전에 꺼지지 않는다)
                 ix["last_seq"] = seq
             self.dirty_index.add(patch_id)

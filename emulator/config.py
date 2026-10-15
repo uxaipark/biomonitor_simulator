@@ -93,6 +93,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "workers": 0,                  # 0 = auto (cpu_count-1), 1 = in-process
         "capture_max_mb": 256,         # ground-truth capture files, total across workers; the tap switches itself off at the cap
         "saf_worker_max_mb": 64,       # store-and-forward buffer per worker (on top of the 2 MB per gateway)
+        "protocol_version": 3,         # 3: 레코드 패킷 번호 u32 · 4: u16 + 패치 재전송(CTRL kind 2, F_RESEND) — 라우터가 v4 를 읽을 수 있을 때 4 로
+        "patch_resend_per_tick": 100,  # 패치 재전송 요청을 워커가 tick(200 ms)마다 최대 몇 프레임씩 다시 만들어 보낼지 (100 = 초당 500)
         "resend_keep_s": 10,           # sent frames are kept this long so a router NACK can be answered (protocol v3)
         "resend_keep_mb": 64,          # ... bounded per worker
         "max_send_backlog_bytes": 262144,
@@ -330,6 +332,8 @@ class Config:
         t["saf_worker_max_mb"] = _num(t.get("saf_worker_max_mb"), 1, 1024, 64)
         t["resend_keep_mb"] = _num(t.get("resend_keep_mb"), 1, 1024, 64)
         t["resend_keep_s"] = _num(t.get("resend_keep_s"), 1, 300, 10)
+        t["protocol_version"] = 4 if _num(t.get("protocol_version"), 3, 4, 3, True) >= 4 else 3
+        t["patch_resend_per_tick"] = _num(t.get("patch_resend_per_tick"), 1, 2000, 100, True)
         t["reconnect_interval_s"] = _num(t.get("reconnect_interval_s"), 0.2, 600, 3.0)
         sf = t.setdefault("store_forward", {})
         sf["enabled"] = bool(sf.get("enabled", True))

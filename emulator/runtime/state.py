@@ -51,7 +51,20 @@ PATCH_FIELDS = [
     ("beat_tap", np.uint8),      # 1 = 일반 환자 패치의 박동 단위 정답을 링버퍼에 남긴다 (POST /api/v1/truth/watch)
     ("beats_n", np.uint32),      # 박동 정답 누적 카운터 (워커가 프레임마다 더함): 전체 · AAMI S · V · F · Q (N = 전체 - 나머지)
     ("beats_s", np.uint32), ("beats_v", np.uint32), ("beats_f", np.uint32), ("beats_q", np.uint32),
+    # ---- 패킷 번호와 재전송 (2026-10-15).  번호 = seq0 + (절대 tick - tabs0): 패치가 켜진 뒤 200 ms 칸마다 1 — 끊긴 동안에도 저절로
+    #      올라가고, 번호만으로 원래 시각을 거꾸로 알 수 있다 (프로토콜 v4 는 하위 16 비트만 보낸다).  절대 tick = 벽시계 ms // bundle_ms.
+    ("seq0", np.uint32), ("tabs0", np.int64),
+    # ECG 루프 위치(표본, 실수)를 워커끼리 공유한다: pos = 다음 tick 의 시작 위치, pos_start = pos_tabs tick 의 시작 위치.
+    # (예전엔 워커마다 따로 누적해 워커가 다른 게이트웨이로 옮기면 파형이 튀었고, 끊긴 동안엔 멈춰 끼워 넣을 자리가 없었다)
+    ("pos", np.float64), ("pos_start", np.float64), ("pos_tabs", np.int64), ("pos_off", np.int32),
+    ("ls_var", np.int32), ("ls_gain", np.float32), ("ls_art", np.float32), ("ls_noise", np.float32),   # 마지막으로 송출한 tick 의 상태
+    # 끊긴 구간 기록 (최근 GAP_K 개, 원형): [a, b) = 송출하지 못한 절대 tick, 양 끝의 ECG 위치·변형·이득 — 재전송 파형을 양 끝에 맞물려 만든다
+    ("gp_a", np.int64, (4,)), ("gp_b", np.int64, (4,)), ("gp_apos", np.float64, (4,)), ("gp_bpos", np.float64, (4,)),
+    ("gp_avar", np.int32, (4,)), ("gp_bvar", np.int32, (4,)), ("gp_ag", np.float32, (4,)), ("gp_bg", np.float32, (4,)),
+    ("gp_aa", np.float32, (4,)), ("gp_ba", np.float32, (4,)), ("gp_an", np.float32, (4,)), ("gp_bn", np.float32, (4,)),
+    ("gp_head", np.uint8),
 ]
+GAP_K = 4
 GW_FIELDS = [
     ("active", np.uint8),
     ("status", np.uint8),        # 0 ok, 1 degraded, 2 down (no frames, socket closed)
@@ -79,6 +92,9 @@ STAT_FIELDS = [                 # per gateway, written by workers
     ("resent", np.uint64),       # frames re-sent from the keep buffer on request
     ("resend_miss", np.uint32),  # requested frames no longer in the keep buffer
     ("bad_ctrl", np.uint32),     # control frames that failed CRC / parsing
+    ("pn_req", np.uint32),       # 패치 재전송 요청 (라우터 → 게이트웨이 → 패치)
+    ("pn_sent", np.uint64),      # 그 요청으로 다시 만들어 보낸 패치 프레임
+    ("pn_fail", np.uint32),      # 처리하지 못한 요청 (패치가 이 게이트웨이에 없음 · 너무 오래됨 · 패치 생성 전)
 ]
 WSTAT_FIELDS = [                # per worker
     ("ticks", np.uint64), ("overruns", np.uint64), ("build_us", np.float64), ("send_us", np.float64),
@@ -93,7 +109,8 @@ CTL = {"running": 0, "epoch_ns": 1, "bundle_ms": 2, "chan_mask": 3, "ecg_fs": 4,
        "meta_every": 8, "gwstat_every": 9, "target_port": 10, "socket_mode": 11, "crossfade_ticks": 12, "cfg_version": 13,
        "loop_seconds": 14, "max_backlog": 15, "reconnect_s": 16, "generate_only": 17, "n_workers": 18, "stop_workers": 19,
        "saf_enabled": 20, "saf_max_bytes": 21, "saf_burst": 22, "fuzz_rate": 23, "fuzz_mask": 24, "storm_epoch": 25, "storm_until": 26,
-       "tap": 27, "connect_budget": 28, "truth_all": 29}      # truth_all: 모든 환자 패치 프레임에 TRUTH 레코드(채널 11)
+       "tap": 27, "connect_budget": 28, "truth_all": 29,
+       "proto": 30, "pn_per_tick": 31}      # proto: 송출 프로토콜 버전(3 = 레코드 seq u32, 4 = u16 + 패치 재전송) · pn_per_tick: 워커가 tick 마다 다시 만들 최대 패치 프레임 수      # truth_all: 모든 환자 패치 프레임에 TRUTH 레코드(채널 11)
 # frame-corruption drill kinds (bit i of CTL fuzz_mask enables FUZZ_KINDS[i])
 FUZZ_KINDS = ["bad_magic", "bad_version", "bad_len", "truncated", "oversize", "garbage", "dup", "reorder", "seq_gap", "bad_record"]
 CTL_SIZE = 32
@@ -115,7 +132,7 @@ class Table:
     def __init__(self, fields, n: int, name: str | None = None, create: bool = True):
         self.fields = fields
         self.n = n
-        self.dtype = np.dtype([(f, t) for f, t in fields])
+        self.dtype = np.dtype([tuple(x) for x in fields])      # (name, type) 또는 (name, type, shape)
         nbytes = self.dtype.itemsize * n
         if create:
             self.shm = shared_memory.SharedMemory(create=True, size=max(1, nbytes))

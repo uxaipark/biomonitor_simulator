@@ -95,6 +95,20 @@ Channel: ch_id u8 | dtype u8 | n u16 | data
 수치 채널은 초당 1회, 패치별로 프레임을 엇갈려 보냅니다. META 블록은 재연결 직후와 `meta_every_n_frames` 마다(게이트웨이별 시차) 채널 구성·패치↔환자 매핑을 실어 나릅니다.
 전체 명세는 `GET /api/v1` 의 `stream_protocol` 로 기계가독 형태로 제공되며, `tools/receiver.py` 가 디코더 레퍼런스입니다.
 
+### 프로토콜 v4 — 2바이트 패킷 번호와 패치 재전송 (2026-10-15, `transport.protocol_version = 4`)
+
+v3 와 프레이밍·CRC 가 같고 세 가지가 다릅니다. 기본값은 3 이며, 라우터가 v4 를 읽을 수 있을 때 4 로 바꿉니다.
+
+```
+Record : patch_id u32 | patient_id u32 | seq u16 | flags u8 | battery u8 | rssi i8 | n_ch u8 | channel × n_ch   (14 B)
+flags  : 0x10 F_RESEND — 재전송분: ts_ms = 원래(과거) 시각, 레코드 seq = 원래 번호, 한 프레임 = 한 패치의 한 칸
+Control: kind 2 PATCH_NACK = <B 2><I patch_id><H seq_from><H seq_to>  (라우터 → 패치가 있는 게이트웨이 소켓)
+```
+
+- **패킷 번호**: 패치가 켜진 뒤 200 ms 칸 수(16 비트에서 감김, 약 3.6 시간). 끊긴 동안에도 시간과 함께 올라가 공백이 곧 유실 구간이고, 번호만으로 원래 시각을 거꾸로 알 수 있습니다.
+- **재전송 경로**: 라우터가 패치가 붙어 있는 게이트웨이 소켓으로 PATCH_NACK 를 보내면(게이트웨이 → 패치), 그 게이트웨이를 맡은 워커가 번호들의 프레임을 다시 만들어 같은 소켓으로 보냅니다. 패치가 다른 게이트웨이에 있거나 음영 중이면 처리하지 않습니다(`pn_fail`). 시험용 REST: `GET /api/v1/patches/{id}/gaps`, `POST /api/v1/patches/{id}/resend {seq_from, seq_to}`.
+- **이음매 없는 파형**: ECG 루프 위치를 워커끼리 공유하고, 송출하지 못한 구간마다 양 끝의 위치·리듬 변형·이득을 기록합니다. 재전송 파형은 그 사이를 고르게 나눠 만들어 처음과 끝이 앞뒤 정상 프레임과 표본 단위로 이어집니다(끊긴 사이 리듬이 바뀌었으면 가운데에서 크로스페이드). 워커가 다른 게이트웨이로 옮겨도 파형이 튀지 않습니다(예전엔 워커 간 이동마다 위치가 바뀌었음).
+
 ## 시나리오 요약
 
 * **장소**: 병원(BLE 패치+병실/복도/엘리베이터/계단/화장실/샤워실/검사실 게이트웨이), 원외 MCOT(모바일 게이트웨이, 배터리 방전/충전, 외출·음영·전파간섭, 패치 탈락), 혼합. 원외 MCOT 환자의 일부(`general.overseas_ratio`, 기본 25 %)는 **해외 체류 외국인**(미국·일본·영국·독일·유럽·남미 고객국 13개국)으로, 실제 해외 주소 체계(동네·도시·주/지역·우편번호·국가)와 좌표(`address.lat/lon`, 라우터 MCOT 지도용)·현지 시간대(하루 생활 리듬)·현지 통신사·국제 구간 지연(META `home`·`abroad`)을 갖고 입원 병상에는 배정되지 않는다. **국가별 신원 세트**: 임상 코어(나이·성별·질환·리듬·기기·입원·패치·파형)는 하나로 두고, 환자 신원(이름·주소·전화·MRN·국적·아바타)만 한국·미국·일본 세 벌을 둔다. 미국 — 시카고권 동네·주·ZIP·좌표, 도시별 지역번호 555-01xx, 출생 연대별 이름, 이민자 8개국, 8자리 MRN / 일본 — 도쿄권 〒·都道府県·市区町村·丁目, 한자+가나 이름, 외국인 주민 6개국, 10자리 카르테 번호 (이름은 그 환자의 성별·출생연도에 맞춤, 번지는 만들지 않음). 세트는 [메디컬 월드 생성 › 환자 프로필]의 [미국·일본 신원 생성] 또는 [환자 프로필 재생성] 때 만들어 `runtime/identities_US.json`·`_JP.json` 에 저장해 재사용하고(`GET /api/v1/identities`, `POST /api/v1/identities/generate`), **③ 시그널 송출 › 송출 국가**(`transport.identity_country`)를 바꾸면 재배정·DB 초기화·전송 중단 없이 신원만 즉시 바뀐다(META 전체 재송, 연동 EMR 인물도 새 신원). `korean_ratio` 는 자국민 비율. **라우터 로그인 연동**: 라우터 로그인에서 국가·병원을 고르면 `POST /api/v1/identities/select {"country":"US","by":"router","reason":"login H001 …"}`(또는 `"hospital":"H001"`; KOR/USA/JPN·한국어 표기 허용) → 에뮬레이터가 그 나라 신원으로 즉시 전환하고 `{current, version, hospital}` 를 돌려준다(같은 값이면 변경 없음). META 게이트웨이 항목 최상위 `identity_country`·`identity_version`(전환마다 +1, 라우터는 바뀌면 EMR 캐시를 비움)·`identity{country,hospital,version}`, EMR API(`/emr/patients`·`/admissions`·`/patients/{pid}`)에 `country`·`name_kana`·`home{sido,sigungu,dong,postal,lat,lon,label,country}`, `/emr/hospital` 에 `country`·`locale`(ko-KR/en-US/ja-JP)·`timezone`. 전환은 채팅(link)·이벤트 로그에 한 줄로 남는다.

@@ -109,7 +109,7 @@ def discovery():
         "endpoints": {
             "discovery": "/api/v1", "truth": "GET /api/v1/truth (정답 전용 벤치마크 패치 상태·등급 세트; 정답은 스트림 채널 11 TRUTH 레코드로 프레임마다 같이 나감)", "truth_beats": "GET /api/v1/truth/beats?patch_id=&since_ms=&until_ms=&pace= (정답 R-peak 절대 시각)", "truth_score": "POST /api/v1/truth/score {detections:{patch_id:[ts_ms..]}, tolerance_ms:150} → QRS 검출 Se/PPV/F1", "config": "/api/v1/config [GET, PATCH]", "status": "/api/v1/status", "stats": "/api/v1/stats", "events": "/api/v1/events?since=<seq>",
             "control": {"start": "POST /api/v1/control/start", "stop": "POST /api/v1/control/stop", "rebuild": "POST /api/v1/control/rebuild",
-                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_stock": "GET /api/v1/emr/patches?status=stock&ward=&q=&limit= (병원 재고 미사용 패치: 로트·유효기간·보관 위치) · POST /api/v1/emr/patches/stock {count, ward, request_id} 수동 입고 · POST /api/v1/emr/patches/stock/adjust {target} 재고 조정", "patient_admin": "POST /api/v1/emr/admissions (환자 등록) · POST /api/v1/emr/admissions/{patient_id}/patch/replace (교체) · POST /api/v1/emr/admissions/{patient_id}/patch/return (반납) — request_id 멱등, 거절 409/410/422 {detail}", "stock_requests": "POST /api/v1/emr/stock/requests {request_id, ward, qty, deliver_on} · GET /api/v1/emr/stock/requests · POST /api/v1/emr/stock/requests/{id}/cancel (납품일 입고)", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
+                        "generate_loops": "POST /api/v1/control/generate", "trigger": "POST /api/v1/control/trigger {what: gateway_fault|gateway_replace|network_event|lead_off|episode|vfib|exam|replace_patch|patch_wear_expire|patch_low_battery|rx_expire|discharge|admit, target, params}", "autotune": "POST /api/v1/control/autotune {start|stop}", "patch_stock": "GET /api/v1/emr/patches?status=stock&ward=&q=&limit= (병원 재고 미사용 패치: 로트·유효기간·보관 위치) · POST /api/v1/emr/patches/stock {count, ward, request_id} 수동 입고 · POST /api/v1/emr/patches/stock/adjust {target} 재고 조정", "patch_resend": "GET /api/v1/patches/{patch_id}/gaps · POST /api/v1/patches/{patch_id}/resend {seq_from, seq_to} · GET /api/v1/patches/resend/stats (v4: 게이트웨이 소켓 CTRL kind 2 PATCH_NACK 도 같은 처리)", "patient_admin": "POST /api/v1/emr/admissions (환자 등록) · POST /api/v1/emr/admissions/{patient_id}/patch/replace (교체) · POST /api/v1/emr/admissions/{patient_id}/patch/return (반납) — request_id 멱등, 거절 409/410/422 {detail}", "stock_requests": "POST /api/v1/emr/stock/requests {request_id, ward, qty, deliver_on} · GET /api/v1/emr/stock/requests · POST /api/v1/emr/stock/requests/{id}/cancel (납품일 입고)", "patch_wear": "GET /api/v1/patch/wear · POST /api/v1/emr/patients/{pid}/patch {action: attach|detach} — 미착용 환자는 송신·위치 추적 없음(병상 고정)",
                         "apply_devices": "POST /api/v1/control/devices/apply {policy: auto|all|minimal}"},
             "emr": {"hospital": "/api/v1/emr/hospital", "floors": "/api/v1/emr/floors", "floor_map": "/api/v1/emr/floors/{building_idx}/{floor}", "wards": "/api/v1/emr/wards",
                     "rooms": "/api/v1/emr/rooms", "beds": "/api/v1/emr/beds (x·y 중심, angle 머리 방향 도, bed_size_m 0.9 x 2.0)", "gateways": "/api/v1/emr/gateways", "staff": "/api/v1/emr/staff",
@@ -1562,6 +1562,42 @@ def alarms_table():
     """기대 경보 기준표: 에뮬레이터는 경보를 내보내지 않는다. 이 신호를 받은 라우터·뷰어에서 떠야 할 경보(우선순위·색·코드)의 시험 기준."""
     from .alarms import table
     return table()
+
+
+@app.get("/api/v1/patches/{patch_id}/gaps")
+def patch_gaps(patch_id: int):
+    """패치가 송출하지 못한 최근 구간(음영·연결 끊김·게이트웨이 장애)을 패킷 번호 범위로 — 재전송 요청 범위를 고를 때."""
+    w = E().world
+    with w.lock:
+        try:
+            return w.patch_gaps(patch_id)
+        except KeyError:
+            raise HTTPException(404, "그런 패치가 없습니다 (사용 중인 패치 번호만)")
+
+
+@app.post("/api/v1/patches/{patch_id}/resend")
+def patch_resend(patch_id: int, body: dict):
+    """패치 재전송 요청 {seq_from, seq_to} (양 끝 포함, v4 는 16 비트 감김 허용).  라우터의 게이트웨이 소켓 CTRL kind 2(PATCH_NACK)와 같은 처리:
+    그 패치가 지금 붙어 있는 게이트웨이를 통해 그 번호들의 프레임을 다시 만들어 보낸다 (F_RESEND, 원래 ts_ms·seq, 앞뒤 파형과 이어짐)."""
+    w = E().world
+    try:
+        a, b = int(body.get("seq_from")), int(body.get("seq_to"))
+    except (TypeError, ValueError):
+        raise HTTPException(422, "seq_from·seq_to 가 숫자가 아닙니다")
+    with w.lock:
+        try:
+            return w.request_patch_resend(patch_id, a, b)
+        except KeyError:
+            raise HTTPException(422, "그런 패치가 없습니다 (사용 중인 패치 번호만)")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+
+@app.get("/api/v1/patches/resend/stats")
+def patch_resend_stats():
+    """패치 재전송 누계: 요청·다시 보낸 프레임·처리 못 한 요청 (게이트웨이별 합)."""
+    S = E().world.st.stat.arr
+    return {"requests": int(S["pn_req"].sum()), "frames_sent": int(S["pn_sent"].sum()), "failed": int(S["pn_fail"].sum())}
 
 
 @app.get("/api/v1/patch/wear")
