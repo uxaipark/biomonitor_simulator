@@ -34,33 +34,70 @@ def meta_field() -> dict:
     return {"id": BOOT["id"], "at": int(BOOT["at"] * 1000)}
 
 
+def router_url(cfg) -> str:
+    """라우터 재가동 엔드포인트: transport.router_reset.notify_url, 비우면 송출 대상 IP 의 7300 (라우터 상태 API) /api/emu/restarted."""
+    rr = (cfg.get("transport", "router_reset", default={}) or {})
+    url = str(rr.get("notify_url") or "").strip()
+    if url:
+        return url
+    ip = str(cfg.get("transport", "target_ip") or "").strip()
+    return f"http://{ip}:7300/api/emu/restarted" if ip else ""
+
+
+def _http(method: str, url: str, body: dict | None = None, timeout: float = 3.0) -> tuple[int, dict]:
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+        try:
+            return r.status, json.loads(raw.decode("utf-8") or "{}")
+        except ValueError:
+            return r.status, {}
+
+
 def notify(cfg, chat, emulator_url: str) -> None:
-    """재가동을 라우터에 알린다 (채팅 + 웹훅).  실패해도 에뮬레이터 기동은 막지 않는다."""
+    """재가동을 라우터에 알린다: 라우터 재가동 엔드포인트에 POST (라우터가 가동 초기화 — 원격·로컬 백업 삭제 — 를 실행) + 채팅.
+    라우터 계약 (2026-10-16 채팅 6912): POST http://<라우터>:7300/api/emu/restarted → 202, 라우터는 우리 /api/v1/status 의 uptime_s 로
+    새 부팅인지 확인하고 초기화를 한 번 실행한다.  실패해도 에뮬레이터 기동은 막지 않는다 (라우터는 uptime_s 감시로도 잡는다)."""
     rr = (cfg.get("transport", "router_reset", default={}) or {})
     need = bool(rr.get("require_ack", True))
+    url = router_url(cfg)
     text = (f"[에뮬레이터 재가동] boot_id={BOOT['id']} · {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(BOOT['at']))}. "
-            f"환자번호·패치 번호·패킷 번호가 모두 새로 시작합니다. 라우터는 정상 동작을 멈추고 가동 초기화(원격 백업·로컬 백업 삭제 포함)를 한 뒤 "
-            f"POST {emulator_url}/api/v1/boot/ack {{\"boot_id\": \"{BOOT['id']}\"}} 를 보내 주세요."
-            + (f" 확인을 받을 때까지 송출을 시작하지 않습니다 (최대 {int(rr.get('ack_timeout_s', 120))}초)." if need else " (확인 없이 바로 송출합니다)"))
+            f"환자번호·패치 번호·패킷 번호가 모두 새로 시작합니다. 라우터 가동 초기화(원격 백업·로컬 백업 삭제 포함)를 요청합니다"
+            + (f" ({url})" if url else "") + "."
+            + (f" 초기화가 끝날 때까지 송출을 시작하지 않습니다 (최대 {int(rr.get('ack_timeout_s', 120))}초)." if need else " (확인 없이 바로 송출합니다)"))
     try:
         chat.post("rp5-1", text, kind="system")
         BOOT["notified"].append({"via": "chat", "t": time.time(), "ok": True})
     except Exception as e:
         BOOT["notified"].append({"via": "chat", "t": time.time(), "ok": False, "error": str(e)})
-    url = str(rr.get("notify_url") or "").strip()
-    if url:
-        body = json.dumps({"event": "emulator_restart", "boot_id": BOOT["id"], "boot_at_ms": int(BOOT["at"] * 1000),
-                           "ack_url": f"{emulator_url}/api/v1/boot/ack", "require_ack": need,
-                           "action": "stop normal operation, reset (delete remote and local backups), then POST ack"}).encode("utf-8")
-        for attempt in range(3):
-            try:
-                req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
-                with urllib.request.urlopen(req, timeout=3) as r:
-                    BOOT["notified"].append({"via": "webhook", "t": time.time(), "ok": True, "status": r.status})
-                break
-            except Exception as e:
-                BOOT["notified"].append({"via": "webhook", "t": time.time(), "ok": False, "error": str(e)[:200]})
-                time.sleep(2 * (attempt + 1))
+    if not url:
+        return
+    body = {"event": "emulator_restart", "boot_id": BOOT["id"], "boot_at_ms": int(BOOT["at"] * 1000), "ack_url": f"{emulator_url}/api/v1/boot/ack"}
+    for attempt in range(5):
+        try:
+            BOOT["reset_post_ms"] = int(time.time() * 1000)
+            code, _ = _http("POST", url, body)
+            BOOT["notified"].append({"via": "router", "t": time.time(), "ok": True, "status": code, "url": url})
+            break
+        except Exception as e:
+            BOOT["notified"].append({"via": "router", "t": time.time(), "ok": False, "error": str(e)[:200], "url": url})
+            time.sleep(2 * (attempt + 1))
+
+
+def router_reset_done(cfg) -> bool:
+    """라우터 초기화 완료: GET 같은 엔드포인트의 reset.running == false 이고 reset.done_ms ≥ 우리가 POST 한 시각."""
+    url = router_url(cfg)
+    post_ms = BOOT.get("reset_post_ms")
+    if not url or not post_ms:
+        return False
+    try:
+        _, d = _http("GET", url, None, timeout=2.0)
+    except Exception:
+        return False
+    r = (d or {}).get("reset") or {}
+    BOOT["router_reset"] = r
+    return (r.get("running") is False) and int(r.get("done_ms") or 0) >= int(post_ms) and not r.get("error")
 
 
 def ack(boot_id: str, body: dict) -> dict:
@@ -82,7 +119,20 @@ def wait_for_ack(cfg) -> str:
     BOOT["state"] = "waiting_ack"
     t0 = time.time()
     tmo = rr.get("ack_timeout_s")
-    got = _ack_event.wait(timeout=float(120 if tmo is None else tmo))     # 0 = 기다리지 않음 (예전 'or 120' 은 0 을 120 으로 바꿨다)
+    limit = float(120 if tmo is None else tmo)                         # 0 = 기다리지 않음 (예전 'or 120' 은 0 을 120 으로 바꿨다)
+    got = False
+    while True:                                                        # 라우터 초기화 완료(GET) 또는 POST /api/v1/boot/ack 를 2 초마다 확인
+        left = limit - (time.time() - t0)
+        if left <= 0:
+            break
+        if _ack_event.wait(timeout=min(2.0, left)):
+            got = True
+            break
+        if router_reset_done(cfg):
+            BOOT["ack"] = {"t": time.time(), "by": "router (GET reset.done_ms)", "router_reset": BOOT.get("router_reset")}
+            BOOT["state"] = "acked"
+            got = True
+            break
     BOOT["waited_s"] = round(time.time() - t0, 1)
     if BOOT["state"] == "override":
         return "override"

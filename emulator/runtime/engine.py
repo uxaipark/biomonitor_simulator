@@ -290,7 +290,9 @@ class Engine:
         last = self._stats_hist[-1] if self._stats_hist else {}
         w = self.world
         st = w.st
-        return {"running": self.running, "uptime_s": (time.time() - self.started_at) if self.running else 0, "generate_only": bool(st.ctl[CTL["generate_only"]] > 0),
+        from ..boot import BOOT
+        # uptime_s = 프로세스 가동 시간 (라우터가 10초마다 보고 재가동을 잡는다 — 송출 시작·정지로 0 이 되면 안 된다, 2026-10-16 라우터 요청)
+        return {"running": self.running, "uptime_s": time.time() - BOOT["at"], "tx_uptime_s": (time.time() - self.started_at) if self.running else 0, "generate_only": bool(st.ctl[CTL["generate_only"]] > 0),
                 "target": {"ip": st.get_target(), "port": int(st.ctl[CTL["target_port"]])}, "last": last,
                 "history": [{"t": e["t"], "pkts_ps": e["pkts_ps"], "bytes_ps": e["bytes_ps"], "drop_backlog_ps": e["drop_backlog_ps"], "drop_emul_ps": e["drop_emul_ps"]} for e in self._stats_hist[-120:]] if history else [],
                 "world_step_ms": round(getattr(self, "world_step_ms", 0.0), 2), "world_step_max_ms": round(getattr(self, "world_step_max_ms", 0.0), 2),
