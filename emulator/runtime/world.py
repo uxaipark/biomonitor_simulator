@@ -44,6 +44,11 @@ from .truthbench import TruthBench, TRUTH_MAX
 ACT_ID = {a: i for i, a in enumerate(ACTIVITIES)}
 POSTURE_ID = {"supine": 0, "left_lateral": 1, "right_lateral": 2, "sitting": 3, "standing": 4, "prone": 5}
 RUNTIME_DIR = BASE_DIR / "runtime"
+
+
+def _boot_meta() -> dict:
+    from ..boot import meta_field
+    return meta_field()
 META_PATH = RUNTIME_DIR / "meta.json"
 META_DELTA_PATH = RUNTIME_DIR / "meta.delta.json"
 # MCOT uplink: the mobile gateway forwards the patch stream over cellular + internet, so every frame carries a
@@ -2676,6 +2681,7 @@ class World:
                 room = h.rooms[g["room_idx"]]["id"] if g["room_idx"] >= 0 else ""
                 d = {"v": sig & 0x7FFFFFFF, "gw": g["id"], "gw_no": g["gw_no"], "gw_idx": gw, "type": g["type"], "mac": g["mac"], "ip": g["ip"], "fw": g["fw"],
                      "identity_country": getattr(self, "identity_country", "KR"), "identity_version": getattr(self, "identity_version", 0),   # 라우터: version 이 바뀌면 EMR 캐시 비움
+                     "emulator_boot": _boot_meta(),           # 재가동 표지: id 가 바뀌면 라우터는 정상 동작을 멈추고 초기화 (emulator/boot.py)
                      "identity": {"country": getattr(self, "identity_country", "KR"), "hospital": cfg["transport"].get("identity_site", ""), "version": getattr(self, "identity_version", 0)},
                      "location": {"building": g["building"], "floor": g["floor"], "x": g["x"], "y": g["y"], "room": room},
                      "bundle_ms": bundle, "channels_enabled": en, "patches": patches}

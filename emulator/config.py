@@ -101,7 +101,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "reconnect_interval_s": 3.0,
         "router_status_url": "",       # retired: the router pushes its status to POST /api/v1/router/status
         # ---- router test drills
-        "store_forward": {"enabled": True, "max_bytes_per_gw": 2097152, "burst_frames_per_cycle": 40},   # buffer frames while down/offline, replay in bursts after reconnect
+        "store_forward": {"enabled": True, "max_bytes_per_gw": 2097152, "burst_frames_per_cycle": 40},
+        # 재가동 알림 (emulator/boot.py): 기동마다 라우터에 알리고, 라우터가 초기화(원격·로컬 백업 삭제)를 마쳤다는 확인을 받은 뒤 송출 시작
+        "router_reset": {"enabled": True, "require_ack": True, "ack_timeout_s": 120, "notify_url": ""},   # buffer frames while down/offline, replay in bursts after reconnect
         "fuzz": {"enabled": False, "rate_per_1000": 5,                                                  # corrupt frames on purpose (parser robustness)
                  "kinds": ["bad_magic", "bad_version", "bad_len", "truncated", "oversize", "garbage", "dup", "reorder", "seq_gap", "bad_record"]},
         "storm_smoothing": True,                                                                          # False = every gateway reconnects at once (connection storm)
@@ -339,6 +341,10 @@ class Config:
         sf["enabled"] = bool(sf.get("enabled", True))
         sf["max_bytes_per_gw"] = int(max(65536, min(64 * 1024 * 1024, sf.get("max_bytes_per_gw", 2097152))))
         sf["burst_frames_per_cycle"] = int(max(1, min(1000, sf.get("burst_frames_per_cycle", 40))))
+        rr = t.setdefault("router_reset", {})
+        rr["enabled"] = bool(rr.get("enabled", True)); rr["require_ack"] = bool(rr.get("require_ack", True))
+        rr["ack_timeout_s"] = _num(rr.get("ack_timeout_s"), 0, 3600, 120, True)
+        rr["notify_url"] = str(rr.get("notify_url") or "").strip()[:300]
         t["identity_country"] = t.get("identity_country") if t.get("identity_country") in ("KR", "US", "JP") else "KR"
         t["identity_site"] = "".join(ch for ch in str(t.get("identity_site") or "") if ch.isalnum() or ch in "-_")[:32]
         tr = t.setdefault("truth", {})

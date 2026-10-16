@@ -28,6 +28,16 @@ from .signals import trend as trend_model
 from .signals.accel import ACTIVITIES
 from .runtime.state import CTL
 from .emrsim import api as emrsim_api, mllp as emrsim_mllp, link as emrsim_link
+from . import boot
+
+
+def _host_ip() -> str:
+    """라우터가 확인(ack)을 보낼 주소: 이 장비의 기본 경로 IP."""
+    import socket
+    try:
+        s_ = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s_.connect(("192.168.0.1", 9)); ip = s_.getsockname()[0]; s_.close(); return ip
+    except OSError:
+        return "127.0.0.1"
 
 STATIC = Path(__file__).parent / "web" / "static"
 cfg = Config()
@@ -42,11 +52,23 @@ async def lifespan(app: FastAPI):
     print("emrsim:", emrsim_mllp.start(emrsim_api.MLLP_PORT), flush=True)
     emrsim_link.configure(lambda: engine.world if engine else None, BASE_DIR)
     emrsim_link.start()
+    # 재가동 알림: 라우터가 정상 동작을 멈추고 초기화(원격·로컬 백업 삭제)한 뒤 확인을 보낼 때까지 송출을 미룬다 (emulator/boot.py)
+    rr = cfg.get("transport", "router_reset", default={}) or {}
+    pub = os.environ.get("BIOSIM_PUBLIC_URL") or f"http://{_host_ip()}:{os.environ.get('BIOSIM_PORT', '5445')}"
+    if rr.get("enabled", True):
+        threading.Thread(target=boot.notify, args=(cfg, chat, pub), daemon=True, name="boot-notify").start()
     if cfg.get("general", "autostart"):
         # every deploy restarts the service, and the engine used to come up idle -- the GUI then
         # showed "stopped" and transmission stayed down until somebody noticed and pressed start.
         def _autostart():
             try:
+                how = boot.wait_for_ack(cfg) if rr.get("enabled", True) else "not_required"
+                if how == "timeout":
+                    chat.post("rp5-1", f"[에뮬레이터 재가동] 라우터 초기화 확인을 {int(rr.get('ack_timeout_s', 120))}초 동안 받지 못해 송출을 시작합니다 (boot_id={boot.BOOT['id']}). 라우터 데이터가 이전 기동과 섞일 수 있습니다.", kind="system")
+                elif how == "acked":
+                    chat.post("rp5-1", f"[에뮬레이터 재가동] 라우터 초기화 확인을 받았습니다 (boot_id={boot.BOOT['id']}) — 송출을 시작합니다.", kind="system")
+                if how == "override" or engine.running:
+                    return
                 engine.start()
                 chat.post("link", "전송 자동 시작 (general.autostart)", kind="system")
             except Exception as e:
@@ -302,7 +324,28 @@ async def reset_config(body: dict | None = None):
 
 @app.post("/api/v1/control/start")
 async def control_start():
+    if boot.BOOT.get("state") == "waiting_ack":                       # 사람이 라우터 확인을 기다리지 않고 시작
+        boot.override("시작 버튼/API")
+        chat.post("rp5-1", f"[에뮬레이터 재가동] 라우터 초기화 확인 전에 수동으로 송출을 시작했습니다 (boot_id={boot.BOOT['id']}).", kind="system")
     return {"result": await asyncio.to_thread(E().start)}
+
+
+@app.get("/api/v1/boot")
+def boot_info():
+    """지금 기동: {id, at, state: waiting_ack|acked|timeout|override|not_required, ack, notified[]}.  라우터는 id 가 바뀌면 재가동으로 보고 초기화한다."""
+    return boot.info()
+
+
+@app.post("/api/v1/boot/ack")
+def boot_ack(body: dict):
+    """라우터: 초기화(정상 동작 중단 · 원격 백업 · 로컬 백업 삭제)를 마쳤다 {boot_id, by, remote_backup_deleted, local_backup_deleted, note}.
+    기다리던 송출이 시작된다.  boot_id 가 지금 기동과 다르면 409."""
+    try:
+        r = boot.ack(str((body or {}).get("boot_id") or ""), body or {})
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    E().log.add("system", f"라우터 초기화 확인: boot_id={r['id']} (원격 백업 삭제 {body.get('remote_backup_deleted')}, 로컬 백업 삭제 {body.get('local_backup_deleted')}) by {body.get('by') or '-'}")
+    return r
 
 
 @app.post("/api/v1/control/stop")
@@ -857,7 +900,10 @@ def _json(obj) -> Response:
 @app.get("/api/v1/status")
 def status():
     """Live status without the 300-entry rate history (the GUI polls this at 1 Hz); /stats carries the history."""
-    return _json(E().stats(history=False))
+    d = E().stats(history=False)
+    if isinstance(d, dict):
+        d["boot"] = {"id": boot.BOOT["id"], "state": boot.BOOT["state"]}
+    return _json(d)
 
 
 @app.get("/api/v1/stats")
