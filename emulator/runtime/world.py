@@ -548,6 +548,7 @@ class World:
         Pa = self.st.patch
         Pa["seq"][row] = 0; Pa["seq0"][row] = 0; Pa["tabs0"][row] = self.tabs_now()
         Pa["gp_a"][row] = 0; Pa["gp_b"][row] = 0; Pa["gp_head"][row] = 0     # 이전 패치의 끊김 기록은 새 패치와 무관
+        Pa["ah_t"][row] = 0; Pa["ah_head"][row] = 0                         # 자세·활동 기록도 새 패치부터
         self.patch_registry[serial] = {**(ent or {}), "serial": serial, "patch_id": p.patch_id, "patient_id": patient_id,
                                        "patient_name": self.by_id[patient_id]["name"] if patient_id in self.by_id else None,
                                        "status": "active", "issued_at": self.sim_time, "issued_reason": reason,

@@ -26,7 +26,7 @@ from .protocol import (record_dtype, fill_constants, pace_record, truth_record, 
                        CRC, F_CTRL, CTRL_NACK, MAGIC, VERSION, frame_crc_ok, parse_ctrl, CTRL_PATCH_NACK, parse_patch_nack, F_RESEND, VERSION_V4, seq_mask)
 from collections import deque
 from .realsig import MAP_PATH as RS_MAP_PATH
-from .state import SharedState, CTL, GAP_K, TRUTH_RING, FLAG_NEW_PATCH, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
+from .state import SharedState, CTL, GAP_K, AH_K, TRUTH_RING, FLAG_NEW_PATCH, FLAG_LEAD_OFF, FLAG_MOTION, FLAG_LOW_BATT, FLAG_SPO2_OFF, FLAG_PACED
 
 POSTURE_G = np.array([POSTURES[k] for k in ("supine", "left_lateral", "right_lateral", "sitting", "standing", "prone")], dtype=np.float32) * 1000.0
 POSTURE_NAMES = ["supine", "left_lateral", "right_lateral", "sitting", "standing", "prone"]
@@ -139,6 +139,8 @@ class Gather:
             P["pos_tabs"][r] = tabs - 1
             P["pos_off"][r] = off[init]
             P["ls_var"][r] = P["variant"][r]; P["ls_gain"][r] = P["gain"][r]; P["ls_art"][r] = P["art_gain"][r]; P["ls_noise"][r] = P["noise"][r]
+            P["ah_t"][r] = 0; P["ah_head"][r] = 0
+            self._push_ah(r, tabs)
         todo = P["pos_tabs"][rows] != tabs
         if todo.any():
             r = rows[todo]
@@ -164,8 +166,20 @@ class Gather:
             P["pos"][r] = (st0 + spt * rate) % n
             P["pos_tabs"][r] = tabs
             P["ls_var"][r] = P["variant"][r]; P["ls_gain"][r] = P["gain"][r]; P["ls_art"][r] = P["art_gain"][r]; P["ls_noise"][r] = P["noise"][r]
+            ch = (P["posture"][r] != P["ls_post"][r]) | (P["activity"][r] != P["ls_act"][r]) | (P["act_offset_ms"][r] != P["ls_aoff"][r])
+            if ch.any():
+                self._push_ah(r[ch], tabs)
         self.tick_start[rows] = P["pos_start"][rows]
         return self.tick_start[rows]
+
+    def _push_ah(self, r: np.ndarray, tabs: int) -> None:
+        """자세·활동 변경 기록에 '절대 tick tabs 부터 지금 상태'를 넣는다 (끊긴 동안 바뀌었으면 끊김 끝 tick 으로 남는다)."""
+        P = self.st.patch.arr
+        k = P["ah_head"][r].astype(np.int64) % AH_K
+        P["ah_t"][r, k] = tabs; P["ah_post"][r, k] = P["posture"][r]; P["ah_act"][r, k] = P["activity"][r]
+        P["ah_aoff"][r, k] = P["act_offset_ms"][r]; P["ah_art"][r, k] = P["art_gain"][r]
+        P["ah_head"][r] = (P["ah_head"][r].astype(np.int64) + 1) % 256
+        P["ls_post"][r] = P["posture"][r]; P["ls_act"][r] = P["activity"][r]; P["ls_aoff"][r] = P["act_offset_ms"][r]
 
     def _wave(self, arr2d, n_loop: int, fs: int, rows: np.ndarray, offset_ms: np.ndarray, tick: int, spt: int, bundle_ms: int) -> np.ndarray:
         base = ((offset_ms.astype(np.int64) * fs) // 1000 + tick * spt) % n_loop
@@ -872,6 +886,17 @@ class FrameBuilder:
             return None
         return t
 
+    @staticmethod
+    def _ah_at(r0, tabs: int) -> tuple[int, int, int, float] | None:
+        """그 tick 에 실제로 보냈던 (자세, 활동, 활동 위치, 움직임 이득).  기록보다 오래된 tick 이면 가장 오래된 기록, 기록이 없으면 None."""
+        t = r0["ah_t"]
+        ok = t > 0
+        if not ok.any():
+            return None
+        past = ok & (t <= tabs)
+        k = int(np.argmax(np.where(past, t, -1))) if past.any() else int(np.argmin(np.where(ok, t, np.iinfo(np.int64).max)))
+        return int(r0["ah_post"][k]), int(r0["ah_act"][k]), int(r0["ah_aoff"][k]), float(r0["ah_art"][k])
+
     def build_resend(self, row: int, tabs: int, gw: int, ts_ms: int) -> bytes | None:
         """row 패치의 절대 tick `tabs` 프레임을 다시 만든다 (F_RESEND, 원래 ts_ms·seq).  공유 행은 건드리지 않고 1 행짜리 사본에서 만든다."""
         st, g = self.st, self.g
@@ -889,6 +914,7 @@ class FrameBuilder:
         if tabs > int(r0["pos_tabs"]):
             return None
         hit = [k for k in range(GAP_K) if int(r0["gp_a"][k]) <= tabs < int(r0["gp_b"][k])]
+        acc_ab = None
         if hit:                                                     # 송출하지 못했던 구간: 양 끝 사이를 고르게 (끝점이 앞뒤 프레임과 맞물림)
             k = hit[0]
             a, b = int(r0["gp_a"][k]), int(r0["gp_b"][k])
@@ -901,6 +927,11 @@ class FrameBuilder:
             mid = a + G_ // 2
             lerp = lambda x, y: float(x) + (float(y) - float(x)) * fr
             sc["gain"] = lerp(r0["gp_ag"][k], r0["gp_bg"][k]); sc["art_gain"] = lerp(r0["gp_aa"][k], r0["gp_ba"][k]); sc["noise"] = lerp(r0["gp_an"][k], r0["gp_bn"][k])
+            sa, sb = self._ah_at(r0, a - 1), self._ah_at(r0, b)     # 끊기기 직전에 보낸 상태 → 끊김 끝에 보낸 상태
+            if sa is not None and sb is not None:
+                s_ = sa if tabs < mid else sb
+                sc["posture"], sc["activity"], sc["act_offset_ms"] = s_[0], s_[1], s_[2]
+                acc_ab = (sa, sb, a, G_)                            # 가속도는 표본마다 sa → sb 로 섞는다 (양 끝 모두 계단 없음)
             if av >= 0 and av != bv:                                # 끊긴 사이에 리듬이 바뀌었다: 가운데에서 크로스페이드로 넘어간다
                 sc["variant"] = av if tabs < mid else bv
                 sc["variant_prev"] = av if tabs >= mid else -1
@@ -909,9 +940,14 @@ class FrameBuilder:
                 sc["variant"] = bv if bv >= 0 else int(r0["variant"]); sc["variant_prev"] = -1
         else:                                                       # 실제로 보냈던 tick (전송 중 유실): 지금 위치에서 같은 속도로 거슬러 계산
             rate = float(r0["hr_scale"]) if float(r0["hr_scale"]) > 0.1 else 1.0
+            s_ = self._ah_at(r0, tabs)
+            if s_ is not None:                                      # 자세·활동은 그 tick 에 보냈던 것으로
+                sc["posture"], sc["activity"], sc["act_offset_ms"], sc["art_gain"] = s_
             start = (float(r0["pos_start"]) - (int(r0["pos_tabs"]) - tabs) * spt * rate) % n
         sc["pos"] = start; sc["pos_tabs"] = tabs - 1; sc["pos_off"] = r0["offset_ms"]; sc["hr_scale"] = rate
-        sc["attach_tick"] = 0; sc["detach_tick"] = 0; sc["lead_off"] = 0
+        # attach_tick 은 그대로: 부착 직후 20 초 전극 안정화(3~8 mV 기준선 이동)는 tick - attach_tick 의 함수라 원래 프레임과 똑같이 다시 만든다
+        # (0 으로 지우면 안정화 중이던 새 패치의 재전송만 기준선이 없어져 '재전송 → 정상' 경계에 수 mV 계단 — 2026-10-20 라우터 보고 #415)
+        sc["detach_tick"] = 0; sc["lead_off"] = 0
         sc["flags"] = int(r0["flags"]) & ~(FLAG_LEAD_OFF | FLAG_NEW_PATCH)
         sc["seq"] = (int(r0["seq0"]) + (tabs - int(r0["tabs0"]))) & 0xFFFFFFFF
         sc["gw"] = gw
@@ -933,7 +969,18 @@ class FrameBuilder:
             if m & (1 << CH_RESP_WAVE):
                 wave[CH_RESP_WAVE] = g.resp_wave(rows, t_rel, fs["resp"] * bundle_ms // 1000, bundle_ms, fs["resp"])
             if m & (1 << CH_ACCEL):
-                wave[CH_ACCEL] = g.accel(rows, t_rel, fs["accel"] * bundle_ms // 1000, bundle_ms, fs["accel"])
+                sa_ = fs["accel"] * bundle_ms // 1000
+                if acc_ab is None:
+                    wave[CH_ACCEL] = g.accel(rows, t_rel, sa_, bundle_ms, fs["accel"])
+                else:
+                    (pa, aa, oa, _), (pb, ab, ob, _), a_, G2 = acc_ab
+                    sc["posture"], sc["activity"], sc["act_offset_ms"] = pa, aa, oa
+                    xa = g.accel(rows, t_rel, sa_, bundle_ms, fs["accel"]).astype(np.float32)
+                    sc["posture"], sc["activity"], sc["act_offset_ms"] = pb, ab, ob
+                    xb = g.accel(rows, t_rel, sa_, bundle_ms, fs["accel"]).astype(np.float32)
+                    w = ((tabs - a_) + (np.arange(sa_, dtype=np.float32) + 1) / (sa_ + 1)) / G2     # 0 (끊김 시작) → 1 (끊김 끝), 표본 단위
+                    w = np.clip(w, 0.0, 1.0)[None, :, None]
+                    wave[CH_ACCEL] = np.clip(xa * (1 - w) + xb * w, -32000, 32000).astype(np.int16)
             tps = max(1, 1000 // bundle_ms)
             num_bits = sum(1 << ch for ch in (CH_HR, CH_TEMP, CH_RESP_RATE, CH_SPO2, CH_GLUCOSE))
             with_num = bool(m & num_bits) and (t_rel + row) % tps == 0

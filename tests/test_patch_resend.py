@@ -1,7 +1,7 @@
 """패치 재전송 (프로토콜 v4): 2 바이트 패킷 번호, 끊긴 구간 기록, 번호 → 원래 시각 역산, 다시 만든 파형이 앞뒤 정상 프레임과 이어짐."""
 import numpy as np
 
-from emulator.config import CH_ECG
+from emulator.config import CH_ECG, CH_ACCEL
 from emulator.runtime import protocol as P
 from emulator.runtime.fastpath import FrameBuilder
 from emulator.runtime.state import SharedState, CTL
@@ -113,3 +113,99 @@ def test_v4_patch_nack_ctrl_roundtrip_and_record_head():
     magic, ver, flags, gw_id, seq, ts, n_rec, plen = P.HEADER.unpack_from(fr, 0)
     assert ver == 4 and flags & P.F_CTRL and P.parse_patch_nack(fr[P.HEADER.size:P.HEADER.size + plen]) == (10000001, 65530, 4)
     assert P.rec_head(4).size == 14 and P.rec_head(3).size == 16
+
+
+def _acc(fr):
+    magic, ver, flags, gw_id, seq, ts, n_rec, plen = P.HEADER.unpack_from(fr, 0)
+    pay = memoryview(fr)[P.HEADER.size:P.HEADER.size + plen]
+    off = P.GWSTAT.size if flags & P.F_GWSTAT else 0
+    if flags & P.F_META:
+        off += 4 + int.from_bytes(pay[off:off + 4], "little")
+    r = list(decode_records(pay, off, n_rec, ver))[0]
+    return r[2], np.frombuffer(r[6][CH_ACCEL][2], dtype="<i2").reshape(-1, 3).astype(np.int64)
+
+
+def test_resend_accel_uses_posture_sent_at_that_time():
+    """2026-10-20 라우터 보고: 재전송 가속도 z 가 '정상 → 재전송' 경계에서 ±0.5 g 계단 — 지금 자세로 다시 만들었기 때문.
+    전송 중 유실(보냈던 tick)은 그때 자세로, 끊김 구간은 끊기기 전 자세 → 끊김 뒤 자세로 표본마다 섞여 양 끝이 이어져야 한다."""
+    st, fb = _setup()
+    st.ctl[CTL["chan_mask"]] = (1 << CH_ECG) | (1 << CH_ACCEL)
+    Pa = st.patch.arr
+    got = {}
+    for t in range(0, 50):
+        if t == 5:
+            Pa["posture"][0] = 3                               # 앉음 (보냈던 구간 안에서 바뀜)
+        if t == 10:
+            Pa["gw"][0] = -1                                   # 끊김 [10, 30)
+        if t == 20:
+            Pa["posture"][0] = 4                               # 끊긴 동안 섬
+        if t == 30:
+            Pa["gw"][0] = 0
+        if t == 40:
+            Pa["posture"][0] = 1                               # 재전송 요청 전에 또 바뀜 (지금 자세 ≠ 그때 자세)
+        frames = fb.build(t, 1_790_000_000_000 + t * 200)
+        if 0 in frames and not P.HEADER.unpack_from(frames[0], 0)[2] & P.F_KEEPALIVE:
+            seq, x = _acc(frames[0])
+            got[seq] = x
+    orig = {s: got[s] for s in range(2, 9)}                    # 이 구간은 '전송 중 유실' 로 다시 요청한다
+
+    class Snd:
+        frames = []
+        def send_resend(self, gw, data, now, mb):
+            self.frames.append(data)
+    snd = Snd()
+    assert fb.queue_patch_nack(0, 10000001, 2, 29)
+    fb.pump_patch_nacks(50, 1_790_000_000.0, snd, 0.0)
+    re = dict(_acc(f) for f in snd.frames)
+    assert sorted(re) == list(range(2, 30))
+    for s in range(2, 9):                                      # 보냈던 tick: 원래와 똑같이
+        assert np.array_equal(re[s], orig[s]), s
+    for s in range(10, 30):
+        got[s] = re[s]
+    full = np.concatenate([got[s] for s in range(50)])
+    jump = np.abs(np.diff(full, axis=0)).max(axis=1)
+    spt = full.shape[0] // 50
+    for b in (10, 30):                                         # 끊김 양 끝: 계단 없음 (원래 자세 변경 0.5 g 이상보다 훨씬 작게)
+        assert jump[b * spt - 1] < 120, (b, jump[b * spt - 1])
+    assert jump[5 * spt - 1] > 300                             # 실제로 보낸 자세 변경(t=5)은 그대로 남는다
+    st.close(); st.unlink()
+
+
+def test_resend_keeps_electrode_settling_of_new_patch():
+    """새 패치 부착 직후(안정화 20 초) 구간을 재전송해도 원래 프레임과 같은 기준선이어야 한다 (#415 ECG +3.9 mV 계단)."""
+    st, fb = _setup()
+    Pa = st.patch.arr
+    Pa["attach_tick"][0] = 3                                   # 번호 0 보다 조금 늦게 붙음
+    got = {}
+    for t in range(0, 140):
+        if t == 50:
+            Pa["gw"][0] = -1
+        if t == 60:
+            Pa["gw"][0] = 0
+        frames = fb.build(t, 1_790_000_000_000 + t * 200)
+        if 0 in frames and not P.HEADER.unpack_from(frames[0], 0)[2] & P.F_KEEPALIVE:
+            ver, flags, ts, seq, x = _ecg(frames[0])
+            got[seq] = x
+    orig = {s: got[s] for s in range(20, 40)}
+
+    class Snd:
+        frames = []
+        def send_resend(self, gw, data, now, mb):
+            self.frames.append(data)
+    snd = Snd()
+    assert fb.queue_patch_nack(0, 10000001, 20, 59)
+    fb.pump_patch_nacks(140, 1_790_000_000.0, snd, 0.0)
+    re = {}
+    for f in snd.frames:
+        ver, flags, ts, seq, x = _ecg(f)
+        re[seq] = x
+    for s in range(20, 40):                                    # 안정화 중에 보냈던 tick: 기준선 그대로 (잡음 성분만 다를 수 있음)
+        assert abs(int(np.median(re[s])) - int(np.median(orig[s]))) < 300, (s, np.median(re[s]), np.median(orig[s]))
+    for s in range(50, 60):
+        got[s] = re[s]
+    full = np.concatenate([got[s] for s in range(40, 140)])
+    spt = got[40].size
+    for b in (50, 60):
+        i = (b - 40) * spt - 1
+        assert abs(int(full[i + 1]) - int(full[i])) < 1500, (b, full[i], full[i + 1])
+    st.close(); st.unlink()

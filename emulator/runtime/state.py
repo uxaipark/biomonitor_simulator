@@ -63,8 +63,14 @@ PATCH_FIELDS = [
     ("gp_avar", np.int32, (4,)), ("gp_bvar", np.int32, (4,)), ("gp_ag", np.float32, (4,)), ("gp_bg", np.float32, (4,)),
     ("gp_aa", np.float32, (4,)), ("gp_ba", np.float32, (4,)), ("gp_an", np.float32, (4,)), ("gp_bn", np.float32, (4,)),
     ("gp_head", np.uint8),
+    # 자세·활동 변경 기록 (최근 AH_K 개, 원형, 2026-10-20): ah_t = 그 상태가 시작된 절대 tick.  재전송 가속도(중력 방향·활동 패턴)를
+    # 지금 상태가 아니라 그 tick 에 실제로 보냈던 상태로 만든다 — 지금 상태로 만들면 '정상 → 재전송' 경계에 ±0.5 g 계단이 생겼다.
+    ("ls_post", np.int32), ("ls_act", np.int32), ("ls_aoff", np.int32),
+    ("ah_t", np.int64, (8,)), ("ah_post", np.int32, (8,)), ("ah_act", np.int32, (8,)), ("ah_aoff", np.int32, (8,)),
+    ("ah_art", np.float32, (8,)), ("ah_head", np.uint8),
 ]
 GAP_K = 4
+AH_K = 8
 GW_FIELDS = [
     ("active", np.uint8),
     ("status", np.uint8),        # 0 ok, 1 degraded, 2 down (no frames, socket closed)
