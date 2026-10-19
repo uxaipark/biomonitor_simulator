@@ -54,7 +54,7 @@ if [ "$DRY" = 0 ] && [ -f "$APP_HOME/app/MANIFEST" ] && [ -d "$APP_HOME/app" ]; 
   fi
 fi
 run rsync -a --delete --exclude 'venv' --exclude '__pycache__' \
-  "$HERE/emulator" "$HERE/router" "$HERE/tools" "$HERE/scenarios" "$HERE/run.py" "$HERE/requirements.txt" "$HERE/README.md" "$HERE/deploy" "$HERE/VERSION" "$HERE/MANIFEST" "$APP_HOME/app/"
+  "$HERE/emulator" "$HERE/kms" "$HERE/router" "$HERE/tools" "$HERE/scenarios" "$HERE/run.py" "$HERE/requirements.txt" "$HERE/README.md" "$HERE/deploy" "$HERE/VERSION" "$HERE/MANIFEST" "$APP_HOME/app/"
 
 # 4) python venv with piwheels (prebuilt ARM wheels: no compiler, minutes instead of hours)
 if [ ! -x "$APP_HOME/venv/bin/python" ]; then run python3 -m venv "$APP_HOME/venv"; fi
@@ -85,6 +85,20 @@ if [ "$SERVICE" = 1 ]; then
   fi
   run systemctl restart biosim.service
   echo "   service: systemctl status biosim   logs: journalctl -u biosim -f"
+fi
+
+# 7b) biosim-kms (암호 키 관리, :7400) — 별도 사용자·데이터 디렉터리 (/var/lib/biosim-kms, 0700).  키는 업데이트해도 그대로 남는다.
+KMS_USER=biosim-kms; KMS_DIR="${BIOSIM_KMS_DIR:-/var/lib/biosim-kms}"
+if [ "$SERVICE" = 1 ] && [ "${BIOSIM_NO_KMS:-0}" != 1 ]; then
+  if ! id "$KMS_USER" >/dev/null 2>&1; then run useradd --system --no-create-home --home "$KMS_DIR" --shell /usr/sbin/nologin "$KMS_USER"; fi
+  run install -d -m 0700 -o "$KMS_USER" -g "$KMS_USER" "$KMS_DIR"
+  if [ "$DRY" = 1 ]; then echo "+ install biosim-kms.service (port 7400)"; else
+    sed -e "s#/opt/biosim#$APP_HOME#g" -e "s#/var/lib/biosim-kms#$KMS_DIR#g" "$HERE/deploy/pi/biosim-kms.service" > /etc/systemd/system/biosim-kms.service
+    systemctl daemon-reload
+    systemctl enable biosim-kms.service >/dev/null
+  fi
+  run systemctl restart biosim-kms.service
+  echo "   kms: systemctl status biosim-kms   관리자 토큰: sudo cat $KMS_DIR/admin.token (채팅으로 보내지 말 것)"
 fi
 
 # 8) reTerminal kiosk (Chromium full screen on the built-in display, autostart with the desktop session)

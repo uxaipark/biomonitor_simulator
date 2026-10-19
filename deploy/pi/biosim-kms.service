@@ -1,0 +1,26 @@
+[Unit]
+Description=biosim-kms (암호 키 관리, /kms/v1 :7400)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 에뮬레이터(biosim)와 다른 사용자·다른 데이터 디렉터리: 에뮬레이터 프로세스는 최상위 키(master.key)를 읽을 수 없다
+User=biosim-kms
+Group=biosim-kms
+WorkingDirectory=/opt/biosim/app
+Environment=BIOSIM_KMS_DIR=/var/lib/biosim-kms
+Environment=BIOSIM_KMS_CHAT_URL=http://192.168.0.91:7300/api/v1/chat
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/biosim/venv/bin/python -m kms --host 0.0.0.0 --port 7400
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/biosim-kms
+
+[Install]
+WantedBy=multi-user.target

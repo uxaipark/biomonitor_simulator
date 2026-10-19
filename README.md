@@ -231,6 +231,23 @@ GUI 마지막 탭 "시작 매뉴얼"은 왼쪽 목차(검색 가능) + 오른쪽
 - **연동 병원 선택**: '에뮬레이터'(기본, 지금 방식) 또는 20곳 중 하나. 병원을 고르면 그 병원 EMR 이 에뮬레이터의 실제 재원 환자·병상·입퇴원을 그 형식으로 내주고, `/emr/admissions[].emr` 에 그 EMR 의 번호가 붙는다(`POST /api/v1/emrsim/link`).
 - 사양: `docs/EMR_SIM.md`. 테스트: `tests/test_emrsim.py`.
 
+## 암호 키 관리 서비스 KMS (`kms/`, 2026-10-19 1단계)
+
+라우터 파형 파일·백업 암호화, 라우터→Vital-Center 전송·의뢰 환자정보, Vital-Center 분석 파일 개인정보 단계별 암호화의 키를 관리한다.
+에뮬레이터와 별도 서비스 `biosim-kms`(사용자 `biosim-kms`, 데이터 `/var/lib/biosim-kms` 0700, 포트 7400 `/kms/v1`)라 에뮬레이터 재가동과 무관하게 키가 남는다.
+
+- 키 계층: 최상위 키 `master.key`(32 B, 0600) → 하위 키 비밀값은 최상위 키로 AES-256-GCM 감싸서 SQLite 에 저장. 알고리즘 `aes256-gcm`(대칭 KEK) · `x25519`(KMS 키쌍 또는 공개키만) · `es256`(공개키만, TPM 키).
+- kid `<용도>:<소유자>#<세대>` (기존 이름 `router:fitlet3`, `dev-vitalcenter-ingest` 도 등록 가능). 상태 active → retiring(복호화만) → disabled → destroyed(비밀값 삭제 = 암호학적 삭제, 되돌릴 수 없음).
+- 조회(인증 없음): `GET /kms/v1`, `/keys?since_rev=&purpose=&owner=`, `/keys/{kid}` (`#` 은 `%23`).
+- 연산(Bearer 토큰): `POST /datakey {kid,aad?}` → `{dek, wrapped}`, `/unwrap {wrapped}`, `/encrypt {kid,plaintext(b64),aad?}` (≤64 KiB), `/decrypt {봉투}`.
+  봉투 `{v,kid,alg,nonce,ct,aad[,epk]}` — aad 는 `kms|<kid>|<aad>` 로 묶여 다른 키·문맥으로 옮기면 풀리지 않는다.
+- 관리: `POST /keys {kid,alg,acl?}`, `/keys/register-public {kid,alg,public_key}`, `/keys/{kid}/rotate|retire|disable|enable|destroy` (destroy 는 `{"confirm":"<kid>"}`),
+  `GET|POST /clients`, `/clients/{name}/disable`, `GET /audit?since=`, `/audit/verify` (해시 체인).
+- 권한: 역할 admin·router·vitalcenter·emulator·reader. 기본 acl — router-backup: 라우터 감싸기·풀기 / vc-ingest·pii-s1~s3: 라우터 암호화만, Vital-Center 복호화.
+  라우터는 router-backup 키를 스스로 만들고·교체하고·폐기한다(가동 세대별 키, 초기화 때 폐기). 그 밖의 키 관리는 관리자만.
+- 관리자 토큰은 첫 기동 때 `/var/lib/biosim-kms/admin.token` 에 쓴다. 토큰은 채팅으로 보내지 않는다. 키 변경은 라우터 에이전트 채널에 알린다(`BIOSIM_KMS_CHAT_URL`, 빈 값이면 끔).
+- 1단계 한계: 내부망 HTTP(TLS 는 2단계), 최상위 키가 파일(Pi 에 TPM 없음).
+
 ## 제안 / 보완이 필요한 항목
 
 * **패치 버퍼링·백필**: 실제 BLE 패치는 끊김 동안 데이터를 내부에 저장했다가 재접속 후 back-fill 합니다. 현재는 손실로만 모델링. 필요하면 지연 프레임(플래그 BACKFILL) 추가를 권합니다.
