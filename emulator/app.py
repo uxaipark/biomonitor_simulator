@@ -891,10 +891,25 @@ def control_autotune(body: dict):
     return {"result": "autotune stopped"}
 
 
+_ENC = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), default=str).encode
+_BIG_LIST = 256
+
+
+def _json_text(obj) -> str:
+    """큰 목록은 항목마다 따로 직렬화한다 (2026-10-26).  json.dumps 한 번은 C 코드 안에서 GIL 을 놓지 않아, 환자 2만 명(35 MB)이면
+    0.8 초 내내 월드 1 Hz 스레드가 멈췄다 (jsonable_encoder 까지 거치면 5 초 · 매시 정각 근처 월드 지연 2.8 초의 원인).
+    항목 사이에서는 인터프리터가 GIL 을 넘겨줄 수 있어 다른 스레드 정지가 수십 ms 로 준다.  출력 바이트는 json.dumps 와 같다."""
+    if isinstance(obj, dict) and any(isinstance(v, list) and len(v) > _BIG_LIST for v in obj.values()):
+        return "{" + ",".join(_ENC(str(k)) + ":" + _json_text(v) for k, v in obj.items()) + "}"
+    if isinstance(obj, list) and len(obj) > _BIG_LIST:
+        return "[" + ",".join([_ENC(x) for x in obj]) + "]"
+    return _ENC(obj)
+
+
 def _json(obj) -> Response:
     """Serialise directly: FastAPI's jsonable_encoder walks every element of a response first, which for the
     1-2 Hz status/stats polls cost more main-process CPU than the world loop's own bookkeeping."""
-    return Response(json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=str), media_type="application/json")
+    return Response(_json_text(obj), media_type="application/json")
 
 
 @app.get("/api/v1/status")
@@ -1317,19 +1332,19 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = Query(0, g
     if patch_id is not None:
         live = next((r for r in w.list_admitted() if patch_id and r.get("patch_id") == patch_id), None)    # 0 = 미착용 환자 행 → 매칭하지 않음
         if live:
-            return {"total": 1, "patients": [{**live, "patch_status": "active"}], "next_offset": None}
+            return _json({"total": 1, "patients": [{**live, "patch_status": "active"}], "next_offset": None})
         ent = next((e for e in w.patch_registry.values() if e.get("patch_id") == patch_id), None)
         if ent is None or ent.get("patient_id") not in w.by_id:
-            return {"total": 0, "patients": [], "next_offset": None}
+            return _json({"total": 0, "patients": [], "next_offset": None})
         p = w.by_id[ent["patient_id"]]
         d = {k: v for k, v in p.items() if k not in ("avatar", "history", "patch_history")}
         d.update(w.identity_fields(p))
         d.update({"rhythm_label": RHYTHMS.get(p.get("rhythm", ""), {}).get("label"), "patch_status": ent["status"], "patch_serial": ent["serial"],
                   "patch_issued_at": ent.get("issued_at"), "patch_retired_at": ent.get("retired_at"), "patch_retired_reason": ent.get("retired_reason")})
-        return {"total": 1, "patients": [d], "next_offset": None}
+        return _json({"total": 1, "patients": [d], "next_offset": None})
     if row >= 0:                                              # single live row (plan marker / moving list click): no 20 000-row scan
         rec = next((r for r in w.list_admitted_rows([row])), None)
-        return {"total": 1 if rec else 0, "patients": [rec] if rec else []}
+        return _json({"total": 1 if rec else 0, "patients": [rec] if rec else []})
     ql = q.lower()
     live = {r["id"]: r for r in w.list_admitted()}          # runtime rows (patch serial/id, gateway, battery, rssi, activity...)
 
@@ -1349,7 +1364,7 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = Query(0, g
         if status != "admitted":                              # inpatient = 병원 내 재원, mcot = 원외 모바일 게이트웨이
             want_out = status == "mcot"
             rows = [r for r in rows if bool(r.get("outpatient")) == want_out]
-        return {"total": len(rows), "patients": rows[offset: offset + limit], "next_offset": offset + limit if offset + limit < len(rows) else None}
+        return _json({"total": len(rows), "patients": rows[offset: offset + limit], "next_offset": offset + limit if offset + limit < len(rows) else None})
     items = [p for p in w.profiles if (status == "all" or p["status"] == status)]
     items = [p for p in items if match(p, live.get(p["id"]))]
     out = []
@@ -1363,7 +1378,7 @@ def emr_patients(status: str = "admitted", q: str = "", offset: int = Query(0, g
             d["patch"] = p["admission"].get("patch")
             d["patch_id"] = p["admission"].get("patch_id")
         out.append(d)
-    return {"total": len(items), "patients": out, "next_offset": offset + limit if offset + limit < len(items) else None}
+    return _json({"total": len(items), "patients": out, "next_offset": offset + limit if offset + limit < len(items) else None})
 
 
 def _news2(num: dict, arrest: bool) -> dict:
